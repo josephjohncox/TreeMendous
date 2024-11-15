@@ -179,12 +179,18 @@ class IntervalTree:
     def print_tree(self) -> None:
         self._print_tree(self.root)
 
-    def _print_tree(self, node: Optional[IntervalNode], indent: str = "", last: str = 'updown') -> None:
-        if node != None:
-            print(f"{indent}<{'-- ' if last == 'up' else '|-- '}{node.start}-{node.end} (len={node.length}, total_len={node.total_length})>")
-            indent += "   " if last == 'up' else "|  "
-            self._print_tree(node.left, indent, last='up')
-            self._print_tree(node.right, indent, last='down')
+    def _print_tree(self, node: Optional[IntervalNode], indent: str = "", prefix: str = "") -> None:
+        if node is None:
+            return
+            
+        # Print right subtree
+        self._print_tree(node.right, indent + "    ", "┌── ")
+        
+        # Print current node
+        print(f"{indent}{prefix}{node.start}-{node.end} (len={node.length}, total_len={node.total_length})")
+        
+        # Print left subtree  
+        self._print_tree(node.left, indent + "    ", "└── ")
 
 # Example usage:
 if __name__ == "__main__":
