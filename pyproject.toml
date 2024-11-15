@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "tree-mendous"
+version = "0.1.0"
+description = "Exploring a diverse collection of interval tree implementations across multiple programming languages to identify the most efficient configurations for varied use cases, such as optimizing for query speed, memory usage, or dynamic updates."
+authors = ["Joseph Cox <joseph@codensity.io>"]
+license = "BSD 3-Clause License"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+sortedcollections = "^2.1.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
