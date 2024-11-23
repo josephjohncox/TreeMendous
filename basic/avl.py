@@ -1,5 +1,7 @@
-from typing import Optional, List, overload
+from typing import Generic, Optional, List, TypeVar, overload
 from base import IntervalNodeBase, IntervalTreeBase
+
+R = TypeVar('R', bound='IntervalNode')
 
 class IntervalNode(IntervalNodeBase['IntervalNode']):
     def __init__(self, start: int, end: int) -> None:
@@ -11,8 +13,10 @@ class IntervalNode(IntervalNodeBase['IntervalNode']):
         self.update_length()
         self.total_length = self.length
         if self.left:
+            assert isinstance(self.left, IntervalNode)
             self.total_length += self.left.total_length
         if self.right:
+            assert isinstance(self.right, IntervalNode)
             self.total_length += self.right.total_length
 
         self.height = 1 + max(self.get_height(self.left), self.get_height(self.right))
@@ -23,68 +27,67 @@ class IntervalNode(IntervalNodeBase['IntervalNode']):
             return 0
         return node.height
 
-class IntervalTree(IntervalTreeBase[IntervalNode]):
-    def _print_node(self, node: IntervalNode, indent: str, prefix: str) -> None:
+class IntervalTree(Generic[R], IntervalTreeBase[R]):
+    def __init__(self, node_class: type[R]) -> None:
+        super().__init__()
+        self.node_class = node_class
+        self.root: Optional[R] = None
+
+    def _print_node(self, node: R, indent: str, prefix: str) -> None:
         print(f"{indent}{prefix}{node.start}-{node.end} (len={node.length}, total_len={node.total_length})")
 
-
     def insert_interval(self, start: int, end: int) -> None:
-        overlapping_nodes: List[IntervalNode] = []
+        overlapping_nodes: List[R] = []
         self.root = self._delete_overlaps(self.root, start, end, overlapping_nodes)
         # Merge overlapping intervals with the new interval
         for node in overlapping_nodes:
             start = min(start, node.start)
             end = max(end, node.end)
-        # Insert the merged interval
-        self.root = self._insert(self.root, IntervalNode(start, end))
+        # Insert the merged interval using the constructor
+        self.root = self._insert(self.root, self.node_class(start, end))
 
     def delete_interval(self, start: int, end: int) -> None:
         # Find overlapping intervals
-        overlapping_nodes: List[IntervalNode] = []
+        overlapping_nodes: List[R] = []
         self.root = self._delete_overlaps(self.root, start, end, overlapping_nodes)
         # For each overlapping interval, we may need to split it
         for node in overlapping_nodes:
             if node.start < start:
                 # Left part remains available
-                self.root = self._insert(self.root, IntervalNode(node.start, start))
+                self.root = self._insert(self.root, self.node_class(node.start, start))
             if node.end > end:
                 # Right part remains available
-                self.root = self._insert(self.root, IntervalNode(end, node.end))
+                self.root = self._insert(self.root, self.node_class(end, node.end))
 
-    def _delete_overlaps(self, node: Optional[IntervalNode], start: int, end: int, 
-                        overlapping_nodes: List[IntervalNode]) -> Optional[IntervalNode]:
+    def _delete_overlaps(self, node: Optional[R], start: int, end: int, 
+                        overlapping_nodes: List[R]) -> Optional[R]:
         if not node:
             return None
 
-        # If the current node interval is completely after the interval to delete, go left
+        # If current node is completely before or after the interval
         if end <= node.start:
             node.left = self._delete_overlaps(node.left, start, end, overlapping_nodes)
-        # If the current node interval is completely before the interval to delete, go right
-        elif start >= node.end:
+            node.update_stats()  # Important: update stats after modification
+            return node
+        if start >= node.end:
             node.right = self._delete_overlaps(node.right, start, end, overlapping_nodes)
-        else:
-            # Current node overlaps with [start, end], remove it and collect it
-            overlapping_nodes.append(node)
-            # Delete this node and replace it with its children
-            if node.left and node.right:
-                # Node with two children: Get the inorder successor (smallest in the right subtree)
-                successor = self._get_min(node.right)
-                # Copy the successor's content to this node
-                node.start = successor.start
-                node.end = successor.end
-                # Delete the successor
-                node.right = self._delete_overlaps(node.right, successor.start, successor.end, overlapping_nodes)
-            elif node.left:
-                node = node.left
-            else:
-                node = node.right
+            node.update_stats()  # Important: update stats after modification
+            return node
 
-        if node:
-            node.update_stats()
-            node = self._rebalance(node)
-        return node
+        # Handle overlap case
+        overlapping_nodes.append(node)
+        left_tree = self._delete_overlaps(node.left, start, end, overlapping_nodes)
+        right_tree = self._delete_overlaps(node.right, start, end, overlapping_nodes)
 
-    def _insert(self, node: Optional[IntervalNode], new_node: IntervalNode) -> IntervalNode:
+        # Merge remaining subtrees
+        if left_tree and right_tree:
+            min_node = self._get_min(right_tree)
+            min_node.left = left_tree
+            min_node.update_stats()
+            return right_tree
+        return left_tree or right_tree
+
+    def _insert(self, node: Optional[R], new_node: R) -> R:
         if not node:
             return new_node
 
@@ -103,7 +106,7 @@ class IntervalTree(IntervalTreeBase[IntervalNode]):
             current = current.left
         return current
 
-    def _rebalance(self, node: IntervalNode) -> IntervalNode:
+    def _rebalance(self, node: R) -> R:
         balance = self._get_balance(node)
         if balance > 1:
             # Left heavy
@@ -130,13 +133,13 @@ class IntervalTree(IntervalTreeBase[IntervalNode]):
     def _rotate_left(self, z: None) -> None: ...
 
     @overload
-    def _rotate_left(self, z: IntervalNode) -> IntervalNode: ...
+    def _rotate_left(self, z: R) -> R: ...
 
-    def _rotate_left(self, z: Optional[IntervalNode]) -> Optional[IntervalNode]:
+    def _rotate_left(self, z: Optional[R]) -> Optional[R]:
         if not z or not z.right:
             return z
-        y: IntervalNode = z.right
-        subtree: Optional[IntervalNode] = y.left
+        y: R = z.right
+        subtree: Optional[R] = y.left
 
         # Perform rotation
         y.left = z
@@ -151,13 +154,13 @@ class IntervalTree(IntervalTreeBase[IntervalNode]):
     def _rotate_right(self, z: None) -> None: ...
 
     @overload
-    def _rotate_right(self, z: IntervalNode) -> IntervalNode: ...
+    def _rotate_right(self, z: R) -> R: ...
 
-    def _rotate_right(self, z: Optional[IntervalNode]) -> Optional[IntervalNode]:
+    def _rotate_right(self, z: Optional[R]) -> Optional[R]:
         if not z or not z.left:
             return z
-        y: IntervalNode = z.left
-        subtree: Optional[IntervalNode] = y.right
+        y: R = z.left
+        subtree: Optional[R] = y.right
 
         # Perform rotation
         y.right = z
@@ -170,7 +173,7 @@ class IntervalTree(IntervalTreeBase[IntervalNode]):
 
 # Example usage:
 if __name__ == "__main__":
-    tree = IntervalTree()
+    tree = IntervalTree[IntervalNode](IntervalNode)
     # Initially, the whole interval [0, 100] is available
     tree.insert_interval(0, 100)
     print("Initial tree:")
