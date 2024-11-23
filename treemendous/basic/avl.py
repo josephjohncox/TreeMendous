@@ -1,9 +1,9 @@
-from typing import Generic, Optional, List, TypeVar, overload
-from base import IntervalNodeBase, IntervalTreeBase
+from typing import Generic, Optional, List, Tuple, TypeVar, cast, overload
+from treemendous.basic.base import IntervalNodeBase, IntervalNodeProtocol, IntervalTreeBase
 
-R = TypeVar('R', bound='IntervalNode')
 
-class IntervalNode(IntervalNodeBase['IntervalNode']):
+
+class IntervalNode(IntervalNodeBase[IntervalNodeProtocol]):
     def __init__(self, start: int, end: int) -> None:
         super().__init__(start, end)
         self.total_length: int = self.length
@@ -13,20 +13,19 @@ class IntervalNode(IntervalNodeBase['IntervalNode']):
         self.update_length()
         self.total_length = self.length
         if self.left:
-            assert isinstance(self.left, IntervalNode)
             self.total_length += self.left.total_length
         if self.right:
-            assert isinstance(self.right, IntervalNode)
             self.total_length += self.right.total_length
-
-        self.height = 1 + max(self.get_height(self.left), self.get_height(self.right))
+        self.height = 1 + max(
+            self.get_height(self.left), 
+            self.get_height(self.right)
+        )
 
     @staticmethod
     def get_height(node: Optional['IntervalNode']) -> int:
-        if not node:
-            return 0
-        return node.height
+        return node.height if node else 0
 
+R = TypeVar('R', bound=IntervalNode)
 class IntervalTree(Generic[R], IntervalTreeBase[R]):
     def __init__(self, node_class: type[R]) -> None:
         super().__init__()
@@ -84,8 +83,15 @@ class IntervalTree(Generic[R], IntervalTreeBase[R]):
             min_node = self._get_min(right_tree)
             min_node.left = left_tree
             min_node.update_stats()
-            return right_tree
-        return left_tree or right_tree
+            merged_tree = right_tree
+        else:
+            merged_tree = left_tree or right_tree
+
+        # **Fix: Update stats on the merged tree**
+        if merged_tree:
+            merged_tree.update_stats()
+
+        return merged_tree
 
     def _insert(self, node: Optional[R], new_node: R) -> R:
         if not node:
@@ -170,6 +176,18 @@ class IntervalTree(Generic[R], IntervalTreeBase[R]):
         z.update_stats()
         y.update_stats()
         return y
+    
+    def get_all_intervals(self) -> List[Tuple[int, int]]:
+        intervals: List[Tuple[int, int]] = []
+        self._get_all_intervals(self.root, intervals)
+        return intervals
+
+    def _get_all_intervals(self, node: Optional[R], intervals: List[Tuple[int, int]]) -> None:
+        if not node:
+            return
+        intervals.append((node.start, node.end))
+        self._get_all_intervals(node.left, intervals)
+        self._get_all_intervals(node.right, intervals)
 
 # Example usage:
 if __name__ == "__main__":
@@ -177,6 +195,18 @@ if __name__ == "__main__":
     # Initially, the whole interval [0, 100] is available
     tree.insert_interval(0, 100)
     print("Initial tree:")
+    tree.print_tree()
+    print(f"Total available length: {tree.get_total_available_length()}")
+
+    # Schedule interval [0, 1
+    tree.delete_interval(0, 1)
+    print("\nAfter scheduling [0, 1]:")
+    tree.print_tree()
+    print(f"Total available length: {tree.get_total_available_length()}")
+
+    # Unschedule interval [0, 1]
+    tree.insert_interval(0, 1)
+    print("\nAfter unscheduling [0, 1]:")
     tree.print_tree()
     print(f"Total available length: {tree.get_total_available_length()}")
 

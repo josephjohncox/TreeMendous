@@ -1,7 +1,19 @@
 from abc import ABC, abstractmethod
-from typing import Generic, Optional, TypeVar
+from typing import Generic, List, Optional, Tuple, TypeVar, Protocol
 
-T = TypeVar('T', bound='IntervalNodeBase')
+class IntervalNodeProtocol(Protocol):
+    start: int
+    end: int
+    length: int
+    height: int
+    total_length: int
+    left: Optional['IntervalNodeProtocol']
+    right: Optional['IntervalNodeProtocol']
+    
+    def update_stats(self) -> None: ...
+    def update_length(self) -> None: ...
+
+T = TypeVar('T', bound=IntervalNodeProtocol)
 
 class IntervalNodeBase(Generic[T]):
     def __init__(self, start: int, end: int) -> None:
@@ -13,9 +25,6 @@ class IntervalNodeBase(Generic[T]):
 
         self.left: Optional[T] = None
         self.right: Optional[T] = None
-
-    def update_length(self) -> None:
-        self.length = self.end - self.start
 
     @property
     @abstractmethod
@@ -35,11 +44,8 @@ class IntervalNodeBase(Generic[T]):
     def total_length(self, value: int) -> None:
         self._total_length = value
 
-    @staticmethod
-    def get_height(node: Optional[T]) -> int:
-        if not node:
-            return 0
-        return node.height
+    def update_length(self) -> None:
+        self.length = self.end - self.start
 
 
 class IntervalTreeBase(Generic[T], ABC):
@@ -64,4 +70,7 @@ class IntervalTreeBase(Generic[T], ABC):
 
     @abstractmethod
     def _print_node(self, node: T, indent: str, prefix: str) -> None: ...
+
+    @abstractmethod
+    def get_all_intervals(self) -> List[Tuple[int, int]]: ...
 
