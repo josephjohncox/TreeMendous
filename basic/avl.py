@@ -1,18 +1,14 @@
 from typing import Optional, List, overload
+from base import IntervalNodeBase, IntervalTreeBase
 
-class IntervalNode:
+class IntervalNode(IntervalNodeBase['IntervalNode']):
     def __init__(self, start: int, end: int) -> None:
-        self.start: int = start
-        self.end: int = end
-        self.length: int = end - start
+        super().__init__(start, end)
         self.total_length: int = self.length
-        
-        self.left: Optional[IntervalNode] = None
-        self.right: Optional[IntervalNode] = None
         self.height: int = 1
 
     def update_stats(self) -> None:
-        self.length = self.end - self.start
+        self.update_length()
         self.total_length = self.length
         if self.left:
             self.total_length += self.left.total_length
@@ -27,9 +23,10 @@ class IntervalNode:
             return 0
         return node.height
 
-class IntervalTree:
-    def __init__(self) -> None:
-        self.root: Optional[IntervalNode] = None
+class IntervalTree(IntervalTreeBase[IntervalNode]):
+    def _print_node(self, node: IntervalNode, indent: str, prefix: str) -> None:
+        print(f"{indent}{prefix}{node.start}-{node.end} (len={node.length}, total_len={node.total_length})")
+
 
     def insert_interval(self, start: int, end: int) -> None:
         overlapping_nodes: List[IntervalNode] = []
@@ -170,27 +167,6 @@ class IntervalTree:
         z.update_stats()
         y.update_stats()
         return y
-
-    def get_total_available_length(self) -> int:
-        if not self.root:
-            return 0
-        return self.root.total_length
-
-    def print_tree(self) -> None:
-        self._print_tree(self.root)
-
-    def _print_tree(self, node: Optional[IntervalNode], indent: str = "", prefix: str = "") -> None:
-        if node is None:
-            return
-            
-        # Print right subtree
-        self._print_tree(node.right, indent + "    ", "┌── ")
-        
-        # Print current node
-        print(f"{indent}{prefix}{node.start}-{node.end} (len={node.length}, total_len={node.total_length})")
-        
-        # Print left subtree  
-        self._print_tree(node.left, indent + "    ", "└── ")
 
 # Example usage:
 if __name__ == "__main__":
