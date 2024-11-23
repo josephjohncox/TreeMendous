@@ -1,14 +1,29 @@
 [tool.poetry]
-name = "tree-mendous"
+name = "treemendous"
 version = "0.1.0"
 description = "Exploring a diverse collection of interval tree implementations across multiple programming languages to identify the most efficient configurations for varied use cases, such as optimizing for query speed, memory usage, or dynamic updates."
 authors = ["Joseph Cox <joseph@codensity.io>"]
 license = "BSD 3-Clause License"
 readme = "README.md"
 
+
+
 [tool.poetry.dependencies]
 python = "^3.12"
 sortedcollections = "^2.1.0"
+sortedcontainers = "^2.4.0"
+
+[tool.poetry.group.dev.dependencies]
+sortedcontainers-stubs = "^2.4.2"
+flameprof = "^0.4"
+
+
+[tool.poetry.group.test.dependencies]
+hypothesis = "^6.119.4"
+pytest = "^8.3.3"
+
+[tool.pytest.ini_options]
+addopts = "--hypothesis-explain -vv"
 
 
 [build-system]

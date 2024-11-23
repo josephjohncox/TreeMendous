@@ -1,8 +1,9 @@
-from typing import Optional, List
-from base import IntervalNodeBase
-from avl import IntervalNode, IntervalTree
+from typing import Optional
 
-class EarliestIntervalNode(IntervalNode):
+from treemendous.basic.base import IntervalNodeProtocol
+from treemendous.basic.avl import IntervalNode, IntervalTree
+
+class EarliestIntervalNode(IntervalNode, IntervalNodeProtocol):
     def __init__(self, start: int, end: int) -> None:
         super().__init__(start, end)
         self.min_start: int = start
@@ -68,6 +69,31 @@ if __name__ == "__main__":
     print("Initial tree:")
     tree.print_tree()
     print(f"Total available length: {tree.get_total_available_length()}")
+
+    # Schedule interval [0, 1
+    tree.delete_interval(0, 1)
+    print("\nAfter scheduling [0, 1]:")
+    tree.print_tree()
+    print(f"Total available length: {tree.get_total_available_length()}")
+
+    # Unschedule interval [0, 1]
+    tree.insert_interval(0, 1)
+    print("\nAfter unscheduling [0, 1]:")
+    tree.print_tree()
+    print(f"Total available length: {tree.get_total_available_length()}")
+
+    # Schedule interval [1, 2]
+    tree.delete_interval(1, 3)
+    print("\nAfter scheduling [1, 3]:")
+    tree.print_tree()
+    print(f"Total available length: {tree.get_total_available_length()}")
+
+    # Schedule interval [2, 3]
+    tree.delete_interval(2, 5)
+    print("\nAfter scheduling [2, 5]:")
+    tree.print_tree()
+    print(f"Total available length: {tree.get_total_available_length()}")
+
 
     # Schedule interval [10, 20)
     tree.delete_interval(10, 20)
