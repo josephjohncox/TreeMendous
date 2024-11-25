@@ -96,6 +96,14 @@ def run_benchmarks(random_seed: int | None) -> None:
         for op in ['reserve', 'release', 'find']:
             if op in result.op_times:
                 print(f"  {op:8}: {result.op_times[op]*1000:.4f} ms")
+    
+    # Calculate and display speedups relative to C++ Boundary
+    cpp_boundary_time = results["C++ Boundary"].total_time
+    print("\nSpeedup relative to C++ Boundary:")
+    for name, result in results.items():
+        if name != "C++ Boundary":
+            speedup = result.total_time / cpp_boundary_time
+            print(f"  {name:15}: {speedup:.2f}x slower")
 
     # Compare results for correctness
     base_intervals = merge_intervals(results["C++ Boundary"].intervals)
