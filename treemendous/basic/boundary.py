@@ -88,19 +88,26 @@ class IntervalManager:
 
     def find_interval(self, point: int, length: int) -> Optional[Tuple[int, int]]:
         idx = self.intervals.bisect_left(point)
-        if idx < len(self.intervals):
-            s = self.intervals.keys()[idx]
+        intervals_keys = self.intervals.keys()
+
+        # Check the interval at idx
+        if idx < len(intervals_keys):
+            s = intervals_keys[idx]
             e = self.intervals[s]
             if s <= point < e and e - point >= length:
                 return point, point + length
             elif s > point and e - s >= length:
                 return s, s + length
 
+        # Check the previous interval
         if idx > 0:
-            s = self.intervals.keys()[idx - 1]
+            idx -= 1
+            s = intervals_keys[idx]
             e = self.intervals[s]
             if s <= point < e and e - point >= length:
                 return point, point + length
+            elif point < s and e - s >= length:
+                return s, s + length
 
         return None
 

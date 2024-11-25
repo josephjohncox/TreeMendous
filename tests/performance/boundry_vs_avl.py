@@ -1,34 +1,51 @@
-from typing import List, Tuple, Callable
+from typing import List, Tuple, Callable, Dict
+from collections import defaultdict
 import time
 import random
 from treemendous.basic.boundary import IntervalManager
 from treemendous.basic.avl_earliest import EarliestIntervalTree
 
-def benchmark_interval_manager(operations: List[Tuple[str, int, int]]) -> float:
+INITIAL_INTERVAL_SIZE: Tuple[int, int] = (0, 10_000_000)
+
+def benchmark_interval_manager(operations: List[Tuple[str, int, int]]) -> Tuple[float, Dict[str, float]]:
     manager: IntervalManager = IntervalManager()
-    manager.release_interval(0, 10_000_000)
-    start_time: float = time.time()
+    manager.release_interval(*INITIAL_INTERVAL_SIZE)
+    op_times: Dict[str, List[float]] = defaultdict(list)
+    
     for op, start, end in operations:
+        start_time: float = time.time()
         if op == 'reserve':
             manager.reserve_interval(start, end)
         elif op == 'release':
             manager.release_interval(start, end)
         elif op == 'find':
             manager.find_interval(start, end - start)
-    return time.time() - start_time
+        op_times[op].append(time.time() - start_time)
+    
+    avg_times: Dict[str, float] = {
+        op: sum(times) / len(times) for op, times in op_times.items()
+    }
+    return sum(sum(times) for times in op_times.values()), avg_times
 
-def benchmark_interval_tree(operations: List[Tuple[str, int, int]]) -> float:
+def benchmark_interval_tree(operations: List[Tuple[str, int, int]]) -> Tuple[float, Dict[str, float]]:
     tree: EarliestIntervalTree = EarliestIntervalTree()
-    tree.insert_interval(0, 10_000_000)
-    start_time: float = time.time()
+    tree.insert_interval(*INITIAL_INTERVAL_SIZE)
+    op_times: Dict[str, List[float]] = defaultdict(list)
+    
     for op, start, end in operations:
+        start_time: float = time.time()
         if op == 'reserve':
             tree.delete_interval(start, end)
         elif op == 'release':
             tree.insert_interval(start, end)
         elif op == 'find':
             tree.find_interval(start, end - start)
-    return time.time() - start_time
+        op_times[op].append(time.time() - start_time)
+    
+    avg_times: Dict[str, float] = {
+        op: sum(times) / len(times) for op, times in op_times.items()
+    }
+    return sum(sum(times) for times in op_times.values()), avg_times
 
 def generate_operations(num_operations: int) -> List[Tuple[str, int, int]]:
     operations: List[Tuple[str, int, int]] = []
@@ -55,11 +72,23 @@ def run_benchmarks(random_seed: int | None) -> None:
     # Create fresh instances for validation
     manager: IntervalManager = IntervalManager()
     tree: EarliestIntervalTree = EarliestIntervalTree()
-    manager.release_interval(0, 10_000_000)
-    tree.insert_interval(0, 10_000_000)
+    manager.release_interval(*INITIAL_INTERVAL_SIZE)
+    tree.insert_interval(*INITIAL_INTERVAL_SIZE)
 
-    time_manager: float = benchmark_interval_manager(operations)
-    time_tree: float = benchmark_interval_tree(operations)
+    time_manager, manager_op_times = benchmark_interval_manager(operations)
+    time_tree, tree_op_times = benchmark_interval_tree(operations)
+
+    print(f"\nIntervalManager execution time: {time_manager:.4f} seconds")
+    print("Average times per operation:")
+    for op in ['reserve', 'release', 'find']:
+        if op in manager_op_times:
+            print(f"  {op:8}: {manager_op_times[op]*1000:.4f} ms")
+
+    print(f"\nEarliestIntervalTree execution time: {time_tree:.4f} seconds")
+    print("Average times per operation:")
+    for op in ['reserve', 'release', 'find']:
+        if op in tree_op_times:
+            print(f"  {op:8}: {tree_op_times[op]*1000:.4f} ms")
 
     # Run operations again to check final state
     for op, start, end in operations:
