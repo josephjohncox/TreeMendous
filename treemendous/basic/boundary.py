@@ -119,6 +119,9 @@ class IntervalManager:
         for s, e in self.intervals.items():
             print(f"[{s}, {e})")
         print(f"Total available length: {self.total_available_length}")
+    
+    def get_intervals(self) -> List[Tuple[int, int]]:
+        return list(self.intervals.items())
 
 # Example usage:
 if __name__ == "__main__":

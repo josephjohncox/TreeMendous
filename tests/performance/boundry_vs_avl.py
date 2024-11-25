@@ -2,10 +2,12 @@ from typing import List, Tuple, Callable, Dict
 from collections import defaultdict
 import time
 import random
-from treemendous.basic.boundary import IntervalManager
+from treemendous.cpp.boundary import IntervalManager
+# from treemendous.basic.boundary import IntervalManager
 from treemendous.basic.avl_earliest import EarliestIntervalTree
 
 INITIAL_INTERVAL_SIZE: Tuple[int, int] = (0, 10_000_000)
+ITERATIONS: int = 100_000
 
 def benchmark_interval_manager(operations: List[Tuple[str, int, int]]) -> Tuple[float, Dict[str, float]]:
     manager: IntervalManager = IntervalManager()
@@ -58,7 +60,7 @@ def generate_operations(num_operations: int) -> List[Tuple[str, int, int]]:
     return operations
 
 def get_intervals(manager: IntervalManager) -> List[Tuple[int, int]]:
-    return sorted([(start, end) for start, end in manager.intervals.items()])
+    return sorted(manager.get_intervals())
 
 def get_tree_intervals(tree: EarliestIntervalTree) -> List[Tuple[int, int]]:
     return sorted(tree.get_all_intervals())
@@ -66,8 +68,7 @@ def get_tree_intervals(tree: EarliestIntervalTree) -> List[Tuple[int, int]]:
 def run_benchmarks(random_seed: int | None) -> None:
     if random_seed:
         random.seed(random_seed)
-    num_operations: int = 10_000
-    operations: List[Tuple[str, int, int]] = generate_operations(num_operations)
+    operations: List[Tuple[str, int, int]] = generate_operations(ITERATIONS)
 
     # Create fresh instances for validation
     manager: IntervalManager = IntervalManager()
@@ -140,6 +141,10 @@ def run_benchmarks(random_seed: int | None) -> None:
             manager_interval = f"[{manager_diffs[i][0]}, {manager_diffs[i][1]}]*" if i < len(manager_diffs) else " " * 20
             tree_interval = f"[{tree_diffs[i][0]}, {tree_diffs[i][1]}]*" if i < len(tree_diffs) else ""
             print(f"{manager_interval:20} {tree_interval}")
+    
+    # Calculate speedup
+    speedup: float = time_tree / time_manager if time_manager > 0 else float('inf')
+    print(f"Speedup (Tree time / Manager time): {speedup:.2f}x")
 
 if __name__ == "__main__":
     import sys
