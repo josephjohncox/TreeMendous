@@ -10,11 +10,11 @@ from typing import List, Tuple, Optional, Set
 ))
 def test_insert_and_delete_intervals(operations: List[Tuple[int, int]]) -> None:
     tree = EarliestIntervalTree()
-    tree.insert_interval(0, 1000)
+    tree.release_interval(0, 1000)
     total_available: int = 1000
 
     for start, end in operations:
-        tree.delete_interval(start, end)
+        tree.reserve_interval(start, end)
         total_available -= end - start
 
     assert tree.get_total_available_length() == total_available
@@ -22,7 +22,7 @@ def test_insert_and_delete_intervals(operations: List[Tuple[int, int]]) -> None:
     for start, end in operations:
         if end > 1000:
             continue
-        tree.insert_interval(start, end)
+        tree.release_interval(start, end)
         total_available += end - start
 
     assert tree.get_total_available_length() == total_available
@@ -30,9 +30,9 @@ def test_insert_and_delete_intervals(operations: List[Tuple[int, int]]) -> None:
 @given(st.integers(min_value=0, max_value=1000), st.integers(min_value=1, max_value=500))
 def test_find_interval(point: int, length: int) -> None:
     tree = EarliestIntervalTree()
-    tree.insert_interval(0, 1000)
-    tree.delete_interval(200, 300)
-    tree.delete_interval(400, 500)
+    tree.release_interval(0, 1000)
+    tree.reserve_interval(200, 300)
+    tree.reserve_interval(400, 500)
 
     interval: Optional[EarliestIntervalNode] = tree.find_interval(point, length)
     if interval:
@@ -43,21 +43,21 @@ def test_find_interval(point: int, length: int) -> None:
 
 def test_total_available_length() -> None:
     tree = EarliestIntervalTree()
-    tree.insert_interval(0, 1000)
-    tree.delete_interval(100, 200)
-    tree.delete_interval(300, 400)
+    tree.release_interval(0, 1000)
+    tree.reserve_interval(100, 200)
+    tree.reserve_interval(300, 400)
 
     assert tree.get_total_available_length() == 800
 
-    tree.insert_interval(150, 350)
+    tree.release_interval(150, 350)
     assert tree.get_total_available_length() == 900
 
 def test_adjacent_intervals() -> None:
     tree = EarliestIntervalTree()
-    tree.insert_interval(0, 100)
-    tree.insert_interval(100, 200)
+    tree.release_interval(0, 100)
+    tree.release_interval(100, 200)
 
-    intervals = tree.get_all_intervals()
+    intervals = tree.get_intervals()
     assert intervals == [(0, 100), (100, 200)]
     assert tree.get_total_available_length() == 200
 
@@ -70,7 +70,7 @@ def test_adjacent_intervals() -> None:
 ))
 def test_random_operations(operations: List[Tuple[str, int, int]]) -> None:
     tree = EarliestIntervalTree()
-    tree.insert_interval(0, 1000)
+    tree.release_interval(0, 1000)
     total_available: int = 1000
 
     for op, start, length in operations:
@@ -78,14 +78,14 @@ def test_random_operations(operations: List[Tuple[str, int, int]]) -> None:
         if end > 1000:
             continue
         if op == 'delete':
-            tree.delete_interval(start, end)
+            tree.reserve_interval(start, end)
             total_available -= length
         else:
             # Only increase total if interval isn't already in tree
             interval: Optional[EarliestIntervalNode] = tree.find_interval(start, length)
             if interval and interval.start > start:
                 total_available += length
-            tree.insert_interval(start, end)
+            tree.release_interval(start, end)
 
     total_available = max(0, min(total_available, 1000))
     assert 0 <= total_available <= 1000
@@ -106,10 +106,10 @@ def test_non_overlapping_reservations(intervals: List[Tuple[int, int]]) -> None:
     assume(all(s2 >= e1 for (_, e1), (s2, _) in zip(sorted_intervals, sorted_intervals[1:])))
 
     tree = EarliestIntervalTree()
-    tree.insert_interval(0, 1000)
+    tree.release_interval(0, 1000)
 
     for start, end in sorted_intervals:
-        tree.delete_interval(start, end)
+        tree.reserve_interval(start, end)
 
     total_reserved: int = sum(end - start for start, end in sorted_intervals)
     total_available: int = tree.get_total_available_length()
@@ -121,12 +121,12 @@ def test_non_overlapping_reservations(intervals: List[Tuple[int, int]]) -> None:
 ).filter(lambda x: x[0] < x[1])))
 def test_overlapping_reservations(intervals: List[Tuple[int, int]]) -> None:
     tree = EarliestIntervalTree()
-    tree.insert_interval(0, 1000)
+    tree.release_interval(0, 1000)
 
     covered_points: Set[int] = set()
 
     for start, end in intervals:
-        tree.delete_interval(start, end)
+        tree.reserve_interval(start, end)
         covered_points.update(range(start, end))
 
     total_reserved: int = len(covered_points)

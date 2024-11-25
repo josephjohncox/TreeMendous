@@ -1,21 +1,38 @@
-from typing import List, Tuple, Callable, Dict
+from typing import List, Tuple, Callable, Dict, Type, Protocol
+from dataclasses import dataclass
 from collections import defaultdict
 import time
 import random
-from treemendous.cpp.boundary import IntervalManager
-# from treemendous.basic.boundary import IntervalManager
+from treemendous.cpp.boundary import IntervalManager as CppIntervalManager
+from treemendous.cpp.boundary import ICIntervalManager as CppICIntervalManager
+from treemendous.basic.boundary import IntervalManager as PyIntervalManager
 from treemendous.basic.avl_earliest import EarliestIntervalTree
 
 INITIAL_INTERVAL_SIZE: Tuple[int, int] = (0, 10_000_000)
 ITERATIONS: int = 100_000
 
-def benchmark_interval_manager(operations: List[Tuple[str, int, int]]) -> Tuple[float, Dict[str, float]]:
-    manager: IntervalManager = IntervalManager()
+@dataclass
+class BenchmarkResult:
+    total_time: float
+    op_times: Dict[str, float]
+    intervals: List[Tuple[int, int]]
+
+class IntervalManagerProtocol(Protocol):
+    def reserve_interval(self, start: int, end: int) -> None: ...
+    def release_interval(self, start: int, end: int) -> None: ...
+    def find_interval(self, start: int, length: int) -> Tuple[int, int]: ...
+    def get_intervals(self) -> List[Tuple[int, int]]: ...
+
+def benchmark_manager(
+    manager_class: Type[IntervalManagerProtocol], 
+    operations: List[Tuple[str, int, int]]
+) -> BenchmarkResult:
+    manager = manager_class()
     manager.release_interval(*INITIAL_INTERVAL_SIZE)
     op_times: Dict[str, List[float]] = defaultdict(list)
     
     for op, start, end in operations:
-        start_time: float = time.time()
+        start_time = time.time()
         if op == 'reserve':
             manager.reserve_interval(start, end)
         elif op == 'release':
@@ -24,30 +41,12 @@ def benchmark_interval_manager(operations: List[Tuple[str, int, int]]) -> Tuple[
             manager.find_interval(start, end - start)
         op_times[op].append(time.time() - start_time)
     
-    avg_times: Dict[str, float] = {
-        op: sum(times) / len(times) for op, times in op_times.items()
-    }
-    return sum(sum(times) for times in op_times.values()), avg_times
-
-def benchmark_interval_tree(operations: List[Tuple[str, int, int]]) -> Tuple[float, Dict[str, float]]:
-    tree: EarliestIntervalTree = EarliestIntervalTree()
-    tree.insert_interval(*INITIAL_INTERVAL_SIZE)
-    op_times: Dict[str, List[float]] = defaultdict(list)
-    
-    for op, start, end in operations:
-        start_time: float = time.time()
-        if op == 'reserve':
-            tree.delete_interval(start, end)
-        elif op == 'release':
-            tree.insert_interval(start, end)
-        elif op == 'find':
-            tree.find_interval(start, end - start)
-        op_times[op].append(time.time() - start_time)
-    
-    avg_times: Dict[str, float] = {
-        op: sum(times) / len(times) for op, times in op_times.items()
-    }
-    return sum(sum(times) for times in op_times.values()), avg_times
+    avg_times = {op: sum(times) / len(times) for op, times in op_times.items()}
+    return BenchmarkResult(
+        total_time=sum(sum(times) for times in op_times.values()),
+        op_times=avg_times,
+        intervals=sorted(manager.get_intervals())
+    )
 
 def generate_operations(num_operations: int) -> List[Tuple[str, int, int]]:
     operations: List[Tuple[str, int, int]] = []
@@ -59,92 +58,66 @@ def generate_operations(num_operations: int) -> List[Tuple[str, int, int]]:
         operations.append((op_type, start, end))
     return operations
 
-def get_intervals(manager: IntervalManager) -> List[Tuple[int, int]]:
-    return sorted(manager.get_intervals())
-
-def get_tree_intervals(tree: EarliestIntervalTree) -> List[Tuple[int, int]]:
-    return sorted(tree.get_all_intervals())
+def merge_intervals(intervals: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+    if not intervals:
+        return []
+    merged: List[Tuple[int, int]] = []
+    current_start, current_end = intervals[0]
+    for start, end in intervals[1:]:
+        if start == current_end:  # Only merge if exactly adjacent
+            current_end = end
+        else:
+            merged.append((current_start, current_end))
+            current_start, current_end = start, end
+    merged.append((current_start, current_end))
+    return merged
 
 def run_benchmarks(random_seed: int | None) -> None:
     if random_seed:
         random.seed(random_seed)
-    operations: List[Tuple[str, int, int]] = generate_operations(ITERATIONS)
+    operations = generate_operations(ITERATIONS)
 
-    # Create fresh instances for validation
-    manager: IntervalManager = IntervalManager()
-    tree: EarliestIntervalTree = EarliestIntervalTree()
-    manager.release_interval(*INITIAL_INTERVAL_SIZE)
-    tree.insert_interval(*INITIAL_INTERVAL_SIZE)
+    managers = {
+        "C++ Boundary": CppIntervalManager,
+        "C++ IC Boundary": CppICIntervalManager,
+        "Python Boundary": PyIntervalManager,
+        "AVL Tree": EarliestIntervalTree
+    }
 
-    time_manager, manager_op_times = benchmark_interval_manager(operations)
-    time_tree, tree_op_times = benchmark_interval_tree(operations)
+    results = {
+        name: benchmark_manager(manager_class, operations)
+        for name, manager_class in managers.items()
+    }
 
-    print(f"\nIntervalManager execution time: {time_manager:.4f} seconds")
-    print("Average times per operation:")
-    for op in ['reserve', 'release', 'find']:
-        if op in manager_op_times:
-            print(f"  {op:8}: {manager_op_times[op]*1000:.4f} ms")
+    # Print results and comparisons
+    for name, result in results.items():
+        print(f"\n{name} execution time: {result.total_time:.4f} seconds")
+        print("Average times per operation:")
+        for op in ['reserve', 'release', 'find']:
+            if op in result.op_times:
+                print(f"  {op:8}: {result.op_times[op]*1000:.4f} ms")
 
-    print(f"\nEarliestIntervalTree execution time: {time_tree:.4f} seconds")
-    print("Average times per operation:")
-    for op in ['reserve', 'release', 'find']:
-        if op in tree_op_times:
-            print(f"  {op:8}: {tree_op_times[op]*1000:.4f} ms")
-
-    # Run operations again to check final state
-    for op, start, end in operations:
-        if op == 'reserve':
-            manager.reserve_interval(start, end)
-            tree.delete_interval(start, end)
-        elif op == 'release':
-            manager.release_interval(start, end)
-            tree.insert_interval(start, end)
-        elif op == 'find':
-            manager.find_interval(start, end - start)
-            tree.find_interval(start, end - start)
-
-    manager_intervals: List[Tuple[int, int]] = get_intervals(manager)
-    tree_intervals: List[Tuple[int, int]] = get_tree_intervals(tree)
-    
-    print(f"IntervalManager execution time: {time_manager:.4f} seconds")
-    print(f"EarliestIntervalTree execution time: {time_tree:.4f} seconds")
-    # Check if the intervals cover the same ranges by merging adjacent intervals
-    def merge_intervals(intervals: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
-        if not intervals:
-            return []
-        merged: List[Tuple[int, int]] = []
-        current_start, current_end = intervals[0]
-        for start, end in intervals[1:]:
-            if start == current_end:  # Only merge if exactly adjacent
-                current_end = end
-            else:
-                merged.append((current_start, current_end))
-                current_start, current_end = start, end
-        merged.append((current_start, current_end))
-        return merged
-
-    manager_merged = merge_intervals(manager_intervals)
-    tree_merged = merge_intervals(tree_intervals)
-    
-    are_equivalent = manager_merged == tree_merged
-    print(f"Data structures functionally equivalent: {are_equivalent}")
-    if not are_equivalent:
-        print("Effective coverage differs:")
-        print("Manager coverage: ", end="")
-        print("Tree coverage:    ", end="")
-        print()
-        # Find intervals that differ between the two data structures
-        manager_diffs = [x for x in manager_merged if x not in tree_merged]
-        tree_diffs = [x for x in tree_merged if x not in manager_merged]
-        
-        for i in range(max(len(manager_diffs), len(tree_diffs))):
-            manager_interval = f"[{manager_diffs[i][0]}, {manager_diffs[i][1]}]*" if i < len(manager_diffs) else " " * 20
-            tree_interval = f"[{tree_diffs[i][0]}, {tree_diffs[i][1]}]*" if i < len(tree_diffs) else ""
-            print(f"{manager_interval:20} {tree_interval}")
-    
-    # Calculate speedup
-    speedup: float = time_tree / time_manager if time_manager > 0 else float('inf')
-    print(f"Speedup (Tree time / Manager time): {speedup:.2f}x")
+    # Compare results for correctness
+    base_intervals = merge_intervals(results["C++ Boundary"].intervals)
+    for name, result in results.items():
+        if name != "C++ Boundary":
+            result_intervals = merge_intervals(result.intervals)
+            are_equivalent = result_intervals == base_intervals
+            print(f"\n{name} matches C++ Boundary: {are_equivalent}")
+            
+            if not are_equivalent:
+                print(f"Effective coverage differs for {name}:")
+                print("Base coverage:     ", end="")
+                print("Result coverage:   ", end="")
+                print()
+                
+                base_diffs = [x for x in base_intervals if x not in result_intervals]
+                result_diffs = [x for x in result_intervals if x not in base_intervals]
+                
+                for i in range(max(len(base_diffs), len(result_diffs))):
+                    base_interval = f"[{base_diffs[i][0]}, {base_diffs[i][1]}]*" if i < len(base_diffs) else " " * 20
+                    result_interval = f"[{result_diffs[i][0]}, {result_diffs[i][1]}]*" if i < len(result_diffs) else ""
+                    print(f"{base_interval:20} {result_interval}")
 
 if __name__ == "__main__":
     import sys

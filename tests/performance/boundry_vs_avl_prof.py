@@ -17,12 +17,12 @@ def profile_interval_manager(operations: List[Tuple[str, int, int]]) -> None:
 
 def profile_earliest_interval_tree(operations: List[Tuple[str, int, int]]) -> None:
     tree: EarliestIntervalTree = EarliestIntervalTree()
-    tree.insert_interval(0, 1_000_000)
+    tree.release_interval(0, 1_000_000)
     for op, start, end in operations:
         if op == 'reserve':
-            tree.delete_interval(start, end)
+            tree.reserve_interval(start, end)
         elif op == 'release':
-            tree.insert_interval(start, end)
+            tree.release_interval(start, end)
         elif op == 'find':
             tree.find_interval(start, end - start)
 
