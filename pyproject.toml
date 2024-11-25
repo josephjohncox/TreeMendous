@@ -17,6 +17,7 @@ pybind11 = "^2.13.6"
 [tool.poetry.group.dev.dependencies]
 sortedcontainers-stubs = "^2.4.2"
 flameprof = "^0.4"
+maturin = "^1.7.4"
 
 
 [tool.poetry.group.test.dependencies]
@@ -28,8 +29,20 @@ addopts = "--hypothesis-explain -vv"
 
 
 [build-system]
-requires = ["poetry-core>=1.0.0", "pybind11>=2.13.6", "setuptools>=75.6.0"]
-build-backend = "poetry.core.masonry.api"
+requires = [
+    "poetry-core>=1.0.0",
+    "pybind11>=2.13.6",
+    "setuptools>=75.6.0",
+    "maturin>=1.7.4"
+]
+build-backend = "maturin"
 
-[tool.poetry-build-plugin]
-source = "build.py"
+[tool.maturin]
+manifest-path = "rust/interval_manager/Cargo.toml"
+module-name = "treemendous.rust.interval_manager"
+features = ["pyo3/extension-module"]
+bindings = "pyo3"
+
+[tool.poetry.build]
+script = "build.py"
+generate-setup-file = true

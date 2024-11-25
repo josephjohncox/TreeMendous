@@ -2,7 +2,8 @@ from typing import List, Tuple, Callable, Dict
 from collections import defaultdict
 import time
 import random
-from treemendous.cpp.boundary import IntervalManager
+#from treemendous.cpp.boundary import IntervalManager
+from treemendous.rust.interval_manager import IntervalManager
 # from treemendous.basic.boundary import IntervalManager
 from treemendous.basic.avl_earliest import EarliestIntervalTree
 
