@@ -35,7 +35,7 @@ class IntervalTree(Generic[R], IntervalTreeBase[R]):
     def _print_node(self, node: R, indent: str, prefix: str) -> None:
         print(f"{indent}{prefix}{node.start}-{node.end} (len={node.length}, total_len={node.total_length})")
 
-    def insert_interval(self, start: int, end: int) -> None:
+    def release_interval(self, start: int, end: int) -> None:
         overlapping_nodes: List[R] = []
         self.root = self._delete_overlaps(self.root, start, end, overlapping_nodes)
         # Merge overlapping intervals with the new interval
@@ -45,7 +45,7 @@ class IntervalTree(Generic[R], IntervalTreeBase[R]):
         # Insert the merged interval using the constructor
         self.root = self._insert(self.root, self.node_class(start, end))
 
-    def delete_interval(self, start: int, end: int) -> None:
+    def reserve_interval(self, start: int, end: int) -> None:
         self.root = self._delete_interval(self.root, start, end)
 
     def _delete_interval(
@@ -225,59 +225,59 @@ class IntervalTree(Generic[R], IntervalTreeBase[R]):
         y.update_stats()
         return y
     
-    def get_all_intervals(self) -> List[Tuple[int, int]]:
+    def get_intervals(self) -> List[Tuple[int, int]]:
         intervals: List[Tuple[int, int]] = []
-        self._get_all_intervals(self.root, intervals)
+        self._get_intervals(self.root, intervals)
         return intervals
 
-    def _get_all_intervals(self, node: Optional[R], intervals: List[Tuple[int, int]]) -> None:
+    def _get_intervals(self, node: Optional[R], intervals: List[Tuple[int, int]]) -> None:
         if not node:
             return
         intervals.append((node.start, node.end))
-        self._get_all_intervals(node.left, intervals)
-        self._get_all_intervals(node.right, intervals)
+        self._get_intervals(node.left, intervals)
+        self._get_intervals(node.right, intervals)
 
 # Example usage:
 if __name__ == "__main__":
     tree = IntervalTree[IntervalNode](IntervalNode)
     # Initially, the whole interval [0, 100] is available
-    tree.insert_interval(0, 100)
+    tree.release_interval(0, 100)
     print("Initial tree:")
     tree.print_tree()
     print(f"Total available length: {tree.get_total_available_length()}")
 
     # Schedule interval [0, 1
-    tree.delete_interval(0, 1)
+    tree.reserve_interval(0, 1)
     print("\nAfter scheduling [0, 1]:")
     tree.print_tree()
     print(f"Total available length: {tree.get_total_available_length()}")
 
     # Unschedule interval [0, 1]
-    tree.insert_interval(0, 1)
+    tree.release_interval(0, 1)
     print("\nAfter unscheduling [0, 1]:")
     tree.print_tree()
     print(f"Total available length: {tree.get_total_available_length()}")
 
     # Schedule interval [10, 20]
-    tree.delete_interval(10, 20)
+    tree.reserve_interval(10, 20)
     print("\nAfter scheduling [10, 20]:")
     tree.print_tree()
     print(f"Total available length: {tree.get_total_available_length()}")
 
     # Schedule interval [30, 40]
-    tree.delete_interval(30, 40)
+    tree.reserve_interval(30, 40)
     print("\nAfter scheduling [30, 40]:")
     tree.print_tree()
     print(f"Total available length: {tree.get_total_available_length()}")
 
     # Unschedule interval [10, 20]
-    tree.insert_interval(10, 20)
+    tree.release_interval(10, 20)
     print("\nAfter unscheduling [10, 20]:")
     tree.print_tree()
     print(f"Total available length: {tree.get_total_available_length()}")
 
     # Split at pivot 50 (delete [50, 50])
-    tree.delete_interval(50, 50)
+    tree.reserve_interval(50, 50)
     print("\nAfter splitting at pivot 50:")
     tree.print_tree()
     print(f"Total available length: {tree.get_total_available_length()}")

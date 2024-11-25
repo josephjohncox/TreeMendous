@@ -65,44 +65,44 @@ class EarliestIntervalTree(IntervalTree[EarliestIntervalNode]):
 if __name__ == "__main__":
     tree = EarliestIntervalTree()
     # Initially, the whole interval [0, 100) is available
-    tree.insert_interval(0, 100)
+    tree.release_interval(0, 100)
     print("Initial tree:")
     tree.print_tree()
     print(f"Total available length: {tree.get_total_available_length()}")
 
     # Schedule interval [0, 1
-    tree.delete_interval(0, 1)
+    tree.reserve_interval(0, 1)
     print("\nAfter scheduling [0, 1]:")
     tree.print_tree()
     print(f"Total available length: {tree.get_total_available_length()}")
 
     # Unschedule interval [0, 1]
-    tree.insert_interval(0, 1)
+    tree.release_interval(0, 1)
     print("\nAfter unscheduling [0, 1]:")
     tree.print_tree()
     print(f"Total available length: {tree.get_total_available_length()}")
 
     # Schedule interval [1, 2]
-    tree.delete_interval(1, 3)
+    tree.reserve_interval(1, 3)
     print("\nAfter scheduling [1, 3]:")
     tree.print_tree()
     print(f"Total available length: {tree.get_total_available_length()}")
 
     # Schedule interval [2, 3]
-    tree.delete_interval(2, 5)
+    tree.reserve_interval(2, 5)
     print("\nAfter scheduling [2, 5]:")
     tree.print_tree()
     print(f"Total available length: {tree.get_total_available_length()}")
 
 
     # Schedule interval [10, 20)
-    tree.delete_interval(10, 20)
+    tree.reserve_interval(10, 20)
     print("\nAfter scheduling [10, 20):")
     tree.print_tree()
     print(f"Total available length: {tree.get_total_available_length()}")
 
     # Schedule interval [15, 25)
-    tree.delete_interval(15, 25)
+    tree.reserve_interval(15, 25)
     print("\nAfter scheduling [15, 25):")
     tree.print_tree()
     print(f"Total available length: {tree.get_total_available_length()}")
@@ -115,13 +115,13 @@ if __name__ == "__main__":
         print("\nNo suitable interval found.")
 
     # Unschedule interval [10, 20)
-    tree.insert_interval(10, 20)
+    tree.release_interval(10, 20)
     print("\nAfter unscheduling [10, 20):")
     tree.print_tree()
     print(f"Total available length: {tree.get_total_available_length()}")
 
     # Delete interval overlapping multiple intervals
-    tree.delete_interval(5, 15)
+    tree.reserve_interval(5, 15)
     print("\nAfter deleting interval [5, 15):")
     tree.print_tree()
     print(f"Total available length: {tree.get_total_available_length()}")

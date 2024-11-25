@@ -1,15 +1,44 @@
-from pybind11.setup_helpers import Pybind11Extension, build_ext
-from setuptools import setup
+import os
+import shutil
+from typing import List, Dict, Any
+from pathlib import Path
 
-ext_modules = [
-    Pybind11Extension(
-        "treemendous.cpp.boundary",
-        ["treemendous/cpp/boundary_bindings.cpp"],
-        cxx_std=20,  # Use C++20
-    ),
-]
+from pybind11.setup_helpers import Pybind11Extension
+from setuptools.command.build_ext import build_ext
+from setuptools.dist import Distribution
 
-setup(
-    ext_modules=ext_modules,
-    cmdclass={"build_ext": build_ext},
-)
+def build(setup_kwargs: Dict[str, Any]) -> None:
+    ext_modules: List[Pybind11Extension] = [
+        Pybind11Extension(
+            "treemendous.cpp.boundary",
+            ["treemendous/cpp/boundary_bindings.cpp"],
+            cxx_std=20,
+            extra_compile_args=["-O3"],
+            include_dirs=["/opt/homebrew/Cellar/boost/1.86.0_2/include"],
+            libraries=["boost_system"],
+            extra_link_args=["-L/opt/homebrew/Cellar/boost/1.86.0_2/lib"],
+        ),
+    ]
+
+    distribution = Distribution({
+        "name": "treemendous",
+        "ext_modules": ext_modules
+    })
+
+    cmd = build_ext(distribution)
+    cmd.ensure_finalized()
+    cmd.run()
+
+    # Copy built extensions back to the project
+    for output in cmd.get_outputs():
+        output = Path(output)
+        relative_extension = output.relative_to(cmd.build_lib)
+
+        shutil.copyfile(output, relative_extension)
+        mode = os.stat(relative_extension).st_mode
+        mode |= (mode & 0o444) >> 2
+        os.chmod(relative_extension, mode)
+    # setup_kwargs.update({
+    #     "ext_modules": ext_modules,
+    #     "cmdclass": {"build_ext": build_ext},
+    # })
