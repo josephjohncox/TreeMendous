@@ -35,7 +35,7 @@ def generate_operations(num_operations: int) -> List[Tuple[str, int, int]]:
     for _ in range(num_operations):
         op_type: str = random.choice(['reserve', 'release', 'find'])
         start: int = random.randint(0, 9_999_899)
-        length: int = random.randint(1, 100)
+        length: int = random.randint(1, 1000)
         end: int = start + length
         operations.append((op_type, start, end))
     return operations
@@ -46,8 +46,9 @@ def get_intervals(manager: IntervalManager) -> List[Tuple[int, int]]:
 def get_tree_intervals(tree: EarliestIntervalTree) -> List[Tuple[int, int]]:
     return sorted(tree.get_all_intervals())
 
-def run_benchmarks() -> None:
-    # random.seed(42)
+def run_benchmarks(random_seed: int | None) -> None:
+    if random_seed:
+        random.seed(random_seed)
     num_operations: int = 10_000
     operations: List[Tuple[str, int, int]] = generate_operations(num_operations)
 
@@ -77,15 +78,15 @@ def run_benchmarks() -> None:
     
     print(f"IntervalManager execution time: {time_manager:.4f} seconds")
     print(f"EarliestIntervalTree execution time: {time_tree:.4f} seconds")
-    # Check if the intervals cover the same ranges by merging overlapping/adjacent intervals
+    # Check if the intervals cover the same ranges by merging adjacent intervals
     def merge_intervals(intervals: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
         if not intervals:
             return []
         merged: List[Tuple[int, int]] = []
         current_start, current_end = intervals[0]
         for start, end in intervals[1:]:
-            if start <= current_end:
-                current_end = max(current_end, end)
+            if start == current_end:  # Only merge if exactly adjacent
+                current_end = end
             else:
                 merged.append((current_start, current_end))
                 current_start, current_end = start, end
@@ -112,4 +113,5 @@ def run_benchmarks() -> None:
             print(f"{manager_interval:20} {tree_interval}")
 
 if __name__ == "__main__":
-    run_benchmarks()
+    import sys
+    run_benchmarks(random_seed=int(sys.argv[1]) if len(sys.argv) > 1 else None)

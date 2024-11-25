@@ -46,10 +46,13 @@ class IntervalManager:
         idx = self.intervals.bisect_left(start)
 
         if idx > 0:
-            idx -= 1
+            prev_start = self.intervals.keys()[idx - 1]
+            prev_end = self.intervals[prev_start]
+            if prev_end > start:
+                idx -= 1
 
         intervals_to_add: List[Tuple[int, int]] = []
-        intervals_to_remove: List[Tuple[int, int]] = []
+        keys_to_delete: List[int] = []
 
         while idx < len(self.intervals):
             curr_start = self.intervals.keys()[idx]
@@ -62,10 +65,9 @@ class IntervalManager:
             overlap_end = min(end, curr_end)
 
             if overlap_start < overlap_end:
-                # Remove current interval
-                del self.intervals[curr_start]
+                # Mark current interval for removal
+                keys_to_delete.append(curr_start)
                 self.total_available_length -= curr_end - curr_start
-                intervals_to_remove.append((curr_start, curr_end))
 
                 # Add non-overlapping intervals
                 if curr_start < start:
@@ -75,6 +77,11 @@ class IntervalManager:
 
             idx += 1
 
+        # Remove intervals after iteration
+        for key in keys_to_delete:
+            del self.intervals[key]
+
+        # Add new intervals
         for s, e in intervals_to_add:
             self.intervals[s] = e
             self.total_available_length += e - s
