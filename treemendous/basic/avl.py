@@ -46,52 +46,100 @@ class IntervalTree(Generic[R], IntervalTreeBase[R]):
         self.root = self._insert(self.root, self.node_class(start, end))
 
     def delete_interval(self, start: int, end: int) -> None:
-        # Find overlapping intervals
-        overlapping_nodes: List[R] = []
-        self.root = self._delete_overlaps(self.root, start, end, overlapping_nodes)
-        # For each overlapping interval, we may need to split it
-        for node in overlapping_nodes:
-            if node.start < start:
-                # Left part remains available
-                self.root = self._insert(self.root, self.node_class(node.start, start))
-            if node.end > end:
-                # Right part remains available
-                self.root = self._insert(self.root, self.node_class(end, node.end))
+        self.root = self._delete_interval(self.root, start, end)
 
-    def _delete_overlaps(self, node: Optional[R], start: int, end: int, 
-                        overlapping_nodes: List[R]) -> Optional[R]:
+    def _delete_interval(
+        self, node: Optional[R], start: int, end: int
+    ) -> Optional[R]:
         if not node:
             return None
 
-        # If current node is completely before or after the interval
-        if end <= node.start:
-            node.left = self._delete_overlaps(node.left, start, end, overlapping_nodes)
-            node.update_stats()  # Important: update stats after modification
-            return node
-        if start >= node.end:
-            node.right = self._delete_overlaps(node.right, start, end, overlapping_nodes)
-            node.update_stats()  # Important: update stats after modification
-            return node
-
-        # Handle overlap case
-        overlapping_nodes.append(node)
-        left_tree = self._delete_overlaps(node.left, start, end, overlapping_nodes)
-        right_tree = self._delete_overlaps(node.right, start, end, overlapping_nodes)
-
-        # Merge remaining subtrees
-        if left_tree and right_tree:
-            min_node = self._get_min(right_tree)
-            min_node.left = left_tree
-            min_node.update_stats()
-            merged_tree = right_tree
+        if node.end <= start:
+            # Interval to delete is after the current node
+            node.right = self._delete_interval(node.right, start, end)
+        elif node.start >= end:
+            # Interval to delete is before the current node
+            node.left = self._delete_interval(node.left, start, end)
         else:
-            merged_tree = left_tree or right_tree
+            # The current node overlaps with the interval to delete
+            # We may need to split the node into up to two intervals
 
-        # **Fix: Update stats on the merged tree**
-        if merged_tree:
-            merged_tree.update_stats()
+            nodes_to_insert = []
 
-        return merged_tree
+            if node.start < start:
+                # Left part remains
+                left_node = self.node_class(node.start, start)
+                nodes_to_insert.append(left_node)
+
+            if node.end > end:
+                # Right part remains
+                right_node = self.node_class(end, node.end)
+                nodes_to_insert.append(right_node)
+
+            # Delete the current node and replace it with left and right parts
+            node = self._merge_subtrees(
+                self._delete_interval(node.left, start, end),
+                self._delete_interval(node.right, start, end)
+            )
+
+            # Insert any remaining parts
+            for n in nodes_to_insert:
+                node = self._insert(node, n)
+
+        if node:
+            node.update_stats()
+            node = self._rebalance(node)
+        return node
+
+    def _delete_overlaps(
+        self, node: Optional[R], start: int, end: int, overlapping_nodes: List[R]
+    ) -> Optional[R]:
+        if not node:
+            return None
+
+        if node.end <= start:
+            # No overlap, move to the right
+            node.right = self._delete_overlaps(node.right, start, end, overlapping_nodes)
+        elif node.start >= end:
+            # No overlap, move to the left
+            node.left = self._delete_overlaps(node.left, start, end, overlapping_nodes)
+        else:
+            # Overlap detected
+            overlapping_nodes.append(node)
+            # Remove this node and continue searching in both subtrees
+            node = self._merge_subtrees(
+                self._delete_overlaps(node.left, start, end, overlapping_nodes),
+                self._delete_overlaps(node.right, start, end, overlapping_nodes)
+            )
+            return node
+
+        if node:
+            node.update_stats()
+            node = self._rebalance(node)
+        return node
+
+    def _merge_subtrees(
+        self, left: Optional[R], right: Optional[R]
+    ) -> Optional[R]:
+        if not left:
+            return right
+        if not right:
+            return left
+
+        # Find the node with the minimum start in the right subtree
+        min_node = self._get_min(right)
+        right = self._delete_min(right)
+        min_node.left = left
+        min_node.right = right
+        min_node.update_stats()
+        return self._rebalance(min_node)
+
+    def _delete_min(self, node: R) -> Optional[R]:
+        if node.left is None:
+            return node.right
+        node.left = self._delete_min(node.left)
+        node.update_stats()
+        return self._rebalance(node)
 
     def _insert(self, node: Optional[R], new_node: R) -> R:
         if not node:

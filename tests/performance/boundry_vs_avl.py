@@ -34,8 +34,9 @@ def generate_operations(num_operations: int) -> List[Tuple[str, int, int]]:
     operations: List[Tuple[str, int, int]] = []
     for _ in range(num_operations):
         op_type: str = random.choice(['reserve', 'release', 'find'])
-        start: int = random.randint(0, 9_999_900)
-        end: int = start + random.randint(1, 100)
+        start: int = random.randint(0, 9_999_899)
+        length: int = random.randint(1, 100)
+        end: int = start + length
         operations.append((op_type, start, end))
     return operations
 
