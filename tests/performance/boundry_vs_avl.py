@@ -4,9 +4,14 @@ from collections import defaultdict
 import time
 import random
 from treemendous.cpp.boundary import IntervalManager as CppIntervalManager
-from treemendous.cpp.boundary import ICIntervalManager as CppICIntervalManager
 from treemendous.basic.boundary import IntervalManager as PyIntervalManager
 from treemendous.basic.avl_earliest import EarliestIntervalTree
+
+# Try to import CppICIntervalManager, set to None if import fails
+try:
+    from treemendous.cpp.boundary import ICIntervalManager as CppICIntervalManager
+except ImportError:
+    CppICIntervalManager = None
 
 INITIAL_INTERVAL_SIZE: Tuple[int, int] = (0, 10_000_000)
 ITERATIONS: int = 100_000
@@ -79,10 +84,13 @@ def run_benchmarks(random_seed: int | None) -> None:
 
     managers = {
         "C++ Boundary": CppIntervalManager,
-        "C++ IC Boundary": CppICIntervalManager,
         "Python Boundary": PyIntervalManager,
         "AVL Tree": EarliestIntervalTree
     }
+    
+    # Only add CppICIntervalManager if import succeeded
+    if CppICIntervalManager is not None:
+        managers["C++ IC Boundary"] = CppICIntervalManager
 
     results = {
         name: benchmark_manager(manager_class, operations)
