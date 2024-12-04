@@ -19,8 +19,12 @@ version:
 release: build
     @poetry version -s | xargs -I {} gh release create v{} --generate-notes
 
-delete-release:
+delete-release: delete-tag
     @poetry version -s | xargs -I {} gh release delete v{}
+
+delete-tag:
+    @poetry version -s | xargs -I {} git tag -d v{}
+
 
 bump-patch:
     poetry version patch
