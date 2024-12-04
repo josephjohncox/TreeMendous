@@ -24,6 +24,7 @@ delete-release: delete-tag
 
 delete-tag:
     @poetry version -s | xargs -I {} git tag -d v{}
+    @poetry version -s | xargs -I {} git push origin :refs/tags/v{}
 
 
 bump-patch:
