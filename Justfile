@@ -13,3 +13,18 @@ test:
 test-perf: build
     python tests/performance/boundry_vs_avl.py
 
+version:
+    @poetry version -s
+
+release: build
+    @poetry version -s | xargs -I {} gh release create v{} --generate-notes
+
+bump-patch:
+    poetry version patch
+    
+bump-minor:
+    poetry version minor
+
+bump-major:
+    poetry version major
+
