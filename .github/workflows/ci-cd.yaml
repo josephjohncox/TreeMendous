@@ -59,4 +59,4 @@ jobs:
           git push origin ${{ github.event.release.tag_name }}
         
       - name: Publish package distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1.12.2
+        uses: pypa/gh-action-pypi-publish@v1.12.2
