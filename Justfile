@@ -19,6 +19,9 @@ version:
 release: build
     @poetry version -s | xargs -I {} gh release create v{} --generate-notes
 
+delete-release:
+    @poetry version -s | xargs -I {} gh release delete v{}
+
 bump-patch:
     poetry version patch
     
