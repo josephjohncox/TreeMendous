@@ -52,11 +52,6 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.12'
-
-      - name: Create Tag
-        run: |
-          git tag ${{ github.event.release.tag_name }}
-          git push origin ${{ github.event.release.tag_name }}
         
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@v1.12.2
