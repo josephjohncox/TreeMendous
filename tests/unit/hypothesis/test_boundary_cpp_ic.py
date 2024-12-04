@@ -1,6 +1,18 @@
-from hypothesis import assume, given, strategies as st
-from treemendous.cpp.boundary import ICIntervalManager as IntervalManager
+import pytest
 from typing import List, Tuple, Optional
+
+try:
+    from treemendous.cpp.boundary import ICIntervalManager as IntervalManager
+    HAS_IC_MANAGER = True
+except ImportError:
+    HAS_IC_MANAGER = False
+
+pytestmark = pytest.mark.skipif(
+    not HAS_IC_MANAGER,
+    reason="ICIntervalManager not available"
+)
+
+from hypothesis import assume, given, strategies as st
 
 @given(st.lists(st.tuples(
     st.integers(min_value=0, max_value=1000),

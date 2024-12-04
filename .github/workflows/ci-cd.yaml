@@ -1,0 +1,62 @@
+name: CI/CD Pipeline
+
+on:
+  pull_request:
+    branches:
+      - '*'
+  release:
+    types:
+      - published
+  
+
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry
+          poetry install
+
+      - name: Run tests
+        run: |
+          poetry run pytest
+
+  pypi-publish:
+    if: github.event_name == 'release'
+    name: Publish to PyPI
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+        name: pypi
+        url: https://pypi.org/p/treemendous
+    permissions:
+      id-token: write
+      contents: write  # Added for tag creation
+    
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Create Tag
+        run: |
+          git tag ${{ github.event.release.tag_name }}
+          git push origin ${{ github.event.release.tag_name }}
+        
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1.12.2

@@ -9,7 +9,7 @@ readme = "README.md"
 
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = "^3.9"
 sortedcollections = "^2.1.0"
 sortedcontainers = "^2.4.0"
 
