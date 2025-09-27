@@ -96,6 +96,7 @@ def test_cpp_treap_mixed_operations(operations: List[Tuple[str, int, int]]) -> N
         else:
             treap.release_interval(start, end)
         
+        # Every operation must maintain treap properties
         validate_cpp_treap_properties(treap)
 
 

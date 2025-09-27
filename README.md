@@ -12,9 +12,15 @@ Interval tree implementations in Python and C++ for resource scheduling and spac
 - **Summary Tree**: Enhanced tree with aggregate statistics (utilization, fragmentation, largest available)
 
 ### C++ (`treemendous.cpp`)
-- **Boundary Manager**: std::map-based implementation
-- **IC Manager**: Boost Interval Container Library implementation
-- Summary-enhanced versions of both with comprehensive statistics
+- **Boundary Manager**: std::map-based implementation (compiled ✅)
+- **Treap**: High-performance randomized tree-heap (source available)
+- **IC Manager**: Boost Interval Container Library implementation (source available)
+- **Summary Boundary**: Enhanced versions with comprehensive statistics (source available)
+
+**C++ Module Status:**
+- ✅ **Boundary Manager**: Compiled and available (2-30x performance boost)
+- 🔧 **Treap, Summary, IC**: Source available, requires compilation (`just build-cpp`)
+- 📋 **Check Status**: `just list-backends` shows all available implementations
 
 ## Basic Usage
 
@@ -32,6 +38,12 @@ treap = IntervalTreap()
 treap.release_interval(0, 1000)
 sample = treap.sample_random_interval()
 overlaps = treap.find_overlapping_intervals(100, 200)
+
+# Backend-agnostic usage (auto-selects best available)
+from examples.common.backend_config import create_interval_tree
+tree = create_interval_tree("auto")        # Auto-select best backend
+tree = create_interval_tree("py_treap")    # Force Python treap  
+tree = create_interval_tree("cpp_boundary") # Force C++ boundary
 ```
 
 ## Installation
@@ -43,19 +55,23 @@ uv sync
 ## Performance Testing
 
 ```bash
-# Using Just commands (recommended)
-just test-perf-simple      # No dependencies required
-just validate              # Quick validation
-just test-perf             # Full benchmark (requires uv sync)
+# Comprehensive backend comparison
+just test-perf             # All available backends
+just test-perf-treap       # Treap-specific benchmarks
+just benchmark-backends    # Compare all backends
+
+# Scale testing
 just test-perf-large       # Large-scale tests (100s of MB, ~10+ min)
 just test-perf-large-quick # Quick large-scale tests (1-50MB)
 
-# Direct commands
-python tests/test_summary_simple.py
-python tests/performance/simple_benchmark.py
-python tests/performance/comprehensive_benchmark.py  # requires uv sync
-python tests/performance/large_scale_benchmark.py    # full large-scale tests
-python tests/performance/large_scale_benchmark.py --quick  # quick mode
+# Simple testing (no dependencies)
+just test-perf-simple      # Summary tree + treap tests
+just validate              # Full validation pipeline
+
+# Backend switching demos
+just list-backends         # Show available backends
+just demo-backends-treap   # Demo with Python treap
+just demo-backends-cpp     # Demo with C++ boundary
 ```
 
 ## Examples
@@ -68,8 +84,18 @@ Comprehensive examples in [`examples/`](examples/) demonstrate practical applica
 - **[Practical Applications](examples/practical_applications/)** - Manufacturing, cloud computing, supply chain
 
 ```bash
-# Run all examples
+# Run all examples (auto backend selection)
 just run-examples
+
+# Run examples with specific backend
+just run-examples-with-backend py_summary    # Python summary trees
+just run-examples-with-backend cpp_summary   # C++ summary trees (fastest)
+just run-examples-with-backend py_treap      # Python randomized treaps
+
+# Backend management
+just list-backends          # Show available implementations
+just benchmark-backends     # Performance comparison
+just demo-backends          # Backend switching demonstration
 
 # Run specific categories  
 just run-examples-randomized

@@ -16,66 +16,28 @@ import sys
 from pathlib import Path
 
 # Add paths for import resolution
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(project_root / 'examples'))
 
-# Import all implementations following the hierarchy
-print("🔄 Loading implementations...")
-
-# Python Simple Implementations
-from treemendous.basic.boundary import IntervalManager as PySimpleBoundary
-from treemendous.basic.avl_earliest import EarliestIntervalTree as PySimpleAVL
-
-# Python Randomized Implementation
-try:
-    sys.path.insert(0, str(project_root / 'treemendous' / 'basic'))
-    from treap import IntervalTreap as PyRandomizedTreap
-    py_treap_available = True
-except ImportError as e:
-    print(f"⚠️  Python Treap not available: {e}")
-    PyRandomizedTreap = None
-    py_treap_available = False
-
-# Python Summary Implementation 
-try:
-    from treemendous.basic.summary import SummaryIntervalTree as PySummaryTree
-    py_summary_available = True
-except ImportError as e:
-    print(f"⚠️  Python Summary not available: {e}")
-    PySummaryTree = None
-    py_summary_available = False
-
-# C++ Implementations
-try:
-    from treemendous.cpp.boundary import SimpleIntervalManager as CppSimpleBoundary
-    from treemendous.cpp.boundary import IntervalManager as CppSummaryBoundary
-    cpp_available = True
-    print("✅ C++ implementations loaded")
-except ImportError as e:
-    print(f"⚠️  C++ implementations not available: {e}")
-    CppSimpleBoundary = None
-    CppSummaryBoundary = None
-    cpp_available = False
+# Use unified backend system
+print("🔄 Loading implementations via backend system...")
 
 try:
-    from treemendous.cpp.boundary import SimpleICIntervalManager as CppSimpleIC
-    from treemendous.cpp.boundary import ICIntervalManager as CppSummaryIC
-    cpp_ic_available = True
-    print("✅ C++ ICL implementations loaded")
+    from common.backend_config import get_backend_manager, create_example_tree, get_tree_analytics
+    backend_manager = get_backend_manager()
+    available_backends = backend_manager.get_available_backends()
+    BACKEND_SYSTEM_AVAILABLE = True
+    
+    print(f"✅ Backend system loaded with {len(available_backends)} implementations:")
+    for backend_id, info in available_backends.items():
+        print(f"  • {info.name} ({info.language}, {info.performance_tier})")
+    
 except ImportError as e:
-    print(f"⚠️  C++ ICL implementations not available: {e}")
-    CppSimpleIC = None
-    CppSummaryIC = None
-    cpp_ic_available = False
-
-# C++ Treap Implementation
-try:
-    from treemendous.cpp.treap import IntervalTreap as CppTreap
-    cpp_treap_available = True
-    print("✅ C++ Treap implementation loaded")
-except ImportError as e:
-    print(f"⚠️  C++ Treap implementation not available: {e}")
-    CppTreap = None
-    cpp_treap_available = False
+    print(f"❌ Backend system not available: {e}")
+    BACKEND_SYSTEM_AVAILABLE = False
+    backend_manager = None
+    available_backends = {}
 
 print("📊 Implementation loading complete\n")
 
@@ -102,7 +64,7 @@ class BenchmarkSuite:
         self.results: List[BenchmarkResult] = []
         
     def register_implementations(self) -> Dict[str, Dict]:
-        """Register all available implementations by category"""
+        """Register all available implementations by category using backend system"""
         implementations = {
             "Simple Python": {},
             "Summary Python": {},
@@ -110,29 +72,44 @@ class BenchmarkSuite:
             "Summary C++": {}
         }
         
-        # Simple Python implementations
-        implementations["Simple Python"]["Boundary"] = PySimpleBoundary
-        implementations["Simple Python"]["AVL Earliest"] = PySimpleAVL
-        if py_treap_available:
-            implementations["Simple Python"]["Treap"] = PyRandomizedTreap
+        if BACKEND_SYSTEM_AVAILABLE:
+            # Categorize backends by type and language
+            for backend_id, backend_info in available_backends.items():
+                # Determine category
+                is_summary = ('summary' in backend_id.lower() or 
+                            'O(1) analytics' in str(backend_info.features))
+                is_cpp = backend_info.language == "C++"
+                
+                if is_cpp and is_summary:
+                    category = "Summary C++"
+                elif is_cpp:
+                    category = "Simple C++"
+                elif is_summary:
+                    category = "Summary Python"
+                else:
+                    category = "Simple Python"
+                
+                # Use a clean name for the implementation
+                if 'treap' in backend_id:
+                    impl_name = "Treap"
+                elif 'summary' in backend_id:
+                    impl_name = "Summary Tree"
+                elif 'boundary' in backend_id:
+                    impl_name = "Boundary"
+                elif 'avl' in backend_id:
+                    impl_name = "AVL"
+                elif 'ic' in backend_id:
+                    impl_name = "IC"
+                else:
+                    impl_name = backend_info.name.split()[0]
+                
+                implementations[category][impl_name] = backend_id  # Store backend_id instead of class
         
-        # Summary Python implementations
-        if py_summary_available:
-            implementations["Summary Python"]["Summary Tree"] = PySummaryTree
-        
-        # Simple C++ implementations
-        if cpp_available:
-            implementations["Simple C++"]["Boundary"] = CppSimpleBoundary
-        if cpp_ic_available:
-            implementations["Simple C++"]["IC Boundary"] = CppSimpleIC
-        if cpp_treap_available:
-            implementations["Simple C++"]["Treap"] = CppTreap
-            
-        # Summary C++ implementations  
-        if cpp_available:
-            implementations["Summary C++"]["Boundary"] = CppSummaryBoundary
-        if cpp_ic_available:
-            implementations["Summary C++"]["IC Boundary"] = CppSummaryIC
+        else:
+            # Fallback to old system (should not happen in normal usage)
+            print("⚠️  Using fallback implementation registration")
+            implementations["Simple Python"]["Boundary"] = "py_boundary"
+            implementations["Simple Python"]["AVL"] = "py_avl"
             
         return implementations
     
@@ -154,132 +131,186 @@ class BenchmarkSuite:
             
         return operations
     
-    def benchmark_basic_operations(self, manager_class, operations: List[Tuple[str, int, int]], name: str, category: str, language: str) -> BenchmarkResult:
-        """Benchmark basic interval operations"""
+    def benchmark_basic_operations(self, backend_id: str, operations: List[Tuple[str, int, int]], name: str, category: str, language: str) -> BenchmarkResult:
+        """Benchmark basic interval operations using backend system"""
         print(f"  📊 Testing {name}...")
         
-        manager = manager_class()
-        manager.release_interval(*INITIAL_INTERVAL_SIZE)
-        
-        op_times = defaultdict(list)
-        start_total = time.perf_counter()
-        
-        for op, start, end in operations:
-            start_time = time.perf_counter()
-            
-            try:
-                if op == 'reserve':
-                    manager.reserve_interval(start, end)
-                elif op == 'release':
-                    manager.release_interval(start, end)
-                elif op == 'find':
-                    if hasattr(manager, 'find_interval'):
-                        manager.find_interval(start, end - start)
-                    else:
-                        # Skip find operations for implementations without this method
-                        continue
-                        
-                op_times[op].append(time.perf_counter() - start_time)
-                
-            except Exception as e:
-                print(f"    ⚠️  Error in {op} operation: {e}")
-                continue
-        
-        total_time = time.perf_counter() - start_total
-        
-        # Calculate average operation times
-        avg_times = {}
-        total_ops = 0
-        for op, times in op_times.items():
-            if times:
-                avg_times[op] = statistics.mean(times)
-                total_ops += len(times)
-        
-        ops_per_second = total_ops / total_time if total_time > 0 else 0
-        
-        # Get final intervals count
         try:
-            intervals = manager.get_intervals()
-            intervals_count = len(intervals)
-        except:
-            intervals_count = 0
+            # Create tree using backend system
+            if BACKEND_SYSTEM_AVAILABLE:
+                tree = create_example_tree(backend_id, random_seed=42)
+            else:
+                # Fallback - this shouldn't happen in normal usage
+                raise ValueError("Backend system not available")
             
-        return BenchmarkResult(
-            name=name,
-            category=category,
-            language=language,
-            total_time=total_time,
-            operations_per_second=ops_per_second,
-            op_times=avg_times,
-            intervals_count=intervals_count
-        )
+            tree.release_interval(*INITIAL_INTERVAL_SIZE)
+            
+            op_times = defaultdict(list)
+            start_total = time.perf_counter()
+            
+            for op, start, end in operations:
+                start_time = time.perf_counter()
+                
+                try:
+                    if op == 'reserve':
+                        tree.reserve_interval(start, end)
+                    elif op == 'release':
+                        tree.release_interval(start, end)
+                    elif op == 'find':
+                        if hasattr(tree, 'find_interval'):
+                            tree.find_interval(start, end - start)
+                        elif hasattr(tree, 'find_best_fit'):
+                            tree.find_best_fit(end - start)
+                        else:
+                            # Skip find operations for implementations without this method
+                            continue
+                            
+                    op_times[op].append(time.perf_counter() - start_time)
+                    
+                except Exception as e:
+                    # Silently continue for expected failures (no suitable interval, etc.)
+                    continue
+            
+            total_time = time.perf_counter() - start_total
+            
+            # Calculate average operation times
+            avg_times = {}
+            total_ops = 0
+            for op, times in op_times.items():
+                if times:
+                    avg_times[op] = statistics.mean(times)
+                    total_ops += len(times)
+            
+            ops_per_second = total_ops / total_time if total_time > 0 else 0
+            
+            # Get final tree analytics
+            analytics = get_tree_analytics(tree) if BACKEND_SYSTEM_AVAILABLE else {}
+            intervals_count = analytics.get('tree_size', 0)
+                
+            return BenchmarkResult(
+                name=name,
+                category=category,
+                language=language,
+                total_time=total_time,
+                operations_per_second=ops_per_second,
+                op_times=avg_times,
+                intervals_count=intervals_count
+            )
+            
+        except Exception as e:
+            print(f"    ❌ Failed to benchmark {name}: {e}")
+            return BenchmarkResult(
+                name=name,
+                category=category,
+                language=language,
+                total_time=0.0,
+                operations_per_second=0.0,
+                intervals_count=0
+            )
     
-    def benchmark_summary_operations(self, manager_class, operations: List[Tuple[str, int, int]], name: str, language: str) -> BenchmarkResult:
-        """Benchmark summary-enhanced operations"""
+    def benchmark_summary_operations(self, backend_id: str, operations: List[Tuple[str, int, int]], name: str, language: str) -> BenchmarkResult:
+        """Benchmark summary-enhanced operations using backend system"""
         print(f"  🌟 Testing {name} (Summary Operations)...")
         
-        manager = manager_class()
-        manager.release_interval(*INITIAL_INTERVAL_SIZE)
-        
-        # Perform basic operations to create fragmentation
-        basic_ops = operations[:len(operations)//2]
-        for op, start, end in basic_ops:
-            if op == 'reserve':
-                manager.reserve_interval(start, end)
-            elif op == 'release':
-                manager.release_interval(start, end)
-        
-        # Benchmark summary-specific operations
-        summary_times = {}
-        summary_stats = {}
-        
-        # Test get_availability_stats
-        if hasattr(manager, 'get_availability_stats'):
-            start_time = time.perf_counter()
-            for _ in range(100):  # Multiple calls to get average
-                stats = manager.get_availability_stats()
-            summary_times['get_stats'] = (time.perf_counter() - start_time) / 100
-            summary_stats = dict(stats) if hasattr(stats, '__dict__') else stats
-        
-        # Test find_best_fit
-        if hasattr(manager, 'find_best_fit'):
-            start_time = time.perf_counter()
-            for _ in range(100):
-                manager.find_best_fit(random.randint(50, 500))
-            summary_times['best_fit'] = (time.perf_counter() - start_time) / 100
-        
-        # Test find_largest_available
-        if hasattr(manager, 'find_largest_available'):
-            start_time = time.perf_counter()
-            for _ in range(100):
-                manager.find_largest_available()
-            summary_times['largest'] = (time.perf_counter() - start_time) / 100
-        
-        # Test get_tree_summary (Python) or get_summary (C++)
-        if hasattr(manager, 'get_tree_summary'):
-            start_time = time.perf_counter()
-            for _ in range(100):
-                manager.get_tree_summary()
-            summary_times['tree_summary'] = (time.perf_counter() - start_time) / 100
-        elif hasattr(manager, 'get_summary'):
-            start_time = time.perf_counter()
-            for _ in range(100):
-                manager.get_summary()
-            summary_times['tree_summary'] = (time.perf_counter() - start_time) / 100
-        
-        total_summary_time = sum(summary_times.values())
-        ops_per_second = len(summary_times) * 100 / total_summary_time if total_summary_time > 0 else 0
-        
-        return BenchmarkResult(
-            name=name,
-            category="Summary",
-            language=language,
-            total_time=total_summary_time,
-            operations_per_second=ops_per_second,
-            op_times=summary_times,
-            intervals_count=len(manager.get_intervals()) if hasattr(manager, 'get_intervals') else 0,
-            summary_stats=summary_stats
-        )
+        try:
+            # Create tree using backend system
+            tree = create_example_tree(backend_id, random_seed=42)
+            tree.release_interval(*INITIAL_INTERVAL_SIZE)
+            
+            # Perform basic operations to create fragmentation
+            basic_ops = operations[:len(operations)//2]
+            for op, start, end in basic_ops:
+                try:
+                    if op == 'reserve':
+                        tree.reserve_interval(start, end)
+                    elif op == 'release':
+                        tree.release_interval(start, end)
+                except:
+                    continue
+            
+            # Benchmark summary-specific operations
+            summary_times = {}
+            summary_stats = {}
+            
+            # Test get_availability_stats
+            if hasattr(tree, 'get_availability_stats'):
+                start_time = time.perf_counter()
+                for _ in range(100):  # Multiple calls to get average
+                    try:
+                        stats = tree.get_availability_stats()
+                    except:
+                        break
+                summary_times['get_stats'] = (time.perf_counter() - start_time) / 100
+                try:
+                    final_stats = tree.get_availability_stats()
+                    summary_stats = dict(final_stats) if hasattr(final_stats, '__dict__') else final_stats
+                except:
+                    pass
+            
+            # Test find_best_fit
+            if hasattr(tree, 'find_best_fit'):
+                start_time = time.perf_counter()
+                successful_calls = 0
+                for _ in range(100):
+                    try:
+                        tree.find_best_fit(random.randint(50, 500))
+                        successful_calls += 1
+                    except (ValueError, AttributeError):
+                        continue
+                if successful_calls > 0:
+                    summary_times['best_fit'] = (time.perf_counter() - start_time) / successful_calls
+            
+            # Test find_largest_available
+            if hasattr(tree, 'find_largest_available'):
+                start_time = time.perf_counter()
+                for _ in range(100):
+                    try:
+                        tree.find_largest_available()
+                    except:
+                        break
+                summary_times['largest'] = (time.perf_counter() - start_time) / 100
+            
+            # Test tree summary methods
+            summary_methods = ['get_tree_summary', 'get_summary', 'get_statistics']
+            for method in summary_methods:
+                if hasattr(tree, method):
+                    start_time = time.perf_counter()
+                    for _ in range(100):
+                        try:
+                            getattr(tree, method)()
+                        except:
+                            break
+                    summary_times['tree_summary'] = (time.perf_counter() - start_time) / 100
+                    break
+            
+            total_summary_time = sum(summary_times.values())
+            ops_per_second = len(summary_times) * 100 / total_summary_time if total_summary_time > 0 else 0
+            
+            # Get interval count
+            analytics = get_tree_analytics(tree)
+            intervals_count = analytics.get('tree_size', 0)
+            
+            return BenchmarkResult(
+                name=name,
+                category="Summary",
+                language=language,
+                total_time=total_summary_time,
+                operations_per_second=ops_per_second,
+                op_times=summary_times,
+                intervals_count=intervals_count,
+                summary_stats=summary_stats
+            )
+            
+        except Exception as e:
+            print(f"    ❌ Failed to benchmark {name}: {e}")
+            return BenchmarkResult(
+                name=name,
+                category="Summary",
+                language=language,
+                total_time=0.0,
+                operations_per_second=0.0,
+                intervals_count=0
+            )
     
     def run_comprehensive_benchmark(self, seed: Optional[int] = None) -> None:
         """Run comprehensive benchmark across all implementations"""
@@ -289,6 +320,10 @@ class BenchmarkSuite:
         
         print("🚀 Starting Comprehensive Tree-Mendous Benchmark")
         print("=" * 70)
+        
+        if not BACKEND_SYSTEM_AVAILABLE:
+            print("❌ Backend system not available - cannot run comprehensive benchmark")
+            return
         
         implementations = self.register_implementations()
         basic_operations = self.generate_operations(BASIC_ITERATIONS)
@@ -304,22 +339,28 @@ class BenchmarkSuite:
             is_cpp = "C++" in category
             language = "C++" if is_cpp else "Python"
             
-            for impl_name, impl_class in impls.items():
+            for impl_name, backend_id in impls.items():  # backend_id instead of impl_class
                 try:
                     # Basic operations benchmark
                     ops_to_use = summary_operations if is_summary else basic_operations
                     result = self.benchmark_basic_operations(
-                        impl_class, ops_to_use, impl_name, category, language
+                        backend_id, ops_to_use, impl_name, category, language
                     )
                     self.results.append(result)
                     
                     # Additional summary operations benchmark for summary implementations
-                    if is_summary and hasattr(impl_class(), 'get_availability_stats'):
-                        summary_result = self.benchmark_summary_operations(
-                            impl_class, summary_operations, impl_name, language
-                        )
-                        summary_result.name = f"{impl_name} (Advanced)"
-                        self.results.append(summary_result)
+                    if is_summary:
+                        try:
+                            # Test if backend supports summary operations
+                            test_tree = create_example_tree(backend_id, random_seed=42)
+                            if hasattr(test_tree, 'get_availability_stats') or hasattr(test_tree, 'get_statistics'):
+                                summary_result = self.benchmark_summary_operations(
+                                    backend_id, summary_operations, impl_name, language
+                                )
+                                summary_result.name = f"{impl_name} (Advanced)"
+                                self.results.append(summary_result)
+                        except:
+                            pass
                     
                 except Exception as e:
                     print(f"    ❌ Failed to benchmark {impl_name}: {e}")

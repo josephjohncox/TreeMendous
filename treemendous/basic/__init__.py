@@ -12,6 +12,7 @@ from .boundary import IntervalManager
 from .segment import SegmentTreeNode, SegmentTree
 from .summary import TreeSummary, SummaryIntervalNode, SummaryIntervalTree
 from .treap import TreapNode, IntervalTreap
+from .boundary_summary import BoundarySummary, BoundarySummaryManager
 
 __all__ = [
     # Base abstractions
@@ -28,6 +29,8 @@ __all__ = [
     
     # Boundary management
     'IntervalManager',
+    'BoundarySummary',
+    'BoundarySummaryManager',
     
     # Segment tree
     'SegmentTreeNode',

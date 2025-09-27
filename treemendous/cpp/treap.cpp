@@ -423,7 +423,7 @@ private:
     TreapNode* select_kth_interval(TreapNode* node, int k) {
         if (!node) return nullptr;
         
-        int left_size = get_size(node->left);
+        int left_size = TreapNode::get_size(node->left);
         
         if (k < left_size) {
             return select_kth_interval(node->left, k);
@@ -483,9 +483,6 @@ private:
                   << " (h=" << node->height << ", s=" << node->subtree_size << ")" << std::endl;
         print_tree_helper(node->left, indent + "    ", "└── ");
     }
-    
-private:
-    std::mt19937 rng;
 };
 
 // Performance-optimized treap with additional features
@@ -503,14 +500,14 @@ public:
         std::sort(sorted_intervals.begin(), sorted_intervals.end());
         
         for (const auto& [start, end] : sorted_intervals) {
-            release_interval(start, end);
+            IntervalTreap::release_interval(start, end);
         }
     }
     
     void bulk_delete(const std::vector<std::pair<int, int>>& intervals) {
         // Process deletions in batches
         for (const auto& [start, end] : intervals) {
-            reserve_interval(start, end);
+            IntervalTreap::reserve_interval(start, end);
         }
     }
     

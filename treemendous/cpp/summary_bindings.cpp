@@ -136,21 +136,21 @@ PYBIND11_MODULE(boundary, m) {
         info["simple_implementations"] = py::list();
         info["summary_implementations"] = py::list();
         
-        py::cast(info["simple_implementations"]).attr("append")("SimpleIntervalManager");
+        info["simple_implementations"].attr("append")("SimpleIntervalManager");
 #ifdef WITH_IC_MANAGER
-        py::cast(info["simple_implementations"]).attr("append")("SimpleICIntervalManager");
+        info["simple_implementations"].attr("append")("SimpleICIntervalManager");
 #endif
         
-        py::cast(info["summary_implementations"]).attr("append")("IntervalManager");
+        info["summary_implementations"].attr("append")("SummaryIntervalManager");
 #ifdef WITH_IC_MANAGER
-        py::cast(info["summary_implementations"]).attr("append")("ICIntervalManager");
+        info["summary_implementations"].attr("append")("SummaryICIntervalManager");
 #endif
         
         info["features"] = py::dict();
-        py::cast(info["features"])["summary_statistics"] = true;
-        py::cast(info["features"])["best_fit_queries"] = true;
-        py::cast(info["features"])["fragmentation_analysis"] = true;
-        py::cast(info["features"])["utilization_monitoring"] = true;
+        info["features"]["summary_statistics"] = true;
+        info["features"]["best_fit_queries"] = true;
+        info["features"]["fragmentation_analysis"] = true;
+        info["features"]["utilization_monitoring"] = true;
         
         return info;
     }, "Get information about available implementations and features");
