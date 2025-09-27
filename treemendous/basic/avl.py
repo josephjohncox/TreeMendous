@@ -3,7 +3,7 @@ from treemendous.basic.base import IntervalNodeBase, IntervalNodeProtocol, Inter
 
 
 
-class IntervalNode(IntervalNodeBase[IntervalNodeProtocol]):
+class IntervalNode(IntervalNodeBase['IntervalNode', None]):
     def __init__(self, start: int, end: int) -> None:
         super().__init__(start, end)
         self.total_length: int = self.length
@@ -26,7 +26,7 @@ class IntervalNode(IntervalNodeBase[IntervalNodeProtocol]):
         return node.height if node else 0
 
 R = TypeVar('R', bound=IntervalNode)
-class IntervalTree(Generic[R], IntervalTreeBase[R]):
+class IntervalTree(Generic[R], IntervalTreeBase[R, None]):
     def __init__(self, node_class: type[R]) -> None:
         super().__init__()
         self.node_class = node_class

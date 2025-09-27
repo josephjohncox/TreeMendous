@@ -1,8 +1,8 @@
 from typing import Optional
-from base import IntervalNodeBase, IntervalTreeBase
+from treemendous.basic.base import IntervalNodeBase, IntervalTreeBase
 
 
-class SegmentTreeNode(IntervalNodeBase['SegmentTreeNode']):
+class SegmentTreeNode(IntervalNodeBase['SegmentTreeNode', None]):
     def __init__(self, start: int, end: int) -> None:
         super().__init__(start, end)
         self.total_length: int = self.length
@@ -15,7 +15,7 @@ class SegmentTreeNode(IntervalNodeBase['SegmentTreeNode']):
         else:
             self.total_length = self.length if self.is_full else 0
 
-class SegmentTree(IntervalTreeBase[SegmentTreeNode]):
+class SegmentTree(IntervalTreeBase[SegmentTreeNode, None]):
     def __init__(self, start: int, end: int) -> None:
         super().__init__(SegmentTreeNode(start, end))
 

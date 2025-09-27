@@ -1,35 +1,48 @@
-[tool.poetry]
+[project]
 name = "treemendous"
 version = "0.1.0"
 description = "Exploring a diverse collection of interval tree implementations across multiple programming languages to identify the most efficient configurations for varied use cases, such as optimizing for query speed, memory usage, or dynamic updates."
-authors = ["Joseph Cox <joseph@codensity.io>"]
-license = "BSD 3-Clause License"
+authors = [{name = "Joseph Cox", email = "joseph@codensity.io"}]
+license = {text = "BSD-3-Clause"}
 readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10", 
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
 
+dependencies = [
+    "sortedcollections>=2.1.0",
+    "sortedcontainers>=2.4.0",
+]
 
-
-[tool.poetry.dependencies]
-python = "^3.9"
-sortedcollections = "^2.1.0"
-sortedcontainers = "^2.4.0"
-
-[tool.poetry.group.dev.dependencies]
-sortedcontainers-stubs = "^2.4.2"
-flameprof = "^0.4"
-
-
-[tool.poetry.group.test.dependencies]
-hypothesis = "^6.119.4"
-pytest = "^8.3.3"
+[project.optional-dependencies]
+dev = [
+    "sortedcontainers-stubs>=2.4.2",
+    "flameprof>=0.4",
+]
+test = [
+    "hypothesis>=6.119.4",
+    "pytest>=8.3.3",
+]
 
 [tool.pytest.ini_options]
 addopts = "--hypothesis-explain -vv"
 
 
 [build-system]
-requires = ["poetry-core>=1.0.0", "pybind11>=2.13.6", "setuptools>=75.6.0"]
-# build-backend = "poetry.core.masonry.api"
+requires = ["setuptools>=75.6.0", "pybind11>=2.13.6", "wheel"]
+build-backend = "setuptools.build_meta"
 
-[tool.poetry.build]
-script = "build.py"
-generate-setup-file = true
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["treemendous*"]
+
+[tool.setuptools.package-data]
+"treemendous.cpp" = ["*.so", "*.pyd"]
