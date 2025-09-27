@@ -18,14 +18,10 @@ from enum import Enum
 
 # Add Tree-Mendous to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / 'treemendous' / 'basic'))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-try:
-    from summary import SummaryIntervalTree
-    print("✅ Tree-Mendous interval trees loaded")
-except ImportError as e:
-    print(f"❌ Failed to load interval trees: {e}")
-    sys.exit(1)
+# Import backend configuration system
+from common.backend_config import parse_backend_args, handle_backend_args, create_example_tree, get_tree_analytics
 
 
 class TaskType(Enum):
@@ -76,11 +72,12 @@ class TaskInstance:
 
 
 class RealTimeScheduler:
-    """Real-time scheduler with interval tree enhancement"""
+    """Real-time scheduler with configurable interval tree backend"""
     
-    def __init__(self, scheduling_algorithm: str = "EDF"):
+    def __init__(self, scheduling_algorithm: str = "EDF", backend: str = "auto"):
         self.algorithm = scheduling_algorithm
-        self.schedule_tree = SummaryIntervalTree()
+        self.backend = backend
+        self.schedule_tree = create_example_tree(backend, random_seed=42)
         self.current_time = 0
         self.hyperperiod = 1
         
@@ -353,7 +350,8 @@ def demo_liu_layland_analysis():
         RealTimeTask(2, "Data Logging", wcet=20, period=100, deadline=100, priority=3),
     ]
     
-    scheduler = RealTimeScheduler("Rate_Monotonic")
+    # Use the selected backend (passed through global variable for simplicity)
+    scheduler = RealTimeScheduler("Rate_Monotonic", backend="auto")
     scheduler.hyperperiod = scheduler.calculate_hyperperiod(tasks)
     
     print("Task set:")
@@ -598,11 +596,19 @@ def demo_multiprocessor_scheduling():
 
 def main():
     """Run all real-time scheduling demonstrations"""
+    # Parse backend configuration
+    args = parse_backend_args("Real-Time Deadline Scheduling with Tree Enhancement")
+    
+    # Handle backend selection
+    selected_backend = handle_backend_args(args)
+    if selected_backend is None:
+        return
+    
     print("⏰ Real-Time Deadline Scheduling with Tree Enhancement")
     print("Demonstrating schedulability analysis and deadline-aware algorithms")
     print("=" * 70)
     
-    random.seed(42)  # Reproducible results
+    random.seed(args.random_seed)  # Use configurable seed
     
     demo_liu_layland_analysis()
     demo_edf_vs_rate_monotonic()

@@ -19,7 +19,11 @@ def build(setup_kwargs: Dict[str, Any], with_ic: bool = False) -> None:
         libraries.append("boost_system")
         extra_link_args.append("-L/opt/homebrew/Cellar/boost/1.86.0_2/lib")
         
-    ext_modules: List[Pybind11Extension] = [
+    # Determine which extensions to build
+    extensions_to_build = []
+    
+    # Always build the original boundary implementation (known to work)
+    extensions_to_build.append(
         Pybind11Extension(
             "treemendous.cpp.boundary",
             ["treemendous/cpp/boundary_bindings.cpp"],
@@ -28,8 +32,55 @@ def build(setup_kwargs: Dict[str, Any], with_ic: bool = False) -> None:
             include_dirs=include_dirs,
             libraries=libraries,
             extra_link_args=extra_link_args,
-        ),
-    ]
+        )
+    )
+    
+    # Build treap if requested
+    import os
+    if os.environ.get('BUILD_TREAP', '1') == '1':
+        extensions_to_build.append(
+            Pybind11Extension(
+                "treemendous.cpp.treap",
+                ["treemendous/cpp/treap_bindings.cpp"],
+                cxx_std=20,
+                extra_compile_args=compile_args,
+                include_dirs=include_dirs,
+                libraries=libraries,
+                extra_link_args=extra_link_args,
+            )
+        )
+    
+    # Build boundary summary if requested
+    if os.environ.get('BUILD_BOUNDARY_SUMMARY', '1') == '1':
+        print("🔧 Adding boundary summary extension to build...")
+        extensions_to_build.append(
+            Pybind11Extension(
+                "treemendous.cpp.boundary_summary",
+                ["treemendous/cpp/boundary_summary_bindings.cpp"],
+                cxx_std=20,
+                extra_compile_args=compile_args,
+                include_dirs=include_dirs,
+                libraries=libraries,
+                extra_link_args=extra_link_args,
+            )
+        )
+        print("✅ Boundary summary extension added")
+    
+    # Build summary enhanced implementations if requested
+    if os.environ.get('BUILD_SUMMARY', '0') == '1':
+        extensions_to_build.append(
+            Pybind11Extension(
+                "treemendous.cpp.summary",
+                ["treemendous/cpp/summary_bindings.cpp"],
+                cxx_std=20,
+                extra_compile_args=compile_args + ["-DWITH_SUMMARY_STATS"],
+                include_dirs=include_dirs,
+                libraries=libraries,
+                extra_link_args=extra_link_args,
+            )
+        )
+    
+    ext_modules: List[Pybind11Extension] = extensions_to_build
 
     distribution = Distribution({
         "name": "treemendous",

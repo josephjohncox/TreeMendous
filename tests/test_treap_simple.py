@@ -58,7 +58,6 @@ def test_basic_treap_functionality():
     assert stats['balance_factor'] > 0
     print(f"✓ Statistics: height={stats['height']}, balance={stats['balance_factor']:.2f}")
     
-    return True
 
 
 def test_treap_operations():
@@ -104,7 +103,6 @@ def test_treap_operations():
     assert merged.get_tree_size() == original_size
     print("✓ Merge operation works correctly")
     
-    return True
 
 
 def test_treap_probabilistic_balance():
@@ -137,7 +135,6 @@ def test_treap_probabilistic_balance():
     assert avg_height < 3 * expected_height, f"Tree too unbalanced: {avg_height} vs expected {expected_height}"
     print("✓ Probabilistic balance verified (within tolerance)")
     
-    return True
 
 
 def test_treap_performance():
@@ -189,7 +186,6 @@ def test_treap_performance():
     assert ops_per_second > 1000, f"Performance too slow: {ops_per_second:.0f} ops/sec"
     print("✓ Performance test passed")
     
-    return True
 
 
 def test_treap_correctness():
@@ -229,7 +225,6 @@ def test_treap_correctness():
         assert treap.verify_treap_properties(), "Treap properties should still be valid"
         print("✓ Interval finding test completed (no suitable interval, but treap valid)")
     
-    return True
 
 
 def main():
@@ -270,7 +265,6 @@ def main():
         print(f"   • BST and heap property maintenance")
         print(f"   • Correct interval merging and splitting")
         print(f"   • Random sampling and overlap queries")
-        return True
     else:
         print(" ❌ Some tests failed.")
         return False

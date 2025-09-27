@@ -50,7 +50,6 @@ def test_basic_functionality():
     print(f"✓ Statistics: {stats['utilization']*100:.0f}% utilization, {stats['fragmentation']*100:.0f}% fragmentation")
     # Now utilization should be > 0 since we're tracking occupied space correctly
     
-    return True
 
 
 def test_best_fit_queries():
@@ -79,7 +78,6 @@ def test_best_fit_queries():
     assert end - start == expected_size
     print(f"✓ Found largest slot: [{start}, {end}] (size: {end-start})")
     
-    return True
 
 
 def test_tree_summary_merging():
@@ -108,7 +106,6 @@ def test_tree_summary_merging():
     assert merged.latest_free_end == 25
     print("✓ Multi-interval merging works")
     
-    return True
 
 
 def test_scheduling_scenario():
@@ -151,7 +148,6 @@ def test_scheduling_scenario():
     else:
         print("! No 1-hour slot available (might be expected due to fragmentation)")
     
-    return True
 
 
 def main():
@@ -189,7 +185,6 @@ def main():
         print(f"   • Real-time fragmentation analysis")
         print(f"   • Efficient scheduling operations")
         print(f"   • O(1) utilization monitoring")
-        return True
     else:
         print(" ❌ Some tests failed.")
         return False

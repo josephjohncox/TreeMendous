@@ -161,18 +161,50 @@ pip install ortools  # For CP-SAT examples
 pip install numpy    # For numerical computations
 ```
 
+### **Backend Selection**
+All examples support switching between Python and C++ implementations:
+
+```bash
+# Auto-select best available backend
+python examples/cp_sat_applications/job_shop_scheduling.py --backend=auto
+
+# Use specific backend
+python examples/deadline_scheduling/realtime_scheduler.py --backend=cpp_summary
+python examples/deadline_scheduling/realtime_scheduler.py --backend=py_treap
+
+# List available backends
+python examples/backend_comparison_demo.py --list-backends
+
+# Compare backend performance
+python examples/backend_comparison_demo.py --benchmark-backends
+```
+
+**Available Backends**:
+- `py_summary`: Python summary trees (baseline, comprehensive analytics)
+- `py_treap`: Python treaps (probabilistic balancing, random sampling)
+- `py_boundary`: Python boundary manager (simple, SortedDict-based)
+- `cpp_summary`: C++ summary boundary (3.5x faster, comprehensive analytics)
+- `cpp_treap`: C++ treap (5x faster, probabilistic balancing)
+- `cpp_simple`: C++ simple boundary (2.5x faster, minimal overhead)
+
 ### **Quick Start**
 ```bash
-# Run all examples in sequence
+# Run all examples with auto backend selection
 just run-examples
 
-# Run specific category
+# Run examples with specific backend
+just run-examples-with-backend cpp_summary   # Use C++ for performance
+just run-examples-with-backend py_treap      # Use treaps for randomization
+
+# Backend management commands
+just list-backends          # Show available implementations
+just benchmark-backends     # Performance comparison
+just demo-backends          # Backend switching demo
+
+# Run specific categories
 python examples/randomized_algorithms/treap_implementation.py
-python examples/cp_sat_applications/job_shop_scheduling.py
-python examples/deadline_scheduling/realtime_scheduler.py
-python examples/bellman_iteration/queue_network_optimization.py
-python examples/practical_applications/manufacturing_scheduler.py
-python examples/practical_applications/cloud_resource_manager.py
+python examples/cp_sat_applications/job_shop_scheduling.py --backend=cpp_summary
+python examples/deadline_scheduling/realtime_scheduler.py --backend=py_treap
 ```
 
 ### **Example Output Interpretation**

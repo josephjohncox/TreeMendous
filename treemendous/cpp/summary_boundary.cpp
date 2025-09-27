@@ -316,5 +316,5 @@ private:
     }
 };
 
-// Alias for backward compatibility
-using IntervalManager = SummaryIntervalManager;
+// Note: IntervalManager alias removed to avoid conflict with boundary.cpp
+// Use SummaryIntervalManager directly

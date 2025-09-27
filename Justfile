@@ -2,7 +2,7 @@
 
 # Install dependencies
 install:
-    uv sync
+    uv sync --all-extras
 
 # Install development dependencies  
 install-dev:
@@ -21,6 +21,42 @@ clean:
 build:
     uv build
 
+# Build C++ extensions (treap only)
+build-cpp-treap: install
+    @echo "🔧 Building C++ treap extension..."
+    BUILD_TREAP=1 BUILD_SUMMARY=0 uv run python build.py
+    @echo "✅ C++ treap built"
+
+# Build C++ extensions (boundary only - safe fallback)
+build-cpp-boundary: install
+    @echo "🔧 Building C++ boundary extension..."
+    BUILD_TREAP=0 BUILD_SUMMARY=0 BUILD_BOUNDARY_SUMMARY=0 uv run python build.py
+    @echo "✅ C++ boundary built"
+
+# Build C++ boundary summary extension  
+build-cpp-boundary-summary: install
+    @echo "🔧 Building C++ boundary summary extension..."
+    BUILD_TREAP=0 BUILD_SUMMARY=0 BUILD_BOUNDARY_SUMMARY=1 uv run python build.py
+    @echo "✅ C++ boundary summary built"
+
+# Build C++ extensions (summary only)
+build-cpp-summary: install
+    @echo "🔧 Building C++ summary extensions..."
+    BUILD_TREAP=0 BUILD_SUMMARY=1 uv run python build.py
+    @echo "✅ C++ summary extensions built"
+
+# Build all C++ extensions
+build-cpp: install
+    @echo "🔧 Building all C++ extensions..."
+    BUILD_TREAP=1 BUILD_SUMMARY=1 BUILD_BOUNDARY_SUMMARY=1 uv run python build.py
+    @echo "✅ All C++ extensions built"
+
+# Build C++ extensions with Boost ICL support
+build-cpp-full: install
+    @echo "🔧 Building C++ extensions with Boost ICL..."
+    BUILD_TREAP=1 BUILD_SUMMARY=1 TREE_MENDOUS_WITH_ICL=1 uv run python build.py
+    @echo "✅ C++ extensions built with ICL support"
+
 # Run tests with pytest
 test:
     uv run pytest
@@ -33,6 +69,11 @@ test-hypothesis:
 test-treap:
     uv run pytest tests/unit/hypothesis/test_treap.py -v
     python tests/unit/hypothesis/test_treap_cpp.py
+
+# Run boundary summary tests specifically
+test-boundary-summary:
+    uv run pytest tests/unit/hypothesis/test_boundary_summary.py -v
+    uv run python tests/test_boundary_summary_simple.py
 
 # Run simple performance tests (no dependencies)
 test-perf-simple:
@@ -92,14 +133,33 @@ validate: test-perf-simple test-treap-simple check
 test-treap-simple:
     python tests/test_treap_simple.py
 
-# Run examples
+# Run examples with auto backend selection
 run-examples:
-    @echo "🚀 Running Tree-Mendous Examples..."
+    @echo "🚀 Running Tree-Mendous Examples (auto backend)..."
     python examples/randomized_algorithms/treap_implementation.py
     @echo ""
-    python examples/deadline_scheduling/realtime_scheduler.py
+    python examples/deadline_scheduling/realtime_scheduler.py --backend=auto
     @echo ""
     python examples/bellman_iteration/queue_network_optimization.py
+
+# Run examples with specific backend
+run-examples-with-backend backend:
+    @echo "🚀 Running Tree-Mendous Examples ({{backend}} backend)..."
+    python examples/cp_sat_applications/job_shop_scheduling.py --backend={{backend}}
+    @echo ""
+    python examples/deadline_scheduling/realtime_scheduler.py --backend={{backend}}
+
+# Show backend comparison (comprehensive)
+demo-backend-comparison:
+    python examples/backend_comparison_demo.py
+
+# List available backends  
+list-backends:
+    python examples/backend_switching_demo.py --list-backends
+
+# Benchmark backends
+benchmark-backends:
+    python examples/backend_comparison_demo.py --benchmark-backends
 
 # Run specific example category
 run-examples-randomized:
@@ -119,6 +179,25 @@ run-examples-manufacturing:
 
 run-examples-cloud:
     python examples/practical_applications/cloud_resource_manager.py
+
+# Backend switching demonstrations
+demo-backends:
+    python examples/backend_switching_demo.py
+
+demo-backends-treap:
+    python examples/backend_switching_demo.py --backend=py_treap
+
+demo-backends-cpp:
+    python examples/backend_switching_demo.py --backend=cpp_boundary
+
+demo-backends-summary:
+    python examples/backend_switching_demo.py --backend=py_summary
+
+list-backends-switch:
+    python examples/backend_switching_demo.py --list-backends
+
+benchmark-backends-switch:
+    python examples/backend_switching_demo.py --benchmark-backends
 
 # Show project status
 status:

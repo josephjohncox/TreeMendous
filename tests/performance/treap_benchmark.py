@@ -17,11 +17,34 @@ from typing import List, Tuple, Dict, Any, Optional
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / 'treemendous' / 'basic'))
+sys.path.insert(0, str(project_root / 'examples'))
 
+# Use backend management system
+try:
+    from common.backend_config import get_backend_manager, create_example_tree, get_tree_analytics
+    backend_manager = get_backend_manager()
+    available_backends = backend_manager.get_available_backends()
+    BACKEND_SYSTEM_AVAILABLE = True
+    print("✅ Backend management system loaded")
+    
+    # Print available backends for treap testing
+    treap_backends = {k: v for k, v in available_backends.items() if 'treap' in k.lower()}
+    if treap_backends:
+        print(f"✅ Treap backends available: {list(treap_backends.keys())}")
+    else:
+        print("⚠️  No treap backends found")
+        
+except ImportError as e:
+    print(f"❌ Backend system failed: {e}")
+    BACKEND_SYSTEM_AVAILABLE = False
+    backend_manager = None
+    available_backends = {}
+
+# Fallback: Direct imports for backward compatibility
 try:
     from treap import IntervalTreap as PyTreap
     py_treap_available = True
-    print("✅ Python Treap loaded")
+    print("✅ Python Treap loaded (direct)")
 except ImportError as e:
     print(f"❌ Python Treap failed: {e}")
     PyTreap = None
@@ -30,21 +53,11 @@ except ImportError as e:
 try:
     from summary import SummaryIntervalTree as PyTree
     py_tree_available = True
-    print("✅ Python Summary Tree loaded")
+    print("✅ Python Summary Tree loaded (direct)")
 except ImportError as e:
     print(f"❌ Python Summary Tree failed: {e}")
     PyTree = None
     py_tree_available = False
-
-# Try C++ implementations
-try:
-    from treemendous.cpp.treap import IntervalTreap as CppTreap
-    cpp_treap_available = True
-    print("✅ C++ Treap loaded")
-except ImportError as e:
-    print(f"⚠️  C++ Treap not available: {e}")
-    CppTreap = None
-    cpp_treap_available = False
 
 
 def generate_test_operations(num_ops: int, operation_mix: Dict[str, float] = None) -> List[Tuple[str, int, int]]:
@@ -67,90 +80,127 @@ def generate_test_operations(num_ops: int, operation_mix: Dict[str, float] = Non
 
 
 def benchmark_treap_vs_others(num_operations: int = 10_000) -> Dict[str, Dict]:
-    """Compare treap performance with other implementations"""
+    """Compare treap performance with other implementations using backend system"""
     print(f"\n🏁 Treap vs Other Implementations ({num_operations:,} operations)")
     print("=" * 60)
     
     operations = generate_test_operations(num_operations)
     results = {}
     
-    # Available implementations
-    implementations = {}
-    if py_treap_available:
-        implementations["Python Treap"] = PyTreap
-    if py_tree_available:
-        implementations["Python Summary Tree"] = PyTree
-    if cpp_treap_available:
-        implementations["C++ Treap"] = CppTreap
-    
-    for name, impl_class in implementations.items():
-        print(f"  🔄 Testing {name}...")
-        
-        # Initialize
-        if name == "Python Treap":
-            tree = impl_class(random_seed=42)
-        elif name == "C++ Treap":
-            tree = impl_class(42)  # C++ takes seed as constructor arg
-        else:
-            tree = impl_class()
-        
-        tree.release_interval(0, 1_000_000)
-        
-        # Benchmark operations
-        op_times = {'reserve': [], 'release': [], 'find': []}
-        start_total = time.perf_counter()
-        
-        for op, start, end in operations:
-            start_time = time.perf_counter()
+    # Use backend system if available
+    if BACKEND_SYSTEM_AVAILABLE:
+        # Test all available backends
+        for backend_id, backend_info in available_backends.items():
+            print(f"  🔄 Testing {backend_info.name}...")
             
             try:
-                if op == 'reserve':
-                    tree.reserve_interval(start, end)
-                elif op == 'release':
-                    tree.release_interval(start, end)
-                elif op == 'find':
-                    if hasattr(tree, 'find_interval'):
-                        tree.find_interval(start, end - start)
-                    else:
+                # Create tree using backend system
+                tree = create_example_tree(backend_id, random_seed=42)
+                tree.release_interval(0, 1_000_000)
+                
+                # Benchmark operations
+                op_times = {'reserve': [], 'release': [], 'find': []}
+                start_total = time.perf_counter()
+                
+                for op, start, end in operations:
+                    start_time = time.perf_counter()
+                    
+                    try:
+                        if op == 'reserve':
+                            tree.reserve_interval(start, end)
+                        elif op == 'release':
+                            tree.release_interval(start, end)
+                        elif op == 'find':
+                            if hasattr(tree, 'find_interval'):
+                                tree.find_interval(start, end - start)
+                            elif hasattr(tree, 'find_best_fit'):
+                                tree.find_best_fit(end - start)
+                            else:
+                                continue
+                        
+                        op_times[op].append(time.perf_counter() - start_time)
+                        
+                    except (ValueError, AttributeError):
                         continue
                 
-                op_times[op].append(time.perf_counter() - start_time)
+                total_time = time.perf_counter() - start_total
                 
-            except (ValueError, AttributeError):
-                continue
+                # Calculate statistics
+                avg_times = {}
+                total_ops = 0
+                for op, times in op_times.items():
+                    if times:
+                        avg_times[op] = statistics.mean(times) * 1000  # Convert to ms
+                        total_ops += len(times)
+                
+                ops_per_second = total_ops / total_time if total_time > 0 else 0
+                
+                # Get tree analytics using unified system
+                tree_stats = get_tree_analytics(tree)
+                
+                results[backend_info.name] = {
+                    'backend_id': backend_id,
+                    'total_time': total_time,
+                    'ops_per_second': ops_per_second,
+                    'avg_times_ms': avg_times,
+                    'tree_stats': tree_stats,
+                    'language': backend_info.language,
+                    'performance_tier': backend_info.performance_tier
+                }
+                
+                print(f"    {ops_per_second:>8,.0f} ops/sec ({backend_info.language})")
+                
+            except Exception as e:
+                print(f"    ❌ Failed: {e}")
+                results[backend_info.name] = {'error': str(e)}
+    
+    else:
+        # Fallback to direct imports
+        implementations = {}
+        if py_treap_available:
+            implementations["Python Treap"] = PyTreap
+        if py_tree_available:
+            implementations["Python Summary Tree"] = PyTree
         
-        total_time = time.perf_counter() - start_total
-        
-        # Calculate statistics
-        avg_times = {}
-        total_ops = 0
-        for op, times in op_times.items():
-            if times:
-                avg_times[op] = statistics.mean(times) * 1000  # Convert to ms
-                total_ops += len(times)
-        
-        ops_per_second = total_ops / total_time if total_time > 0 else 0
-        
-        # Get tree statistics
-        tree_stats = {}
-        if hasattr(tree, 'get_statistics'):
-            tree_stats = tree.get_statistics()
-        elif hasattr(tree, 'get_availability_stats'):
-            stats = tree.get_availability_stats()
-            tree_stats = {
-                'utilization': stats['utilization'],
-                'fragmentation': stats['fragmentation'],
-                'total_free': stats['total_free']
+        for name, impl_class in implementations.items():
+            print(f"  🔄 Testing {name}...")
+            
+            # Initialize (fallback logic)
+            if name == "Python Treap":
+                tree = impl_class(random_seed=42)
+            else:
+                tree = impl_class()
+            
+            tree.release_interval(0, 1_000_000)
+            
+            # Benchmark operations (simplified fallback)
+            start_total = time.perf_counter()
+            successful_ops = 0
+            
+            for op, start, end in operations:
+                try:
+                    if op == 'reserve':
+                        tree.reserve_interval(start, end)
+                        successful_ops += 1
+                    elif op == 'release':
+                        tree.release_interval(start, end)
+                        successful_ops += 1
+                    elif op == 'find' and hasattr(tree, 'find_interval'):
+                        tree.find_interval(start, end - start)
+                        successful_ops += 1
+                except (ValueError, AttributeError):
+                    continue
+            
+            total_time = time.perf_counter() - start_total
+            ops_per_second = successful_ops / total_time if total_time > 0 else 0
+            
+            results[name] = {
+                'total_time': total_time,
+                'ops_per_second': ops_per_second,
+                'language': 'Python'
             }
-        
-        results[name] = {
-            'total_time': total_time,
-            'ops_per_second': ops_per_second,
-            'avg_times_ms': avg_times,
-            'tree_stats': tree_stats
-        }
-        
-        print(f"    {ops_per_second:>8,.0f} ops/sec")
+            
+            print(f"    {ops_per_second:>8,.0f} ops/sec")
     
     return results
 

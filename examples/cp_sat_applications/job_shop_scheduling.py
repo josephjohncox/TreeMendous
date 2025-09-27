@@ -15,7 +15,10 @@ import random
 
 # Add Tree-Mendous to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / 'treemendous' / 'basic'))
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Import backend configuration system
+from common.backend_config import parse_backend_args, handle_backend_args, create_example_tree, get_tree_analytics
 
 try:
     from ortools.sat.python import cp_model
@@ -23,13 +26,6 @@ try:
 except ImportError:
     ORTOOLS_AVAILABLE = False
     print("⚠️  OR-Tools not available - using simulation mode")
-
-try:
-    from summary import SummaryIntervalTree
-    print("✅ Tree-Mendous interval trees loaded")
-except ImportError as e:
-    print(f"❌ Failed to load interval trees: {e}")
-    sys.exit(1)
 
 
 @dataclass
@@ -51,16 +47,19 @@ class Machine:
 
 
 class JobShopCPSAT:
-    """Job shop scheduler using CP-SAT with interval tree enhancement"""
+    """Job shop scheduler using CP-SAT with configurable interval tree backend"""
     
-    def __init__(self, machines: List[Machine], horizon: int = 1000):
+    def __init__(self, machines: List[Machine], horizon: int = 1000, backend: str = "auto"):
         self.machines = machines
         self.horizon = horizon
-        self.machine_trees = {m.id: SummaryIntervalTree() for m in machines}
+        self.backend = backend
         
-        # Initialize available time for all machines
-        for tree in self.machine_trees.values():
+        # Create machine trees using specified backend
+        self.machine_trees = {}
+        for machine in machines:
+            tree = create_example_tree(backend, random_seed=42)
             tree.release_interval(0, horizon)
+            self.machine_trees[machine.id] = tree
     
     def solve_job_shop(self, jobs: List[Job]) -> Optional[Dict]:
         """Solve job shop scheduling problem using CP-SAT"""
@@ -199,9 +198,10 @@ class JobShopCPSAT:
         print(f"  Makespan: {solution['makespan']}")
         
         # Reset trees and populate with solution
-        for tree in self.machine_trees.values():
-            tree = SummaryIntervalTree()
+        for machine_id in self.machine_trees.keys():
+            tree = create_example_tree(self.backend, random_seed=42)
             tree.release_interval(0, self.horizon)
+            self.machine_trees[machine_id] = tree
         
         machine_schedules = {m.id: [] for m in self.machines}
         
@@ -217,22 +217,23 @@ class JobShopCPSAT:
                 # Reserve interval in machine's tree
                 self.machine_trees[machine_id].reserve_interval(start_time, end_time)
         
-        # Analyze using tree summaries
+        # Analyze using backend-agnostic tree analytics
         print("\n  Machine utilization analysis:")
         total_utilization = 0
         total_fragmentation = 0
         
         for machine in self.machines:
-            stats = self.machine_trees[machine.id].get_availability_stats()
-            utilization = stats['utilization']
-            fragmentation = stats['fragmentation']
+            analytics = get_tree_analytics(self.machine_trees[machine.id])
+            utilization = analytics.get('utilization', 0)
+            fragmentation = analytics.get('fragmentation', 0)
+            free_chunks = analytics.get('free_chunks', analytics.get('tree_size', 0))
             
             total_utilization += utilization
             total_fragmentation += fragmentation
             
             print(f"    Machine {machine.id} ({machine.name}): "
                   f"util={utilization:.1%}, frag={fragmentation:.1%}, "
-                  f"chunks={stats['free_chunks']}")
+                  f"chunks={free_chunks}")
         
         avg_utilization = total_utilization / len(self.machines)
         avg_fragmentation = total_fragmentation / len(self.machines)
@@ -264,7 +265,8 @@ def demo_flexible_job_shop():
         Job(3, [(1, 18), (3, 15), (4, 9)], due_date=85),   # CNC → Mill → Drill
     ]
     
-    scheduler = JobShopCPSAT(machines, horizon=200)
+    # Use same backend as main function (get from global if needed)
+    scheduler = JobShopCPSAT(machines, horizon=200, backend="py_summary")
     
     print("Flexible job shop configuration:")
     for machine in machines:
@@ -310,7 +312,7 @@ def demo_multi_objective_optimization():
         Job(3, [(0, 15), (2, 10), (1, 16)], due_date=55, priority=2),
     ]
     
-    scheduler = JobShopCPSAT(machines, horizon=150)
+    scheduler = JobShopCPSAT(machines, horizon=150, backend="py_summary")
     
     print("Multi-objective optimization:")
     print("  Objective 1: Minimize makespan")
@@ -343,11 +345,11 @@ def demo_multi_objective_optimization():
                     tardiness = completion_time - job.due_date
                     total_tardiness += job.priority * tardiness
             
-            # Calculate machine idle time using tree summaries
+            # Calculate machine idle time using backend-agnostic analytics
             total_idle_time = 0
             for machine in machines:
-                stats = scheduler.machine_trees[machine.id].get_availability_stats()
-                idle_time = stats['total_free']
+                analytics = get_tree_analytics(scheduler.machine_trees[machine.id])
+                idle_time = analytics.get('total_free', analytics.get('total_available', 0))
                 total_idle_time += idle_time
             
             print(f"    Makespan: {makespan}")
@@ -430,6 +432,14 @@ def demo_tree_guided_constraint_generation():
 
 def main():
     """Run all CP-SAT demonstrations"""
+    # Parse backend configuration
+    args = parse_backend_args("CP-SAT Job Shop Scheduling with Tree Enhancement")
+    
+    # Handle backend selection
+    selected_backend = handle_backend_args(args)
+    if selected_backend is None:
+        return
+    
     print("🔧 CP-SAT Job Shop Scheduling with Tree Enhancement")
     print("Demonstrating constraint programming with interval tree integration")
     print("=" * 70)
@@ -455,8 +465,8 @@ def main():
         operations_str = " → ".join([f"{machines[mid].name}({pt})" for mid, pt in job.operations])
         print(f"  Job {job.id}: {operations_str} (due: {job.due_date})")
     
-    # Solve and analyze
-    scheduler = JobShopCPSAT(machines, horizon=100)
+    # Solve and analyze using selected backend
+    scheduler = JobShopCPSAT(machines, horizon=100, backend=selected_backend)
     solution = scheduler.solve_job_shop(jobs)
     scheduler.analyze_solution_with_trees(solution, jobs)
     
