@@ -1,6 +1,6 @@
 from typing import Optional
 
-from treemendous.basic.base import IntervalNodeProtocol
+from treemendous.basic.base import IntervalManagerProtocol, IntervalNodeProtocol
 from treemendous.basic.avl import IntervalNode, IntervalTree
 
 class EarliestIntervalNode(IntervalNode, IntervalNodeProtocol):
@@ -28,7 +28,7 @@ class EarliestIntervalNode(IntervalNode, IntervalNodeProtocol):
             self.max_end = max(self.max_end, self.right.max_end)
             self.max_length = max(self.max_length, self.right.max_length)
 
-class EarliestIntervalTree(IntervalTree[EarliestIntervalNode]):
+class EarliestIntervalTree(IntervalTree[EarliestIntervalNode], IntervalManagerProtocol):
     def __init__(self) -> None:
         super().__init__(EarliestIntervalNode)
 
