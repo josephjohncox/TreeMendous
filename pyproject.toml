@@ -45,6 +45,7 @@ visualization = [
     "numpy>=1.21.0",
     "jupyter>=1.0.0",
     "networkx>=3.5.0",
+    "scipy>=1.16.0",
 ]
 examples = [
     "ortools>=9.14.6206",
