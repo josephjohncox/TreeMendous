@@ -15,13 +15,13 @@
 
 namespace py = pybind11;
 
-PYBIND11_MODULE(boundary, m) {
+PYBIND11_MODULE(summary, m) {
     m.doc() = "Tree-Mendous C++ Interval Tree Implementations with Summary Statistics";
     
     // ==== SIMPLE IMPLEMENTATIONS ====
     
     // Basic IntervalManager (std::map based)
-    py::class_<IntervalManager>(m, "SimpleIntervalManager", 
+    py::class_<IntervalManager>(m, "SummarySimpleIntervalManager", 
         "Basic interval manager using std::map - optimized for simplicity")
         .def(py::init<>())
         .def("release_interval", &IntervalManager::release_interval,
@@ -136,7 +136,7 @@ PYBIND11_MODULE(boundary, m) {
         info["simple_implementations"] = py::list();
         info["summary_implementations"] = py::list();
         
-        info["simple_implementations"].attr("append")("SimpleIntervalManager");
+        info["simple_implementations"].attr("append")("SummarySimpleIntervalManager");
 #ifdef WITH_IC_MANAGER
         info["simple_implementations"].attr("append")("SimpleICIntervalManager");
 #endif

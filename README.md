@@ -52,6 +52,26 @@ tree = create_interval_tree("cpp_boundary") # Force C++ boundary
 uv sync
 ```
 
+## Testing & Validation
+
+Tree-Mendous includes a **unified testing framework** that automatically discovers and validates all implementations:
+
+```bash
+# Unified cross-implementation testing  
+just test               # Complete test suite (197 tests, 8 implementations)
+just test-unified       # Cross-implementation validation (64 passed, 34 skipped)
+
+# Implementation-specific tests
+just test-treap         # Treap-specific tests  
+just test-boundary-summary  # Boundary summary tests
+just test-hypothesis    # Property-based testing
+```
+
+The unified testing system discovers **8 implementations** automatically:
+- **Python** (5): AVL, Boundary, Summary, Treap, Boundary Summary
+- **C++** (3): Boundary, Treap, Boundary Summary
+- **Specialized**: ICL variants (when compiled with `just build-cpp-full`)
+
 ## Performance Testing
 
 ```bash

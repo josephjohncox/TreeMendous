@@ -45,9 +45,15 @@ PYBIND11_MODULE(treap, m) {
         .def("reserve_interval", &IntervalTreap::reserve_interval,
              py::arg("start"), py::arg("end"),
              "Remove interval from available space")
-        .def("find_interval", &IntervalTreap::find_interval,
-             py::arg("start"), py::arg("length"),
-             "Find available interval of given length")
+        .def("find_interval", [](IntervalTreap& self, int start, int length) -> py::object {
+            auto result = self.find_interval(start, length);
+            if (result.has_value()) {
+                return py::make_tuple(result->first, result->second);
+            } else {
+                return py::none();
+            }
+        }, py::arg("start"), py::arg("length"),
+           "Find available interval of given length")
         .def("get_intervals", &IntervalTreap::get_intervals,
              "Get all available intervals")
         .def("get_total_available_length", &IntervalTreap::get_total_available_length,

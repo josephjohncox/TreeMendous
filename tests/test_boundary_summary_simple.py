@@ -229,6 +229,9 @@ def test_py_cpp_equivalence():
     
     print("\nTesting Python vs C++ equivalence...")
     
+    from boundary_summary import BoundarySummaryManager
+    from treemendous.cpp.boundary_summary import BoundarySummaryManager as CppBoundarySummaryManager
+    
     py_manager = BoundarySummaryManager()
     cpp_manager = CppBoundarySummaryManager()
     
