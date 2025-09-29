@@ -23,7 +23,7 @@ except ImportError as e:
     PY_AVAILABLE = False
 
 try:
-    from treemendous.cpp.boundary_summary import BoundarySummaryManager as CppBoundarySummaryManager
+    from treemendous.cpp import BoundarySummaryManager as CppBoundarySummaryManager
     print("✅ C++ Boundary Summary loaded successfully")
     CPP_AVAILABLE = True
 except ImportError as e:
@@ -228,7 +228,7 @@ def test_py_cpp_equivalence():
     print("\nTesting Python vs C++ equivalence...")
     
     from boundary_summary import BoundarySummaryManager
-    from treemendous.cpp.boundary_summary import BoundarySummaryManager as CppBoundarySummaryManager
+    from treemendous.cpp import BoundarySummaryManager as CppBoundarySummaryManager
     
     py_manager = BoundarySummaryManager()
     cpp_manager = CppBoundarySummaryManager()

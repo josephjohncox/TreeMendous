@@ -27,7 +27,7 @@ except ImportError as e:
 
 # Import C++ implementation
 try:
-    from treemendous.cpp.boundary_summary import BoundarySummaryManager as CppBoundarySummary
+    from treemendous.cpp import BoundarySummaryManager as CppBoundarySummary
     CPP_BOUNDARY_SUMMARY_AVAILABLE = True
     print("✅ C++ Boundary Summary loaded")
 except ImportError as e:
@@ -260,8 +260,7 @@ def test_boundary_summary_advanced_queries():
         best_fit_50 = manager.find_best_fit(50)
         assert best_fit_50 is not None, f"{impl_name}: Should find 50-unit interval"
         
-        start, end = best_fit_50.start, best_fit_50.end
-        assert end - start == 50, f"{impl_name}: Best fit should be exactly 50 units"
+        assert best_fit_50.length == 50, f"{impl_name}: Best fit should be exactly 50 units"
         
         # Test largest available
         largest = manager.find_largest_available()

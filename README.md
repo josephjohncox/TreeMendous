@@ -52,6 +52,29 @@ tree = create_interval_tree("cpp_boundary") # Force C++ boundary
 uv sync
 ```
 
+## 📚 Documentation & Visualizations
+
+### Core Documentation
+- **[Quick Reference](docs/QUICK_REFERENCE.md)** - One-page guide to get started instantly
+- **[Architecture Guide](docs/ARCHITECTURE_GUIDE.md)** - Deep dive into design patterns and mathematical foundations
+- **[Interval Tree Visualizations](docs/INTERVAL_TREE_VISUALIZATION.md)** - Visual explanations of data structures and algorithms
+- **[Interactive Notebook](docs/interactive_visualization.ipynb)** - Jupyter notebook with matplotlib visualizations
+
+### Practical Examples
+- **[Tree Structure Demo](examples/visualizations/tree_structure_demo.py)** - Interactive demo of all implementations
+- **[Algorithm Analysis](examples/visualizations/algorithm_analysis.py)** - Performance and mathematical analysis
+- **[Backend Comparison](examples/backend_comparison_demo.py)** - Cross-implementation validation
+
+### Run Visualizations
+```bash
+# Interactive demos
+uv run python examples/visualizations/tree_structure_demo.py
+uv run python examples/visualizations/algorithm_analysis.py
+
+# Jupyter notebook
+jupyter notebook docs/interactive_visualization.ipynb
+```
+
 ## Testing & Validation
 
 Tree-Mendous includes a **unified testing framework** that automatically discovers and validates all implementations:

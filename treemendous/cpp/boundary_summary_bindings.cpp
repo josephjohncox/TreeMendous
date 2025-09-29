@@ -28,6 +28,8 @@ PYBIND11_MODULE(boundary_summary, m) {
     
     // IntervalResult structure
     py::class_<IntervalResult>(m, "IntervalResult")
+        .def(py::init<int, int>(), "Construct IntervalResult with start and end")
+        .def(py::init<int, int, int>(), "Construct IntervalResult with start, end, and length")
         .def_readwrite("start", &IntervalResult::start)
         .def_readwrite("end", &IntervalResult::end)
         .def_readwrite("length", &IntervalResult::length)
@@ -80,11 +82,23 @@ PYBIND11_MODULE(boundary_summary, m) {
              "Get total available space")
         
         // Advanced query operations
-        .def("find_best_fit", &BoundarySummaryManager::find_best_fit,
-             py::arg("length"), py::arg("prefer_early") = true,
+        .def("find_best_fit", [](BoundarySummaryManager &self, int length, bool prefer_early) -> py::object {
+            auto result = self.find_best_fit(length, prefer_early);
+            if (result) {
+                return py::cast(*result);
+            } else {
+                return py::none();
+            }
+        }, py::arg("length"), py::arg("prefer_early") = true,
              "Find best-fit interval with preference")
-        .def("find_largest_available", &BoundarySummaryManager::find_largest_available,
-             "Find largest available interval")
+        .def("find_largest_available", [](BoundarySummaryManager &self) -> py::object {
+            auto result = self.find_largest_available();
+            if (result) {
+                return py::cast(*result);
+            } else {
+                return py::none();
+            }
+        }, "Find largest available interval")
         
         // Summary statistics
         .def("get_summary", &BoundarySummaryManager::get_summary,
