@@ -1,6 +1,86 @@
 # Tree-Mendous Examples
 
-Comprehensive examples demonstrating practical applications of Tree-Mendous interval trees across multiple domains including randomized algorithms, constraint programming, real-time systems, and optimization.
+Comprehensive examples demonstrating practical applications of Tree-Mendous interval trees across multiple domains including scheduling, randomized algorithms, constraint programming, real-time systems, and optimization.
+
+---
+
+## 🚀 Quick Start - Interactive Demos
+
+### **[scheduling_visualization.ipynb](scheduling_visualization.ipynb)** - **Meeting Room Scheduling**
+**Step-by-Step Interactive Notebook**
+
+Learn interval tree scheduling with beautiful visualizations.
+
+```bash
+cd examples
+uv run jupyter notebook scheduling_visualization.ipynb
+```
+
+**Features**: Interactive cells, Gantt charts, performance comparison (5 implementations), gap analysis, customizable schedules.
+
+---
+
+### **[queueing_optimization.ipynb](queueing_optimization.ipynb)** ⭐ NEW - **Queue Networks & Dynamic Programming**
+**Production Network Optimization with Bellman Iteration**
+
+Interactive notebook for multi-stage manufacturing with stochastic processing times.
+
+```bash
+cd examples
+uv run jupyter notebook queueing_optimization.ipynb
+```
+
+**Demonstrates**: Dynamic programming, Bellman iteration, stochastic scheduling, policy comparison (FCFS/EDD/Slack/Value), utilization heatmaps.
+
+**Generates**: `queueing_gantt_comparison.png`, `queueing_performance.png`
+
+---
+
+### **[job_shop_cpsat.ipynb](job_shop_cpsat.ipynb)** ⭐ NEW - **Constraint Programming with CP-SAT**
+**Job Shop Scheduling with Google OR-Tools**
+
+Interactive notebook for optimal scheduling using constraint programming.
+
+```bash
+cd examples
+uv run jupyter notebook job_shop_cpsat.ipynb
+```
+
+**Demonstrates**: CP-SAT optimization, precedence constraints, no-overlap constraints, makespan minimization, multi-scale analysis.
+
+**Generates**: `job_shop_gantt.png`, `job_shop_utilization.png`
+
+---
+
+###  **[genetic_algorithm.ipynb](genetic_algorithm.ipynb)** ⭐ NEW - **Evolutionary Optimization**
+**Resource Allocation with Genetic Algorithms**
+
+Interactive notebook for evolutionary approach to resource-constrained scheduling.
+
+```bash
+cd examples
+uv run jupyter notebook genetic_algorithm.ipynb
+```
+
+**Demonstrates**: GA evolution, chromosome encoding, fitness evaluation with trees, selection/crossover/mutation, population diversity, convergence analysis.
+
+**Generates**: `genetic_schedule.png`, `genetic_convergence.png`
+
+---
+
+### **[small_world_networks.ipynb](small_world_networks.ipynb)** ⭐ NEW - **Network Topology + Scheduling**
+**Small World Networks with Interval Tree Scheduling**
+
+Interactive notebook exploring the intersection of network topology and temporal scheduling.
+
+```bash
+cd examples
+uv run jupyter notebook small_world_networks.ipynb
+```
+
+**Demonstrates**: Watts-Strogatz small world model, network-aware task scheduling, communication delays, topology analysis, distributed coordination.
+
+**Generates**: Network topology plots, Gantt charts with network context, utilization analysis.
 
 ---
 
@@ -353,7 +433,7 @@ We welcome contributions of new examples demonstrating:
 
 ## 📚 **Related Documentation**
 
-- **[Mathematical Analysis](../MATHEMATICAL_ANALYSIS.md)**: Theoretical foundations
+- **[Mathematical Analysis](../docs/MATHEMATICAL_ANALYSIS.md)**: Theoretical foundations
 - **[Temporal Algebras](../docs/TEMPORAL_ALGEBRAS_SCHEDULING.md)**: Process calculi and scheduling theory
 - **[Real-Time Systems](../docs/REALTIME_SYSTEMS_THEORY.md)**: Timing analysis and verification
 - **[Optimization Theory](../docs/OPTIMIZATION_CP_SAT.md)**: Convex/non-convex optimization

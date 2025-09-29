@@ -50,7 +50,7 @@ class BackendManager:
         """Load and register available implementations"""
         
         # Python implementations
-        from summary import SummaryIntervalTree as PySummaryTree
+        from treemendous.basic.summary import SummaryIntervalTree as PySummaryTree
         self.available_backends['py_summary'] = BackendInfo(
             name="Python Summary Tree",
             language="Python",
@@ -61,7 +61,7 @@ class BackendManager:
         )
         self.implementations['py_summary'] = PySummaryTree
         
-        from treap import IntervalTreap as PyTreap
+        from treemendous.basic.treap import IntervalTreap as PyTreap
         self.available_backends['py_treap'] = BackendInfo(
             name="Python Treap",
             language="Python", 
@@ -72,7 +72,7 @@ class BackendManager:
         )
         self.implementations['py_treap'] = PyTreap
         
-        from boundary import IntervalManager as PyBoundary
+        from treemendous.basic.boundary import IntervalManager as PyBoundary
         self.available_backends['py_boundary'] = BackendInfo(
             name="Python Boundary Manager",
             language="Python",
@@ -83,7 +83,7 @@ class BackendManager:
         )
         self.implementations['py_boundary'] = PyBoundary
         
-        from avl_earliest import EarliestIntervalTree as PyAVL
+        from treemendous.basic.avl_earliest import EarliestIntervalTree as PyAVL
         self.available_backends['py_avl'] = BackendInfo(
             name="Python AVL Earliest",
             language="Python",
@@ -94,7 +94,7 @@ class BackendManager:
         )
         self.implementations['py_avl'] = PyAVL
         
-        from boundary_summary import BoundarySummaryManager as PyBoundarySummary
+        from treemendous.basic.boundary_summary import BoundarySummaryManager as PyBoundarySummary
         self.available_backends['py_boundary_summary'] = BackendInfo(
             name="Python Boundary Summary",
             language="Python",
@@ -132,6 +132,35 @@ class BackendManager:
             
         except ImportError:
             pass  # C++ boundary not compiled
+        
+        # C++ optimized implementations (with micro-optimizations)
+        try:
+            from treemendous.cpp.boundary_optimized import IntervalManager as CppBoundaryOptimized
+            self.available_backends['cpp_boundary_optimized'] = BackendInfo(
+                name="C++ Boundary (Optimized)",
+                language="C++",
+                available=True,
+                performance_tier="high_performance",
+                features=["native performance", "small-vector opt", "branch hints"],
+                estimated_speedup=2.5
+            )
+            self.implementations['cpp_boundary_optimized'] = CppBoundaryOptimized
+        except ImportError:
+            pass
+        
+        try:
+            from treemendous.cpp.boundary_summary_optimized import BoundarySummaryManager as CppBoundarySummaryOptimized
+            self.available_backends['cpp_boundary_summary_optimized'] = BackendInfo(
+                name="C++ Boundary Summary (Optimized)",
+                language="C++",
+                available=True,
+                performance_tier="high_performance",
+                features=["native performance", "O(1) analytics", "caching", "small-vector opt"],
+                estimated_speedup=3.0
+            )
+            self.implementations['cpp_boundary_summary_optimized'] = CppBoundarySummaryOptimized
+        except ImportError:
+            pass
         
         # C++ Treap (optional - only if compiled)
         try:

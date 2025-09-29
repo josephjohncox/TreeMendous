@@ -5,7 +5,7 @@ This directory contains comprehensive mathematical analysis and theoretical foun
 ## Documents Overview
 
 ### 📐 **Core Mathematical Analysis**
-- **[MATHEMATICAL_ANALYSIS.md](../MATHEMATICAL_ANALYSIS.md)** - Complete mathematical foundations including category theory, type theory, complexity analysis, and algorithmic engineering principles
+- **[MATHEMATICAL_ANALYSIS.md](MATHEMATICAL_ANALYSIS.md)** - Complete mathematical foundations including category theory, type theory, complexity analysis, and algorithmic engineering principles
 
 ### ⏰ **Temporal and Scheduling Theory**
 - **[TEMPORAL_ALGEBRAS_SCHEDULING.md](TEMPORAL_ALGEBRAS_SCHEDULING.md)** - Process calculi, temporal logic, scheduling algebras, and workflow optimization

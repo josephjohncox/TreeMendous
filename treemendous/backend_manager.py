@@ -297,6 +297,24 @@ class TreeMendousBackendManager:
                 features=["core-operations", "native-performance", "summary-stats", "caching"],
                 constructor_args={}
             ),
+            BackendConfiguration(
+                implementation_id="cpp_boundary_optimized",
+                name="C++ Boundary (Optimized)",
+                language="C++",
+                implementation_type=ImplementationType.BOUNDARY,
+                performance_tier=PerformanceTier.HIGH_PERFORMANCE,
+                features=["core-operations", "native-performance", "small-vector", "branch-hints"],
+                constructor_args={}
+            ),
+            BackendConfiguration(
+                implementation_id="cpp_boundary_summary_optimized",
+                name="C++ Boundary Summary (Optimized)",
+                language="C++",
+                implementation_type=ImplementationType.BOUNDARY,
+                performance_tier=PerformanceTier.HIGH_PERFORMANCE,
+                features=["core-operations", "native-performance", "summary-stats", "caching", "small-vector", "branch-hints"],
+                constructor_args={}
+            ),
         ]
         
         for config in cpp_backends:
@@ -343,6 +361,8 @@ class TreeMendousBackendManager:
             "cpp_boundary": ("treemendous.cpp.boundary", "IntervalManager"),
             "cpp_treap": ("treemendous.cpp.treap", "IntervalTreap"),
             "cpp_boundary_summary": ("treemendous.cpp.boundary_summary", "BoundarySummaryManager"),
+            "cpp_boundary_optimized": ("treemendous.cpp.boundary_optimized", "IntervalManager"),
+            "cpp_boundary_summary_optimized": ("treemendous.cpp.boundary_summary_optimized", "BoundarySummaryManager"),
         }
         
         if config.implementation_id not in module_map:

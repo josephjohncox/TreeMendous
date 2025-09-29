@@ -24,6 +24,8 @@ from treemendous.basic.boundary import IntervalManager
 from treemendous.basic.summary import SummaryIntervalTree
 from treemendous.basic.treap import IntervalTreap
 from treemendous.basic.boundary_summary import BoundarySummaryManager
+from treemendous.basic.avl_earliest import EarliestIntervalTree
+from treemendous.basic.avl import IntervalTree, IntervalNode
 from treemendous.basic.protocols import IntervalResult
 from tests.performance.workload import generate_standard_workload, execute_workload
 
@@ -38,6 +40,18 @@ try:
     CPP_BOUNDARY_SUMMARY_AVAILABLE = True
 except ImportError:
     CPP_BOUNDARY_SUMMARY_AVAILABLE = False
+
+try:
+    from treemendous.cpp.boundary_optimized import IntervalManager as CppBoundaryOptimized
+    CPP_BOUNDARY_OPTIMIZED_AVAILABLE = True
+except ImportError:
+    CPP_BOUNDARY_OPTIMIZED_AVAILABLE = False
+
+try:
+    from treemendous.cpp.boundary_summary_optimized import BoundarySummaryManager as CppBoundarySummaryOptimized
+    CPP_BOUNDARY_SUMMARY_OPTIMIZED_AVAILABLE = True
+except ImportError:
+    CPP_BOUNDARY_SUMMARY_OPTIMIZED_AVAILABLE = False
 
 
 @dataclass
@@ -118,21 +132,30 @@ def run_comprehensive_benchmark(num_operations: int = 10_000) -> List[BenchmarkR
     # Generate unified workload - SAME for all implementations
     operations = generate_standard_workload(num_operations)
     
-    # Define implementations to test
+    # Define ALL implementations to test with clear model names
     implementations = [
-        ("Python Boundary", IntervalManager),
-        ("Python Summary", SummaryIntervalTree),
-        ("Python Treap", lambda: IntervalTreap(random_seed=42)),
-        ("Python BoundarySummary", BoundarySummaryManager),
+        # Python implementations
+        ("Py Boundary", IntervalManager),
+        ("Py AVL", lambda: IntervalTree(IntervalNode)),
+        ("Py AVL Earliest", EarliestIntervalTree),
+        ("Py Summary", SummaryIntervalTree),
+        ("Py Treap", lambda: IntervalTreap(random_seed=42)),
+        ("Py BoundarySummary", BoundarySummaryManager),
     ]
     
-    # Add C++ implementations if available
+    # C++ original implementations
     if CPP_BOUNDARY_AVAILABLE:
         implementations.append(("C++ Boundary", CppBoundary))
     if CPP_TREAP_AVAILABLE:
         implementations.append(("C++ Treap", lambda: CppTreap(42)))
     if CPP_BOUNDARY_SUMMARY_AVAILABLE:
         implementations.append(("C++ BoundarySummary", CppBoundarySummary))
+    
+    # C++ optimized implementations
+    if CPP_BOUNDARY_OPTIMIZED_AVAILABLE:
+        implementations.append(("C++ Boundary-Opt", CppBoundaryOptimized))
+    if CPP_BOUNDARY_SUMMARY_OPTIMIZED_AVAILABLE:
+        implementations.append(("C++ BoundarySummary-Opt", CppBoundarySummaryOptimized))
     
     results = []
     
@@ -161,33 +184,36 @@ def print_benchmark_report(results: List[BenchmarkResult]) -> None:
     print("📈 COMPREHENSIVE BENCHMARK REPORT")
     print("=" * 80)
     
-    # Main performance table
-    print(f"\n{'Implementation':<25} {'Total(ms)':<12} {'Ops/sec':<12} {'Avg(µs)':<10} {'P95(µs)':<10} {'P99(µs)':<10}")
-    print("-" * 90)
+    # Main performance table with clearer model names
+    print(f"\n{'Model':<22} {'Total(ms)':<10} {'Ops/sec':<13} {'Avg(µs)':<9} {'P95(µs)':<9} {'P99(µs)':<9}")
+    print("-" * 80)
     
     for result in results:
-        print(f"{result.implementation:<25} "
-              f"{result.total_time_ms:<11.2f} "
-              f"{result.operations_per_second:<11,.0f} "
-              f"{result.avg_operation_time_us:<9.2f} "
-              f"{result.p95_time_us:<9.2f} "
-              f"{result.p99_time_us:<9.2f}")
+        print(f"{result.implementation:<22} "
+              f"{result.total_time_ms:<9.2f} "
+              f"{result.operations_per_second:<12,.0f} "
+              f"{result.avg_operation_time_us:<8.2f} "
+              f"{result.p95_time_us:<8.2f} "
+              f"{result.p99_time_us:<8.2f}")
     
     # Relative performance analysis
     print(f"\n📊 Relative Performance (normalized to fastest):")
-    print("-" * 60)
+    print("-" * 70)
     
     fastest_time = min(r.total_time_ms for r in results)
+    fastest_impl = next(r for r in results if r.total_time_ms == fastest_time)
+    
+    print(f"Baseline (fastest): {fastest_impl.implementation}\n")
     
     for result in results:
         ratio = result.total_time_ms / fastest_time
-        bar = "█" * int(ratio * 20)
-        print(f"  {result.implementation:<25} {ratio:5.2f}x {bar}")
+        bar = "█" * min(int(ratio * 20), 60)  # Cap bar length
+        print(f"  {result.implementation:<22} {ratio:5.2f}x {bar}")
     
     # Memory efficiency
     print(f"\n💾 Memory Efficiency:")
     print("-" * 60)
-    print(f"{'Implementation':<25} {'Intervals':<12} {'Avg Bytes/Interval':<20}")
+    print(f"{'Model':<22} {'Intervals':<12} {'Avg Bytes/Interval':<20}")
     print("-" * 60)
     
     for result in results:
@@ -198,7 +224,7 @@ def print_benchmark_report(results: List[BenchmarkResult]) -> None:
         elif "Treap" in result.implementation:
             bytes_per_interval = 48
         
-        print(f"{result.implementation:<25} {result.memory_intervals:<12} ~{bytes_per_interval}")
+        print(f"{result.implementation:<22} {result.memory_intervals:<12} ~{bytes_per_interval}")
     
     # Consistency check
     print(f"\n✅ Consistency Verification:")

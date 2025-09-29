@@ -25,7 +25,9 @@
         "*.egg": true,
     },
     "files.associations": {
-        "map": "cpp"
+        "map": "cpp",
+        "__tree": "cpp",
+        "set": "cpp"
     },
     "python.languageServer": "None"
 }
