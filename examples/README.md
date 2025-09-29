@@ -100,6 +100,22 @@ uv run jupyter notebook bellman_optimization.ipynb
 
 ---
 
+### **[manufacturing_bellman.ipynb](manufacturing_bellman.ipynb)** ⭐ NEW - **Manufacturing with Risk-Aware Bellman**
+**Multi-Station Production with Stochastic Timing & Due Date Risk**
+
+Advanced Bellman optimization for manufacturing with DAG routing, multiple stations per type, and risk analysis.
+
+```bash
+cd examples
+uv run jupyter notebook manufacturing_bellman.ipynb
+```
+
+**Demonstrates**: Multi-station DAG (Cutting→Assembly→Testing→Packaging), stochastic processing times, risk-aware Bellman equations, station assignment optimization, due date risk calculation.
+
+**Generates**: Production network DAG, risk heatmaps, convergence analysis, station utilization.
+
+---
+
 ## 📁 Example Categories
 
 ### 🎲 **Randomized Algorithms** (`randomized_algorithms/`)
