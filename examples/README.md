@@ -84,6 +84,22 @@ uv run jupyter notebook small_world_networks.ipynb
 
 ---
 
+### **[bellman_optimization.ipynb](bellman_optimization.ipynb)** ⭐ NEW - **Dynamic Programming & Bellman Equations**
+**Value Iteration for Resource Allocation**
+
+Interactive notebook implementing the Bellman equation for optimal resource allocation over time.
+
+```bash
+cd examples
+uv run jupyter notebook bellman_optimization.ipynb
+```
+
+**Demonstrates**: Bellman equation, value iteration, policy learning, MDP formulation, state representation with interval trees, convergence analysis.
+
+**Generates**: Convergence plots, value function heatmaps, policy analysis, allocation schedules.
+
+---
+
 ## 📁 Example Categories
 
 ### 🎲 **Randomized Algorithms** (`randomized_algorithms/`)

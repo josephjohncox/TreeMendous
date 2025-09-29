@@ -68,7 +68,7 @@ uv sync --all-extras
 - **[Quick Reference](docs/QUICK_REFERENCE.md)** - One-page guide to get started instantly
 - **[Architecture Guide](docs/ARCHITECTURE_GUIDE.md)** - Deep dive into design patterns and mathematical foundations
 - **[Interval Tree Visualizations](docs/INTERVAL_TREE_VISUALIZATION.md)** - Visual explanations of data structures and algorithms
-- **[Interactive Notebook](docs/interactive_visualization.ipynb)** - Jupyter notebook with matplotlib visualizations
+- **[Interactive Notebook](examples/interactive_visualization.ipynb)** - Jupyter notebook with matplotlib visualizations
 
 ### Practical Examples
 - **[Tree Structure Demo](examples/visualizations/tree_structure_demo.py)** - Interactive demo of all implementations
