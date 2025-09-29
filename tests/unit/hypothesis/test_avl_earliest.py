@@ -66,7 +66,9 @@ def test_adjacent_intervals() -> None:
     tree.release_interval(100, 200)
 
     intervals = tree.get_intervals()
-    assert intervals == [(0, 100), (100, 200)]
+    expected = [(0, 100), (100, 200)]
+    actual = [(interval.start, interval.end) for interval in intervals]
+    assert actual == expected
     assert tree.get_total_available_length() == 200
 
 @given(st.lists(st.tuples(

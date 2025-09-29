@@ -20,7 +20,7 @@ def validate_treap_invariants(treap: IntervalTreap) -> None:
     
     # BST property: in-order traversal gives sorted intervals
     intervals = treap.get_intervals()
-    sorted_intervals = sorted(intervals, key=lambda x: x[0])
+    sorted_intervals = sorted(intervals, key=lambda x: x.start)
     assert intervals == sorted_intervals, "BST property violated: intervals not in sorted order"
     
     # Heap property: parent priority ≥ child priorities
@@ -69,19 +69,20 @@ def test_treap_basic_operations(operations: List[Tuple[int, int]]) -> None:
     
     # Verify total length calculation
     intervals = treap.get_intervals()
-    calculated_total = sum(end - start for start, end, _ in intervals)
+    calculated_total = sum(interval.length for interval in intervals)
     assert treap.get_total_available_length() == calculated_total
     
     # Reserve some intervals and verify
     if intervals:
         # Reserve first interval
-        first_start, first_end, _ = intervals[0]
-        treap.reserve_interval(first_start, first_end)
+        first_interval = intervals[0]
+        treap.reserve_interval(first_interval.start, first_interval.end)
         validate_treap_invariants(treap)
         
         # Verify interval was removed
         new_intervals = treap.get_intervals()
-        assert (first_start, first_end, None) not in new_intervals
+        interval_tuples = [(interval.start, interval.end) for interval in new_intervals]
+        assert (first_interval.start, first_interval.end) not in interval_tuples
 
 
 @given(st.lists(st.tuples(
@@ -115,29 +116,25 @@ def test_treap_find_operations(length: int) -> None:
     treap.reserve_interval(300, 400)
     treap.reserve_interval(600, 700)
     
-    try:
-        result = treap.find_interval(0, length)
-        start, end = result
-        
+    result = treap.find_interval(0, length)
+    if result:
         # Verify result is valid
-        assert end - start == length
-        assert start >= 0 and end <= 1000
+        assert result.length == length
+        assert result.start >= 0 and result.end <= 1000
         
         # Verify the interval is actually available
         intervals = treap.get_intervals()
         found_available = False
-        for istart, iend, _ in intervals:
-            if istart <= start and end <= iend:
+        for interval in intervals:
+            if interval.start <= result.start and result.end <= interval.end:
                 found_available = True
                 break
-        assert found_available, f"Interval [{start}, {end}] not actually available"
-        
-    except ValueError:
-        # It's okay if no suitable interval exists
-        # Verify this is actually the case by checking largest available
+        assert found_available, f"Interval [{result.start}, {result.end}] not actually available"
+    else:
+        # No suitable interval found - verify this is correct
         intervals = treap.get_intervals()
         if intervals:
-            max_available = max(iend - istart for istart, iend, _ in intervals)
+            max_available = max(interval.length for interval in intervals)
             assert max_available < length, f"Should have found interval of length {length}, max available is {max_available}"
 
 
@@ -158,8 +155,8 @@ def test_treap_random_sampling():
             samples.append(sample)
     
     # Should have sampled from available intervals
-    available_intervals = {(start, end) for start, end, _ in treap.get_intervals()}
-    sampled_intervals = set(samples)
+    available_intervals = {(interval.start, interval.end) for interval in treap.get_intervals()}
+    sampled_intervals = {(sample.start, sample.end) for sample in samples}
     
     assert sampled_intervals.issubset(available_intervals), "Sampled intervals not in available set"
     
@@ -191,11 +188,11 @@ def test_treap_split_merge():
     left_intervals = left_treap.get_intervals()
     right_intervals = right_treap.get_intervals()
     
-    for start, end, _ in left_intervals:
-        assert start < 45, f"Left treap should only contain intervals starting before 45, found [{start}, {end})"
+    for interval in left_intervals:
+        assert interval.start < 45, f"Left treap should only contain intervals starting before 45, found [{interval.start}, {interval.end})"
     
-    for start, end, _ in right_intervals:
-        assert start >= 45, f"Right treap should only contain intervals starting at/after 45, found [{start}, {end})"
+    for interval in right_intervals:
+        assert interval.start >= 45, f"Right treap should only contain intervals starting at/after 45, found [{interval.start}, {interval.end})"
     
     # Test merge
     merged_treap = left_treap.merge_treap(right_treap)
@@ -244,9 +241,9 @@ def test_treap_interval_merging(intervals: List[Tuple[int, int]]) -> None:
     # Verify no overlapping intervals in result
     result_intervals = treap.get_intervals()
     for i in range(len(result_intervals) - 1):
-        curr_start, curr_end, _ = result_intervals[i]
-        next_start, next_end, _ = result_intervals[i + 1]
-        assert curr_end <= next_start, f"Overlapping intervals: [{curr_start}, {curr_end}) and [{next_start}, {next_end})"
+        curr_interval = result_intervals[i]
+        next_interval = result_intervals[i + 1]
+        assert curr_interval.end <= next_interval.start, f"Overlapping intervals: [{curr_interval.start}, {curr_interval.end}) and [{next_interval.start}, {next_interval.end})"
 
 
 def test_treap_performance_characteristics():
@@ -308,7 +305,7 @@ def test_treap_rank_operations():
     for i in range(len(test_intervals)):
         sample = treap.sample_random_interval()
         if sample:
-            assert sample in [(s, e) for s, e, _ in treap.get_intervals()], "Selected interval not in treap"
+            assert (sample.start, sample.end) in [(interval.start, interval.end) for interval in treap.get_intervals()], "Selected interval not in treap"
 
 
 def test_treap_overlapping_operations():
@@ -350,7 +347,7 @@ def test_treap_correctness_vs_simple_tree(intervals: List[Tuple[int, int]]) -> N
         simple_tree.release_interval(start, end)
     
     # Results should be equivalent (after merging adjacent intervals)
-    treap_intervals = set((start, end) for start, end, _ in treap.get_intervals())
+    treap_intervals = set((interval.start, interval.end) for interval in treap.get_intervals())
     simple_intervals = set(simple_tree.get_intervals())
     
     # Convert simple tree format to match treap format
@@ -361,7 +358,7 @@ def test_treap_correctness_vs_simple_tree(intervals: List[Tuple[int, int]]) -> N
     
     # Individual intervals might differ due to merging strategies, but total coverage should be same
     treap_total = sum(end - start for start, end in treap_intervals)
-    simple_total = sum(end - start for start, end in simple_intervals_formatted)
+    simple_total = sum(interval.length for interval in simple_intervals_formatted)
     assert treap_total == simple_total
 
 
@@ -380,7 +377,7 @@ def test_treap_edge_cases():
     assert treap.get_total_available_length() == 10
     
     sample = treap.sample_random_interval()
-    assert sample == (10, 20)
+    assert sample.start == 10 and sample.end == 20
     
     # Zero-length interval (should be no-op)
     treap.release_interval(15, 15)
@@ -390,7 +387,7 @@ def test_treap_edge_cases():
     treap.release_interval(20, 30)
     intervals = treap.get_intervals()
     # Treap may keep adjacent intervals separate: [10, 20) and [20, 30)
-    interval_starts = [start for start, end, _ in intervals]
+    interval_starts = [interval.start for interval in intervals]
     assert 10 in interval_starts and 20 in interval_starts
     assert treap.get_total_available_length() == 20  # Total length should be correct
     

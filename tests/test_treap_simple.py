@@ -79,8 +79,8 @@ def test_treap_operations():
             samples.append(sample)
     
     # All samples should be valid intervals
-    available_intervals = {(start, end) for start, end, _ in treap.get_intervals()}
-    sampled_intervals = set(samples)
+    available_intervals = {(interval.start, interval.end) for interval in treap.get_intervals()}
+    sampled_intervals = {(sample.start, sample.end) for sample in samples}
     assert sampled_intervals.issubset(available_intervals)
     print("✓ Random sampling works correctly")
     
@@ -203,10 +203,10 @@ def test_treap_correctness():
     intervals = treap.get_intervals()
     
     # Debug: print actual intervals to understand result
-    print(f"    Actual intervals: {[(start, end) for start, end, _ in intervals]}")
+    print(f"    Actual intervals: {[(interval.start, interval.end) for interval in intervals]}")
     
     # Calculate total available space
-    total_length = sum(end - start for start, end, _ in intervals)
+    total_length = sum(interval.length for interval in intervals)
     
     # The merging behavior depends on implementation details
     # Let's verify that we have reasonable total length
@@ -217,9 +217,11 @@ def test_treap_correctness():
     # Test interval finding - look for a smaller interval that should exist
     try:
         result = treap.find_interval(0, 15)  # Smaller interval that should fit
-        start, end = result
-        assert end - start == 15, f"Found interval wrong size: {end - start}"
-        print("✓ Interval finding works correctly")
+        if result:
+            assert result.length == 15, f"Found interval wrong size: {result.length}"
+            print("✓ Interval finding works correctly")
+        else:
+            raise ValueError("No interval found")
     except ValueError:
         # If no interval found, just verify treap is still valid
         assert treap.verify_treap_properties(), "Treap properties should still be valid"

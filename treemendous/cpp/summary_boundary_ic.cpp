@@ -7,6 +7,17 @@
 #include <algorithm>
 #include <cmath>
 
+// IntervalResult structure for consistent return types
+struct IntervalResult {
+    int start;
+    int end;
+    int length;
+    void* data = nullptr;  // For compatibility, though we don't use it
+    
+    IntervalResult(int s, int e) : start(s), end(e), length(e - s) {}
+    IntervalResult(int s, int e, int len) : start(s), end(e), length(len) {}
+};
+
 // Same TreeSummary structure as in summary_boundary.cpp
 struct TreeSummary {
     int total_free_length = 0;
@@ -86,12 +97,12 @@ public:
     }
     
     // Enhanced query operations using summary statistics
-    std::optional<std::pair<int, int>> find_best_fit(int length, bool prefer_early = true) {
+    std::optional<IntervalResult> find_best_fit(int length, bool prefer_early = true) {
         if (summary.largest_free_length < length) {
             return std::nullopt;  // Quick elimination using summary
         }
         
-        std::optional<std::pair<int, int>> best_candidate;
+        std::optional<IntervalResult> best_candidate;
         int best_fit_size = INT_MAX;
         int best_start = INT_MAX;
         
@@ -103,13 +114,13 @@ public:
             if (available >= length) {
                 if (prefer_early) {
                     if (start < best_start) {
-                        best_candidate = std::make_pair(start, start + length);
+                        best_candidate = IntervalResult(start, start + length);
                         best_start = start;
                     }
                 } else {
                     // Best fit: smallest interval that satisfies requirement
                     if (available < best_fit_size) {
-                        best_candidate = std::make_pair(start, start + length);
+                        best_candidate = IntervalResult(start, start + length);
                         best_fit_size = available;
                     }
                 }
@@ -119,7 +130,7 @@ public:
         return best_candidate;
     }
     
-    std::optional<std::pair<int, int>> find_largest_available() {
+    std::optional<IntervalResult> find_largest_available() {
         if (summary.largest_free_length == 0) {
             return std::nullopt;
         }
@@ -129,7 +140,7 @@ public:
             int start = interval.lower();
             int end = interval.upper();
             if ((end - start) == summary.largest_free_length) {
-                return std::make_pair(start, end);
+                return IntervalResult(start, end);
             }
         }
         

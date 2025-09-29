@@ -12,9 +12,11 @@ import math
 from typing import Optional, List, Tuple, TypeVar, Generic, Dict
 
 try:
-    from treemendous.basic.base import IntervalNodeBase, IntervalTreeBase, IntervalManagerProtocol
+    from treemendous.basic.base import IntervalNodeBase, IntervalTreeBase
+    from treemendous.basic.protocols import CoreIntervalManagerProtocol, RandomizedProtocol, IntervalResult, PerformanceStats
 except ImportError:
-    from base import IntervalNodeBase, IntervalTreeBase, IntervalManagerProtocol
+    from base import IntervalNodeBase, IntervalTreeBase
+    from protocols import CoreIntervalManagerProtocol, RandomizedProtocol, IntervalResult, PerformanceStats
 
 
 class TreapNode(IntervalNodeBase['TreapNode', None]):
@@ -60,7 +62,7 @@ class TreapNode(IntervalNodeBase['TreapNode', None]):
         return node.subtree_size if node else 0
 
 
-class IntervalTreap(IntervalTreeBase[TreapNode, None], IntervalManagerProtocol[None]):
+class IntervalTreap(IntervalTreeBase[TreapNode, None], CoreIntervalManagerProtocol[None], RandomizedProtocol):
     """Randomized interval tree using treap structure"""
     
     def __init__(self, random_seed: Optional[int] = None):
@@ -96,18 +98,23 @@ class IntervalTreap(IntervalTreeBase[TreapNode, None], IntervalManagerProtocol[N
         new_node = TreapNode(merged_start, merged_end)
         self.root = self._insert(self.root, new_node)
     
-    def find_interval(self, start: int, length: int) -> Tuple[int, int]:
+    def find_interval(self, start: int, length: int) -> Optional[IntervalResult]:
         """Find available interval of given length starting at or after start time"""
         result = self._find_interval(self.root, start, length)
         if result:
-            return (result.start, result.start + length)
-        raise ValueError(f"No interval of length {length} available starting from {start}")
+            # If the requested start point is within the found interval, use it
+            if result.start <= start and start + length <= result.end:
+                return IntervalResult(start=start, end=start + length, length=length)
+            else:
+                # Otherwise, allocate from the beginning of the found interval
+                return IntervalResult(start=result.start, end=result.start + length, length=length)
+        return None
     
-    def get_intervals(self) -> List[Tuple[int, int, None]]:
+    def get_intervals(self) -> List[IntervalResult]:
         """Get all available intervals in sorted order"""
         intervals = []
         self._inorder_traversal(self.root, intervals)
-        return intervals
+        return [IntervalResult(start=start, end=end, data=data) for start, end, data in intervals]
     
     def get_total_available_length(self) -> int:
         """Get total available space"""
@@ -125,6 +132,10 @@ class IntervalTreap(IntervalTreeBase[TreapNode, None], IntervalManagerProtocol[N
     def verify_treap_properties(self) -> bool:
         """Verify BST and heap properties are maintained"""
         return self._verify_bst_property(self.root) and self._verify_heap_property(self.root)
+    
+    def verify_properties(self) -> bool:
+        """Verify implementation-specific properties (RandomizedProtocol requirement)"""
+        return self.verify_treap_properties()
     
     # Core treap operations
     def _insert(self, node: Optional[TreapNode], new_node: TreapNode) -> TreapNode:
@@ -264,16 +275,22 @@ class IntervalTreap(IntervalTreeBase[TreapNode, None], IntervalManagerProtocol[N
             return None
         
         # Check if current node works
-        if node.start >= start and (node.end - node.start) >= length:
-            # Check left subtree for earlier option
-            left_result = self._find_interval(node.left, start, length)
-            return left_result if left_result else node
+        node_length = node.end - node.start
+        if node_length >= length:
+            # Node is large enough - check if it can accommodate the request
+            if node.end >= start + length:  # Can fit the request starting at 'start' or later
+                # Check left subtree for earlier option
+                left_result = self._find_interval(node.left, start, length)
+                return left_result if left_result else node
         
-        # Search appropriate subtree
-        if node.start < start:
-            return self._find_interval(node.right, start, length)
-        else:
-            return self._find_interval(node.right, start, length)
+        # Search both subtrees if current node doesn't work
+        # Try left subtree first (earlier intervals)
+        left_result = self._find_interval(node.left, start, length)
+        if left_result:
+            return left_result
+        
+        # Try right subtree
+        return self._find_interval(node.right, start, length)
     
     def _merge_subtrees(self, left: Optional[TreapNode], right: Optional[TreapNode]) -> Optional[TreapNode]:
         """Merge two treap subtrees"""
@@ -385,7 +402,7 @@ class IntervalTreap(IntervalTreeBase[TreapNode, None], IntervalManagerProtocol[N
         result.root = self._merge_subtrees(self.root, other.root)
         return result
     
-    def sample_random_interval(self) -> Optional[Tuple[int, int]]:
+    def sample_random_interval(self) -> Optional[IntervalResult]:
         """Sample random interval from treap with uniform probability"""
         if not self.root:
             return None
@@ -393,7 +410,7 @@ class IntervalTreap(IntervalTreeBase[TreapNode, None], IntervalManagerProtocol[N
         target_index = random.randint(0, self.root.subtree_size - 1)
         node = self._select_kth_interval(self.root, target_index)
         
-        return (node.start, node.end) if node else None
+        return IntervalResult(start=node.start, end=node.end) if node else None
     
     def _select_kth_interval(self, node: Optional[TreapNode], k: int) -> Optional[TreapNode]:
         """Select k-th interval in sorted order (0-indexed)"""

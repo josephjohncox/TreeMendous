@@ -10,8 +10,10 @@ from dataclasses import dataclass
 from typing import Generic, Optional, List, Tuple, TypeVar, cast, Protocol
 try:
     from treemendous.basic.base import IntervalNodeBase, IntervalNodeProtocol, IntervalTreeBase
+    from treemendous.basic.protocols import CoreIntervalManagerProtocol, EnhancedIntervalManagerProtocol, IntervalResult, AvailabilityStats
 except ImportError:
     from base import IntervalNodeBase, IntervalNodeProtocol, IntervalTreeBase
+    from protocols import CoreIntervalManagerProtocol, EnhancedIntervalManagerProtocol, IntervalResult, AvailabilityStats
 
 
 @dataclass(frozen=True)
@@ -141,7 +143,7 @@ class SummaryIntervalNode(IntervalNodeBase['SummaryIntervalNode', None]):
         return node.height if node else 0
 
 
-class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode, None]):
+class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode, None], EnhancedIntervalManagerProtocol[None]):
     """AVL interval tree with summary statistics for efficient scheduling"""
     
     def __init__(self) -> None:

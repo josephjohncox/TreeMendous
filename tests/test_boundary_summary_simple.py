@@ -142,21 +142,19 @@ def test_best_fit_queries():
         best_fit = manager.find_best_fit(50)
         assert best_fit is not None, f"{impl_name}: Should find 50-unit interval"
         
-        start, end = best_fit
-        assert end - start == 50, f"{impl_name}: Best fit should be exactly 50 units"
-        assert start >= 0, f"{impl_name}: Start should be non-negative"
+        assert best_fit.length == 50, f"{impl_name}: Best fit should be exactly 50 units"
+        assert best_fit.start >= 0, f"{impl_name}: Start should be non-negative"
         
-        print(f"    ✓ Best fit (50 units): [{start}, {end})")
+        print(f"    ✓ Best fit (50 units): [{best_fit.start}, {best_fit.end})")
         
         # Test largest available
         largest = manager.find_largest_available()
         assert largest is not None, f"{impl_name}: Should find largest interval"
         
-        start, end = largest
         expected_size = 700  # [300, 1000) should be largest
-        assert end - start == expected_size, f"{impl_name}: Largest should be {expected_size}, got {end - start}"
+        assert largest.length == expected_size, f"{impl_name}: Largest should be {expected_size}, got {largest.length}"
         
-        print(f"    ✓ Largest available: [{start}, {end}), size={end-start}")
+        print(f"    ✓ Largest available: [{largest.start}, {largest.end}), size={largest.length}")
     
 
 
@@ -290,7 +288,7 @@ def test_caching_behavior():
     perf2 = manager.get_performance_stats()
     
     # Cache hits should increase
-    assert perf2['cache_hits'] > perf1['cache_hits'], "Cache hits should increase"
+    assert perf2.cache_hits > perf1.cache_hits, "Cache hits should increase"
     
     # Modify manager to invalidate cache
     manager.reserve_interval(100, 200)

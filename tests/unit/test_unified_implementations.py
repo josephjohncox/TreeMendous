@@ -277,19 +277,26 @@ class TestUniversalIntervalOperations:
             f"{implementation_name}: Should have at least one interval"
         
         # Check that interval is accessible somewhere
-        # Handle different interval formats: (start, end) or (start, end, data)
+        # Handle both tuple and IntervalResult formats
         found_interval = False
         for interval in intervals:
-            if len(interval) == 2:
-                start, end = interval
-            elif len(interval) == 3:
-                start, end, _ = interval
+            if hasattr(interval, 'start'):
+                # IntervalResult format
+                if interval.start <= 10 < interval.end and interval.length >= 10:
+                    found_interval = True
+                    break
             else:
-                continue
-                
-            if start <= 10 < end and end - start >= 10:
-                found_interval = True
-                break
+                # Tuple format - could be (start, end) or (start, end, data)
+                if len(interval) == 2:
+                    start, end = interval
+                    if start <= 10 < end and (end - start) >= 10:
+                        found_interval = True
+                        break
+                elif len(interval) == 3:
+                    start, end, _ = interval
+                    if start <= 10 < end and (end - start) >= 10:
+                        found_interval = True
+                        break
         assert found_interval, \
             f"{implementation_name}: Released interval [10, 20) should be accessible"
     
@@ -446,8 +453,7 @@ class TestImplementationSpecificFeatures:
         if hasattr(interval_manager, 'sample_random_interval'):
             sample = interval_manager.sample_random_interval()
             assert sample is not None
-            start, end = sample
-            assert start < end
+            assert sample.start < sample.end
     
     def test_treap_properties(self, interval_manager, implementation_name, implementation_info):
         """Test treap-specific properties"""

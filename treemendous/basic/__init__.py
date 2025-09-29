@@ -6,6 +6,18 @@ focusing on readability and algorithm demonstration before optimization.
 """
 
 from .base import IntervalNodeBase, IntervalNodeProtocol, IntervalTreeBase, IntervalManagerProtocol
+from .protocols import (
+    CoreIntervalManagerProtocol,
+    EnhancedIntervalManagerProtocol,
+    PerformanceTrackingProtocol,
+    RandomizedProtocol,
+    IntervalResult,
+    AvailabilityStats,
+    PerformanceStats,
+    BackendConfiguration,
+    ImplementationType,
+    PerformanceTier,
+)
 from .avl import IntervalNode, IntervalTree
 from .avl_earliest import EarliestIntervalNode, EarliestIntervalTree
 from .boundary import IntervalManager
@@ -15,11 +27,23 @@ from .treap import TreapNode, IntervalTreap
 from .boundary_summary import BoundarySummary, BoundarySummaryManager
 
 __all__ = [
-    # Base abstractions
+    # Base abstractions (legacy)
     'IntervalNodeBase',
     'IntervalNodeProtocol', 
     'IntervalTreeBase',
     'IntervalManagerProtocol',
+    
+    # Unified protocols (new)
+    'CoreIntervalManagerProtocol',
+    'EnhancedIntervalManagerProtocol',
+    'PerformanceTrackingProtocol',
+    'RandomizedProtocol',
+    'IntervalResult',
+    'AvailabilityStats',
+    'PerformanceStats',
+    'BackendConfiguration',
+    'ImplementationType',
+    'PerformanceTier',
     
     # AVL tree implementations
     'IntervalNode',

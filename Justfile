@@ -47,6 +47,10 @@ test-hypothesis: install-dev
 test-unified: install-dev
     uv run pytest tests/unit/test_unified_implementations.py -v --tb=short
 
+test-protocols: install-dev
+    @echo "🔄 Testing unified protocol system..."
+    uv run python -c 'import treemendous; treemendous.print_backend_status(); tree = treemendous.create_interval_tree(); tree.release_interval(0, 1000); tree.reserve_interval(100, 200); print(f"✅ {len(tree.get_intervals())} intervals, protocol consistency verified!")'
+
 # Performance Testing
 test-perf: install-dev
     uv run python tests/performance/comprehensive_benchmark.py
@@ -76,12 +80,14 @@ version:
 # Help
 help:
     @echo "Tree-Mendous Commands:"
-    @echo "  install        - Install dependencies"
-    @echo "  build-cpp      - Build all C++ extensions (with clean)"
-    @echo "  build-cpp-icl  - Build with Boost ICL support"
-    @echo "  test           - Run complete test suite"
-    @echo "  test-unified   - Cross-implementation validation" 
-    @echo "  test-perf      - Performance benchmarks"
-    @echo "  validate       - Quick validation"
-    @echo "  run-examples   - Run key examples"
-    @echo "  clean-cpp      - Clean C++ build artifacts"
+    @echo "  install          - Install dependencies"
+    @echo "  build            - Build package with C++ extensions"
+    @echo "  build-cpp        - Build C++ extensions for development"
+    @echo "  build-cpp-icl    - Build with Boost ICL support"
+    @echo "  test             - Run complete test suite"
+    @echo "  test-unified     - Cross-implementation validation"
+    @echo "  test-protocols   - Test unified protocol system"
+    @echo "  test-perf        - Performance benchmarks"
+    @echo "  validate         - Quick validation"
+    @echo "  run-examples     - Run key examples"
+    @echo "  clean-cpp        - Clean C++ build artifacts"

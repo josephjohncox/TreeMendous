@@ -1,7 +1,8 @@
 from sortedcontainers import SortedDict
 from typing import List, Optional, Tuple
+from .protocols import CoreIntervalManagerProtocol, IntervalResult, AvailabilityStats
 
-class IntervalManager:
+class IntervalManager(CoreIntervalManagerProtocol[None]):
     def __init__(self) -> None:
         # Intervals are stored as {start: end}
         self.intervals: SortedDict[int, int] = SortedDict()
@@ -86,28 +87,28 @@ class IntervalManager:
             self.intervals[s] = e
             self.total_available_length += e - s
 
-    def find_interval(self, point: int, length: int) -> Optional[Tuple[int, int]]:
-        idx = self.intervals.bisect_left(point)
+    def find_interval(self, start: int, length: int) -> Optional[IntervalResult]:
+        idx = self.intervals.bisect_left(start)
         intervals_keys = self.intervals.keys()
 
         # Check the interval at idx
         if idx < len(intervals_keys):
             s = intervals_keys[idx]
             e = self.intervals[s]
-            if s <= point < e and e - point >= length:
-                return point, point + length
-            elif s > point and e - s >= length:
-                return s, s + length
+            if s <= start < e and e - start >= length:
+                return IntervalResult(start=start, end=start + length)
+            elif s > start and e - s >= length:
+                return IntervalResult(start=s, end=s + length)
 
         # Check the previous interval
         if idx > 0:
             idx -= 1
             s = intervals_keys[idx]
             e = self.intervals[s]
-            if s <= point < e and e - point >= length:
-                return point, point + length
-            elif point < s and e - s >= length:
-                return s, s + length
+            if s <= start < e and e - start >= length:
+                return IntervalResult(start=start, end=start + length)
+            elif start < s and e - s >= length:
+                return IntervalResult(start=s, end=s + length)
 
         return None
 
@@ -120,8 +121,8 @@ class IntervalManager:
             print(f"[{s}, {e})")
         print(f"Total available length: {self.total_available_length}")
     
-    def get_intervals(self) -> List[Tuple[int, int]]:
-        return list(self.intervals.items())
+    def get_intervals(self) -> List[IntervalResult]:
+        return [IntervalResult(start=start, end=end) for start, end in self.intervals.items()]
 
 # Example usage:
 if __name__ == "__main__":
