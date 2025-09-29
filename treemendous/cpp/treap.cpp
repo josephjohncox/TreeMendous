@@ -125,8 +125,12 @@ public:
     
     std::optional<std::pair<int, int>> find_interval(int start, int length) {
         TreapNode* result = find_interval_node(root, start, length);
-        if (result && (result->end - result->start) >= length) {
-            return std::make_pair(result->start, result->start + length);
+        if (result) {
+            // Allocate at the requested start point if possible, otherwise at interval start
+            int alloc_start = std::max(start, result->start);
+            if (result->end - alloc_start >= length) {
+                return std::make_pair(alloc_start, alloc_start + length);
+            }
         }
         return std::nullopt;
     }
@@ -277,12 +281,14 @@ private:
             
             // Create left remainder if needed
             if (node->start < start) {
-                remainders.push_back(new TreapNode(node->start, start, generate_random_priority()));
+                // Use priority lower than original node to maintain heap property
+                remainders.push_back(new TreapNode(node->start, start, node->priority * 0.5));
             }
             
             // Create right remainder if needed
             if (node->end > end) {
-                remainders.push_back(new TreapNode(end, node->end, generate_random_priority()));
+                // Use priority lower than original node to maintain heap property
+                remainders.push_back(new TreapNode(end, node->end, node->priority * 0.5));
             }
             
             // Delete current node and process subtrees
@@ -347,19 +353,20 @@ private:
     TreapNode* find_interval_node(TreapNode* node, int start, int length) {
         if (!node) return nullptr;
         
+        // Simple implementation: find any interval that can accommodate the request
         // Check if current node works
-        if (node->start >= start && (node->end - node->start) >= length) {
-            // Check left subtree for earlier option
-            TreapNode* left_result = find_interval_node(node->left, start, length);
-            return left_result ? left_result : node;
+        if (node->start <= start && start < node->end && (node->end - start) >= length) {
+            return node;  // Found suitable interval
         }
         
-        // Search appropriate subtree
-        if (node->start < start) {
-            return find_interval_node(node->right, start, length);
-        } else {
-            return find_interval_node(node->right, start, length);
+        // If start is before this node, try left subtree first
+        if (start < node->start) {
+            TreapNode* left_result = find_interval_node(node->left, start, length);
+            if (left_result) return left_result;
         }
+        
+        // Try right subtree
+        return find_interval_node(node->right, start, length);
     }
     
     TreapNode* merge_subtrees(TreapNode* left, TreapNode* right) {

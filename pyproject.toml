@@ -3,18 +3,19 @@ name = "treemendous"
 version = "0.1.0"
 description = "Exploring a diverse collection of interval tree implementations across multiple programming languages to identify the most efficient configurations for varied use cases, such as optimizing for query speed, memory usage, or dynamic updates."
 authors = [{name = "Joseph Cox", email = "joseph@codensity.io"}]
-license = {text = "BSD-3-Clause"}
+license = "BSD-3-Clause"
 readme = "README.md"
 requires-python = ">=3.9"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: BSD License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10", 
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
 dependencies = [
@@ -50,4 +51,8 @@ where = ["."]
 include = ["treemendous*"]
 
 [tool.setuptools.package-data]
-"treemendous.cpp" = ["*.so", "*.pyd"]
+"treemendous.cpp" = ["*.so", "*.pyd", "*.dll", "*.dylib"]
+
+# Ensure compiled extensions are included
+[tool.setuptools]
+include-package-data = true

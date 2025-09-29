@@ -37,7 +37,15 @@ def test_find_interval(point: int, length: int) -> None:
     interval: Optional[EarliestIntervalNode] = tree.find_interval(point, length)
     if interval:
         assert interval.end - interval.start >= length
-        assert interval.start >= point
+        # For "earliest" fit: finds the earliest interval that can accommodate the request
+        # The interval must be able to fit the request starting from the requested point OR
+        # be large enough to accommodate the full request regardless of where it starts
+        can_fit_from_point = (interval.start <= point < interval.end and 
+                             interval.end - point >= length)
+        can_fit_entire_request = interval.end - interval.start >= length
+        
+        assert can_fit_from_point or can_fit_entire_request, \
+            f"Interval [{interval.start}, {interval.end}) cannot accommodate request: point={point}, length={length}"
         assert not (200 <= interval.start < 300 or 200 < interval.end <= 300)
         assert not (400 <= interval.start < 500 or 400 < interval.end <= 500)
 

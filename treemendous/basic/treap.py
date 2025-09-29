@@ -144,7 +144,9 @@ class IntervalTreap(IntervalTreeBase[TreapNode, None], IntervalManagerProtocol[N
             if node.right and node.right.priority > node.priority:
                 node = self._rotate_left(node)
         
-        node.update_stats()
+        # Update stats and return
+        if node:
+            node.update_stats()
         return node
     
     def _delete(self, node: Optional[TreapNode], start: int, end: int) -> Tuple[Optional[TreapNode], bool]:
@@ -203,12 +205,14 @@ class IntervalTreap(IntervalTreeBase[TreapNode, None], IntervalManagerProtocol[N
             
             # Create left remainder if needed
             if node.start < start:
-                left_remainder = TreapNode(node.start, start)
+                # Use a priority lower than the original node to maintain heap property
+                left_remainder = TreapNode(node.start, start, priority=node.priority * 0.5)
                 nodes_to_insert.append(left_remainder)
             
             # Create right remainder if needed
             if node.end > end:
-                right_remainder = TreapNode(end, node.end)
+                # Use a priority lower than the original node to maintain heap property
+                right_remainder = TreapNode(end, node.end, priority=node.priority * 0.5)
                 nodes_to_insert.append(right_remainder)
             
             # Delete current node and process subtrees

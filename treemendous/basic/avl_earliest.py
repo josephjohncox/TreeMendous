@@ -43,15 +43,35 @@ class EarliestIntervalTree(IntervalTree[EarliestIntervalNode], IntervalManagerPr
                       length: int) -> Optional[EarliestIntervalNode]:
         if not node:
             return None
-        if node.start >= point and (node.end - node.start) >= length:
-            # Potential candidate
+        
+        # Check if this interval can satisfy the request
+        # Case 1: point is within the interval and there's enough space
+        if node.start <= point < node.end and (node.end - point) >= length:
+            # This interval works, but check if there's an earlier one
             left_candidate = self._find_interval(node.left, point, length)
             return left_candidate if left_candidate else node
-        elif node.start < point:
-            # Search right subtree
+        
+        # Case 2: point is before this interval and interval is large enough
+        elif point <= node.start and (node.end - node.start) >= length:
+            # This interval works, but check if there's an earlier one
+            left_candidate = self._find_interval(node.left, point, length)
+            return left_candidate if left_candidate else node
+        
+        # Case 3: point is after this interval's end
+        elif point >= node.end:
             return self._find_interval(node.right, point, length)
+        
+        # Case 4: point is before this interval's start but interval is too small
+        elif point < node.start:
+            # Check both subtrees
+            left_candidate = self._find_interval(node.left, point, length)
+            if left_candidate:
+                return left_candidate
+            return self._find_interval(node.right, point, length)
+        
+        # Case 5: point is within interval but not enough space remaining
         else:
-            # Node's interval is too short; search right subtree
+            # Check right subtree for intervals starting after this one
             return self._find_interval(node.right, point, length)
 
     def _insert(self, node: Optional[EarliestIntervalNode], 
