@@ -206,7 +206,7 @@ just status               # Show project status
 ## Mathematical Documentation
 
 Comprehensive theoretical analysis available in [`docs/`](docs/):
-- **[Mathematical Analysis](MATHEMATICAL_ANALYSIS.md)** - Category theory, complexity analysis, algorithmic foundations
+- **[Mathematical Analysis](docs/MATHEMATICAL_ANALYSIS.md)** - Category theory, complexity analysis, algorithmic foundations
 - **[Temporal Algebras](docs/TEMPORAL_ALGEBRAS_SCHEDULING.md)** - Process calculi, scheduling theory, temporal logic
 - **[Real-Time Systems](docs/REALTIME_SYSTEMS_THEORY.md)** - Timing analysis, schedulability, fault tolerance
 - **[Optimization Theory](docs/OPTIMIZATION_CP_SAT.md)** - Convex optimization, constraint programming, SAT solving

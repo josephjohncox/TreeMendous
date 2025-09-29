@@ -80,9 +80,17 @@ flamegraph: install-dev
     @echo "🔥 Generating flame graphs..."
     uv run python tests/performance/flamegraph_profiler.py all
 
-# Quick performance comparison (Python vs C++)
+# Performance Benchmarks
 benchmark: install-dev
-    @echo "📊 Running implementation comparison (Python vs C++)..."
+    @echo "📊 Running comprehensive protocol benchmark (all implementations)..."
+    uv run python tests/performance/protocol_benchmark.py
+
+benchmark-optimizations: install-dev
+    @echo "📊 Comparing original vs optimized C++ implementations..."
+    uv run python tests/performance/simple_optimization_benchmark.py
+
+benchmark-flamegraph: install-dev
+    @echo "📊 Running benchmarks with flamegraph comparison..."
     uv run python tests/performance/flamegraph_profiler.py compare
 
 # Profile C++ implementations (requires py-spy)

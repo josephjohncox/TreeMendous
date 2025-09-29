@@ -100,7 +100,29 @@ def profile_all_implementations(num_operations: int = 10_000) -> Dict[str, pstat
         ("py_boundary_summary", lambda: benchmark_boundary_summary(operations))
     ]
     
-    # Add C++ implementations if available (using same unified workload)
+    # Add C++ optimized implementations first
+    cpp_count = 0
+    try:
+        from treemendous.cpp.boundary_optimized import IntervalManager as CppBoundaryOptimized
+        def benchmark_cpp_boundary_optimized(ops):
+            manager = CppBoundaryOptimized()
+            execute_workload(manager, ops)
+        implementations.append(("cpp_boundary_optimized", lambda: benchmark_cpp_boundary_optimized(operations)))
+        cpp_count += 1
+    except ImportError:
+        pass
+    
+    try:
+        from treemendous.cpp.boundary_summary_optimized import BoundarySummaryManager as CppBoundarySummaryOptimized
+        def benchmark_cpp_boundary_summary_optimized(ops):
+            manager = CppBoundarySummaryOptimized()
+            execute_workload(manager, ops)
+        implementations.append(("cpp_boundary_summary_optimized", lambda: benchmark_cpp_boundary_summary_optimized(operations)))
+        cpp_count += 1
+    except ImportError:
+        pass
+    
+    # Add C++ original implementations if available (using same unified workload)
     try:
         from treemendous.cpp.boundary import IntervalManager as CppBoundary
         from treemendous.cpp.treap import IntervalTreap as CppTreap
@@ -117,6 +139,7 @@ def profile_all_implementations(num_operations: int = 10_000) -> Dict[str, pstat
             ("cpp_boundary", lambda: benchmark_cpp_boundary(operations)),
             ("cpp_treap", lambda: benchmark_cpp_treap(operations))
         ])
+        cpp_count += 2
         
         # Try to add C++ BoundarySummary
         try:
@@ -127,9 +150,12 @@ def profile_all_implementations(num_operations: int = 10_000) -> Dict[str, pstat
                 execute_workload(manager, ops)
             
             implementations.append(("cpp_boundary_summary", lambda: benchmark_cpp_boundary_summary(operations)))
-            print("   ✅ C++ implementations included (Boundary, Treap, BoundarySummary)")
+            cpp_count += 1
         except ImportError:
-            print("   ✅ C++ implementations included (Boundary, Treap)")
+            pass
+        
+        if cpp_count > 0:
+            print(f"   ✅ C++ implementations included ({cpp_count} total)")
             
     except ImportError:
         print("   ⚠️  C++ implementations not available")
