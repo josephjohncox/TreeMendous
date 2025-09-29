@@ -53,10 +53,46 @@ test-protocols: install-dev
 
 # Performance Testing
 test-perf: install-dev
-    uv run python tests/performance/comprehensive_benchmark.py
+    uv run python tests/performance/protocol_benchmark.py
 
 test-perf-full: install-dev
     timeout 600 uv run python tests/performance/comprehensive_benchmark.py
+
+# Performance profiling with flame graphs (Python + C++)
+profile: install-dev
+    @echo "🔥 Profiling all implementations (Python + C++)..."
+    @echo ""
+    @echo "═══════════════════════════════════════════════════════════"
+    @echo "1️⃣  Python Implementations (cProfile + flameprof)"
+    @echo "═══════════════════════════════════════════════════════════"
+    uv run python tests/performance/flamegraph_profiler.py all
+    @echo ""
+    @echo "═══════════════════════════════════════════════════════════"
+    @echo "2️⃣  C++ Performance Comparison"
+    @echo "═══════════════════════════════════════════════════════════"
+    uv run python tests/performance/cpp_profiler.py
+    @echo ""
+    @echo "💡 For C++ flame graphs with native frames:"
+    @echo "   py-spy record --native -o cpp_flame.svg -- uv run python tests/performance/cpp_profiler.py"
+
+# Generate flame graphs from existing profiles
+flamegraph: install-dev
+    @echo "🔥 Generating flame graphs..."
+    uv run python tests/performance/flamegraph_profiler.py all
+
+# Quick performance comparison (Python vs C++)
+benchmark: install-dev
+    @echo "📊 Running implementation comparison (Python vs C++)..."
+    uv run python tests/performance/flamegraph_profiler.py compare
+
+# Profile C++ implementations (requires py-spy)
+profile-cpp: install-dev
+    @echo "🔥 C++ profiling (install py-spy if needed: uv pip install py-spy)..."
+    @echo "Running workload to profile..."
+    uv run python tests/performance/cpp_profiler.py
+    @echo ""
+    @echo "💡 To generate flame graph with C++ frames:"
+    @echo "   py-spy record --native -o cpp_flame.svg -- uv run python tests/performance/cpp_profiler.py"
 
 # Development utilities
 check: install-dev
@@ -88,6 +124,10 @@ help:
     @echo "  test-unified     - Cross-implementation validation"
     @echo "  test-protocols   - Test unified protocol system"
     @echo "  test-perf        - Performance benchmarks"
+    @echo "  profile          - Profile Python with flame graphs"
+    @echo "  profile-cpp      - Profile C++ implementations"
+    @echo "  flamegraph       - Generate flame graphs from profiles"
+    @echo "  benchmark        - Quick performance comparison"
     @echo "  validate         - Quick validation"
     @echo "  run-examples     - Run key examples"
     @echo "  clean-cpp        - Clean C++ build artifacts"

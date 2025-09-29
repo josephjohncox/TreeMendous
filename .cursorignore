@@ -1,0 +1,7 @@
+build/
+dist/
+performance_profiles/
+.venv/
+.pytest_cache/
+.hypothesis/
+.cache/
