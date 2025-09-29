@@ -128,7 +128,7 @@ def test_cpp_py_treap_equivalence():
             cpp_treap.release_interval(start, end)
     
     # Compare results
-    py_intervals = set((start, end) for start, end, _ in py_treap.get_intervals())
+    py_intervals = set((interval.start, interval.end) for interval in py_treap.get_intervals())
     cpp_intervals = set(cpp_treap.get_intervals())
     
     # Total lengths should match

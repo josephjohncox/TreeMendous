@@ -13,9 +13,23 @@ import math
 from sortedcontainers import SortedDict
 
 try:
-    from treemendous.basic.base import IntervalManagerProtocol
+    from treemendous.basic.protocols import (
+        CoreIntervalManagerProtocol, 
+        EnhancedIntervalManagerProtocol,
+        PerformanceTrackingProtocol,
+        IntervalResult,
+        AvailabilityStats,
+        PerformanceStats
+    )
 except ImportError:
-    from base import IntervalManagerProtocol
+    from protocols import (
+        CoreIntervalManagerProtocol,
+        EnhancedIntervalManagerProtocol, 
+        PerformanceTrackingProtocol,
+        IntervalResult,
+        AvailabilityStats,
+        PerformanceStats
+    )
 
 
 @dataclass
@@ -120,7 +134,7 @@ class BoundarySummary:
         )
 
 
-class BoundarySummaryManager(IntervalManagerProtocol[None]):
+class BoundarySummaryManager(EnhancedIntervalManagerProtocol[None], PerformanceTrackingProtocol):
     """Boundary manager enhanced with comprehensive summary statistics"""
     
     def __init__(self):
@@ -222,7 +236,7 @@ class BoundarySummaryManager(IntervalManagerProtocol[None]):
         for s, e in intervals_to_add:
             self.intervals[s] = e
     
-    def find_interval(self, start: int, length: int) -> Tuple[int, int]:
+    def find_interval(self, start: int, length: int) -> Optional[IntervalResult]:
         """Find suitable interval using boundary-based search"""
         idx = self.intervals.bisect_left(start)
         
@@ -231,9 +245,9 @@ class BoundarySummaryManager(IntervalManagerProtocol[None]):
             s = self.intervals.keys()[idx]
             e = self.intervals[s]
             if s <= start < e and e - start >= length:
-                return (start, start + length)
+                return IntervalResult(start=start, end=start + length)
             elif s > start and e - s >= length:
-                return (s, s + length)
+                return IntervalResult(start=s, end=s + length)
         
         # Check previous interval
         if idx > 0:
@@ -241,15 +255,53 @@ class BoundarySummaryManager(IntervalManagerProtocol[None]):
             s = self.intervals.keys()[idx]
             e = self.intervals[s]
             if s <= start < e and e - start >= length:
-                return (start, start + length)
+                return IntervalResult(start=start, end=start + length)
             elif start < s and e - s >= length:
-                return (s, s + length)
+                return IntervalResult(start=s, end=s + length)
         
-        raise ValueError(f"No interval of length {length} available starting from {start}")
+        return None
     
-    def get_intervals(self) -> List[Tuple[int, int, None]]:
+    def find_best_fit(self, length: int) -> Optional[IntervalResult]:
+        """Find best available interval of given length"""
+        best_interval = None
+        best_size = float('inf')
+        
+        for start, end in self.intervals.items():
+            available_length = end - start
+            if available_length >= length:
+                if available_length < best_size:
+                    best_size = available_length
+                    best_interval = (start, end)
+        
+        if best_interval:
+            start, end = best_interval
+            return IntervalResult(start=start, end=start + length, length=length)
+        
+        return None
+    
+    def find_largest_available(self) -> Optional[IntervalResult]:
+        """Find the largest available interval"""
+        if not self.intervals:
+            return None
+        
+        largest_interval = None
+        largest_size = 0
+        
+        for start, end in self.intervals.items():
+            size = end - start
+            if size > largest_size:
+                largest_size = size
+                largest_interval = (start, end)
+        
+        if largest_interval:
+            start, end = largest_interval
+            return IntervalResult(start=start, end=end, length=end - start)
+        
+        return None
+    
+    def get_intervals(self) -> List[IntervalResult]:
         """Get all available intervals"""
-        return [(start, end, None) for start, end in self.intervals.items()]
+        return [IntervalResult(start=start, end=end) for start, end in self.intervals.items()]
     
     def get_total_available_length(self) -> int:
         """Get total available space (with caching)"""
@@ -289,7 +341,7 @@ class BoundarySummaryManager(IntervalManagerProtocol[None]):
             'avg_gap_size': summary.avg_gap_size
         }
     
-    def find_best_fit(self, length: int, prefer_early: bool = True) -> Optional[Tuple[int, int]]:
+    def find_best_fit(self, length: int, prefer_early: bool = True) -> Optional[IntervalResult]:
         """Find best-fit interval using boundary-based search"""
         best_candidate = None
         best_fit_size = float('inf')
@@ -300,17 +352,17 @@ class BoundarySummaryManager(IntervalManagerProtocol[None]):
             if available >= length:
                 if prefer_early:
                     if start < best_start:
-                        best_candidate = (start, start + length)
+                        best_candidate = IntervalResult(start=start, end=start + length)
                         best_start = start
                 else:
                     # Best fit: smallest interval that satisfies requirement
                     if available < best_fit_size:
-                        best_candidate = (start, start + length)
+                        best_candidate = IntervalResult(start=start, end=start + length)
                         best_fit_size = available
         
         return best_candidate
     
-    def find_largest_available(self) -> Optional[Tuple[int, int]]:
+    def find_largest_available(self) -> Optional[IntervalResult]:
         """Find largest available interval using summary optimization"""
         summary = self.get_summary()
         
@@ -320,7 +372,7 @@ class BoundarySummaryManager(IntervalManagerProtocol[None]):
         # Find the interval with largest size
         for start, end in self.intervals.items():
             if (end - start) == summary.largest_interval_length:
-                return (start, end)
+                return IntervalResult(start=start, end=end)
         
         return None
     
@@ -335,16 +387,15 @@ class BoundarySummaryManager(IntervalManagerProtocol[None]):
         
         self._summary_dirty = True
     
-    def get_performance_stats(self) -> Dict[str, Any]:
+    def get_performance_stats(self) -> PerformanceStats:
         """Get implementation-specific performance statistics"""
-        return {
-            'operation_count': self._operation_count,
-            'cache_hits': self._cache_hits,
-            'cache_hit_rate': self._cache_hits / max(1, self._operation_count),
-            'implementation': 'boundary_summary',
-            'sorted_containers': True,  # Always true since we assume libraries are available
-            'interval_count': len(self.intervals)
-        }
+        return PerformanceStats(
+            operation_count=self._operation_count,
+            cache_hits=self._cache_hits,
+            cache_hit_rate=self._cache_hits / max(1, self._operation_count),
+            implementation_name='boundary_summary',
+            language='Python'
+        )
     
     def print_intervals(self) -> None:
         """Print intervals with summary information"""

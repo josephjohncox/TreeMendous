@@ -26,6 +26,17 @@ PYBIND11_MODULE(boundary_summary, m) {
         .def_readwrite("utilization", &BoundarySummary::utilization)
         .def("update_metrics", &BoundarySummary::update_metrics);
     
+    // IntervalResult structure
+    py::class_<IntervalResult>(m, "IntervalResult")
+        .def_readwrite("start", &IntervalResult::start)
+        .def_readwrite("end", &IntervalResult::end)
+        .def_readwrite("length", &IntervalResult::length)
+        .def("__repr__", [](const IntervalResult &ir) {
+            return "IntervalResult(start=" + std::to_string(ir.start) + 
+                   ", end=" + std::to_string(ir.end) + 
+                   ", length=" + std::to_string(ir.length) + ", data=None)";
+        });
+    
     // AvailabilityStats structure
     py::class_<BoundarySummaryManager::AvailabilityStats>(m, "AvailabilityStats")
         .def_readwrite("total_free", &BoundarySummaryManager::AvailabilityStats::total_free)

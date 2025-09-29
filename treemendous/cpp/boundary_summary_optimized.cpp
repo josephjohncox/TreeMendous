@@ -14,6 +14,16 @@
 #include <random>
 #include <chrono>
 
+struct IntervalResult {
+    int start;
+    int end;
+    int length;
+    void* data = nullptr;  // For compatibility, though we don't use it
+    
+    IntervalResult(int s, int e) : start(s), end(e), length(e - s) {}
+    IntervalResult(int s, int e, int len) : start(s), end(e), length(len) {}
+};
+
 struct BoundarySummary {
     // Core metrics
     int total_free_length = 0;
@@ -134,16 +144,16 @@ public:
         }
     }
     
-    std::optional<std::pair<int, int>> find_interval(int start, int length) {
+    std::optional<IntervalResult> find_interval(int start, int length) {
         auto it = intervals_.lower_bound(start);
         
         if (it != intervals_.end()) {
             int s = it->first;
             int e = it->second;
             if (s <= start && e - start >= length) {
-                return std::make_pair(start, start + length);
+                return IntervalResult(start, start + length);
             } else if (s > start && e - s >= length) {
-                return std::make_pair(s, s + length);
+                return IntervalResult(s, s + length);
             }
         }
         
@@ -152,17 +162,17 @@ public:
             int s = it->first;
             int e = it->second;
             if (s <= start && e - start >= length) {
-                return std::make_pair(start, start + length);
+                return IntervalResult(start, start + length);
             } else if (start < s && e - s >= length) {
-                return std::make_pair(s, s + length);
+                return IntervalResult(s, s + length);
             }
         }
         
         return std::nullopt;
     }
     
-    std::optional<std::pair<int, int>> find_best_fit(int length, bool prefer_early = true) {
-        std::optional<std::pair<int, int>> best_candidate;
+    std::optional<IntervalResult> find_best_fit(int length, bool prefer_early = true) {
+        std::optional<IntervalResult> best_candidate;
         int best_fit_size = INT_MAX;
         int best_start = INT_MAX;
         
@@ -171,13 +181,13 @@ public:
             if (available >= length) {
                 if (prefer_early) {
                     if (start < best_start) {
-                        best_candidate = std::make_pair(start, start + length);
+                        best_candidate = IntervalResult(start, start + length);
                         best_start = start;
                     }
                 } else {
                     // Best fit: smallest interval that satisfies requirement
                     if (available < best_fit_size) {
-                        best_candidate = std::make_pair(start, start + length);
+                        best_candidate = IntervalResult(start, start + length);
                         best_fit_size = available;
                     }
                 }
@@ -187,7 +197,7 @@ public:
         return best_candidate;
     }
     
-    std::optional<std::pair<int, int>> find_largest_available() {
+    std::optional<IntervalResult> find_largest_available() {
         BoundarySummary summary = get_summary();
         
         if (summary.largest_interval_length == 0) {
@@ -197,7 +207,7 @@ public:
         // Find the interval with largest size
         for (const auto& [start, end] : intervals_) {
             if ((end - start) == summary.largest_interval_length) {
-                return std::make_pair(start, end);
+                return IntervalResult(start, end);
             }
         }
         
@@ -444,13 +454,13 @@ int main() {
     
     auto best_fit = manager.find_best_fit(300);
     if (best_fit) {
-        std::cout << "  Best fit (300 units): [" << best_fit->first << ", " << best_fit->second << ")\n";
+        std::cout << "  Best fit (300 units): [" << best_fit->start << ", " << best_fit->end << ")\n";
     }
     
     auto largest = manager.find_largest_available();
     if (largest) {
-        std::cout << "  Largest available: [" << largest->first << ", " << largest->second 
-                  << "), size=" << (largest->second - largest->first) << "\n";
+        std::cout << "  Largest available: [" << largest->start << ", " << largest->end 
+                  << "), size=" << largest->length << "\n";
     }
     
     auto perf = manager.get_performance_stats();

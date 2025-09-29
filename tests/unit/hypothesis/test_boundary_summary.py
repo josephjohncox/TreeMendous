@@ -61,16 +61,23 @@ def validate_boundary_summary_invariants(manager) -> None:
     # Verify statistics match actual intervals
     if hasattr(manager, 'get_intervals'):
         intervals = manager.get_intervals()
-        if isinstance(intervals[0], tuple) and len(intervals[0]) == 3:
-            # Format: (start, end, data)
-            actual_intervals = [(start, end) for start, end, _ in intervals]
+        # Handle both legacy tuples and new IntervalResult objects
+        if intervals and hasattr(intervals[0], 'start'):
+            # New IntervalResult format
+            actual_intervals = [(interval.start, interval.end) for interval in intervals]
+        elif intervals and isinstance(intervals[0], tuple):
+            if len(intervals[0]) == 3:
+                # Format: (start, end, data)
+                actual_intervals = [(start, end) for start, end, _ in intervals]
+            else:
+                # Format: (start, end)
+                actual_intervals = intervals
         else:
-            # Format: (start, end)
-            actual_intervals = intervals
+            actual_intervals = []
         
         actual_count = len(actual_intervals)
         actual_total = sum(end - start for start, end in actual_intervals)
-        
+    
         assert summary.interval_count == actual_count, f"Count mismatch: summary {summary.interval_count} vs actual {actual_count}"
         assert summary.total_free_length == actual_total, f"Length mismatch: summary {summary.total_free_length} vs actual {actual_total}"
         
@@ -106,8 +113,7 @@ def test_py_boundary_summary_operations(operations: List[Tuple[int, int]]) -> No
         largest = manager.find_largest_available()
         assert largest is not None, "Should find largest interval when one exists"
         
-        start, end = largest
-        assert end - start == stats['largest_chunk'], "Largest interval size should match summary"
+        assert largest.length == stats['largest_chunk'], "Largest interval size should match summary"
 
 
 @given(st.lists(st.tuples(
@@ -219,7 +225,7 @@ def test_boundary_summary_caching():
     perf2 = manager.get_performance_stats()
     
     # Cache hits should increase
-    assert perf2['cache_hits'] > perf1['cache_hits'], "Cache hits should increase on repeated access"
+    assert perf2.cache_hits > perf1.cache_hits, "Cache hits should increase on repeated access"
     
     # Summaries should be identical
     assert summary1.total_free_length == summary2.total_free_length
@@ -254,16 +260,15 @@ def test_boundary_summary_advanced_queries():
         best_fit_50 = manager.find_best_fit(50)
         assert best_fit_50 is not None, f"{impl_name}: Should find 50-unit interval"
         
-        start, end = best_fit_50
+        start, end = best_fit_50.start, best_fit_50.end
         assert end - start == 50, f"{impl_name}: Best fit should be exactly 50 units"
         
         # Test largest available
         largest = manager.find_largest_available()
         assert largest is not None, f"{impl_name}: Should find largest interval"
         
-        start, end = largest
         expected_largest = 600  # [400, 1000) should be largest
-        assert end - start == expected_largest, f"{impl_name}: Largest should be {expected_largest}, got {end - start}"
+        assert largest.length == expected_largest, f"{impl_name}: Largest should be {expected_largest}, got {largest.length}"
         
         # Test summary statistics
         stats = manager.get_availability_stats()
