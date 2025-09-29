@@ -116,6 +116,29 @@ uv run jupyter notebook manufacturing_bellman.ipynb
 
 ---
 
+### **[jackson_networks_bellman.ipynb](jackson_networks_bellman.ipynb)** ⭐ NEW - **Jackson Networks with Risk-Adjusted Bellman**
+**Queueing Networks, Mean Field Limits & Queue Insertion Optimization**
+
+Advanced Jackson network optimization with risk-adjusted Bellman equations and mean field analysis.
+
+```bash
+cd examples
+uv run jupyter notebook jackson_networks_bellman.ipynb
+```
+
+**Advanced Features**: Jackson queueing networks with probabilistic routing, risk-adjusted Bellman equations for queue insertion decisions, mean field limit analysis, stochastic routing with rework loops, capacity constraints with overflow penalties.
+
+**Mathematical Framework**: 
+- Risk-adjusted Bellman: $V(\mathbf{Q}, t) = \max_{a} [R(\mathbf{Q}, a) + \gamma \mathbb{E}[V(\mathbf{Q}', t+1)] - \lambda \cdot \text{Risk}(\mathbf{Q}, a)]$
+- Mean field convergence: $\frac{1}{N} \sum_{n=1}^N \delta_{X_n(t)} \to \mu_t$ (deterministic measure)
+- Traffic equations: $\lambda = \gamma + \lambda P$ for effective arrival rates
+
+**Visualizations**: Queue length evolution, utilization heatmaps, value function visualization, tardiness risk analysis, queue insertion position distributions, profit decomposition.
+
+**Applications**: Manufacturing with quality control, healthcare patient routing, cloud computing load balancing, supply chain optimization, telecommunications packet routing.
+
+---
+
 ## 📁 Example Categories
 
 ### 🎲 **Randomized Algorithms** (`randomized_algorithms/`)
