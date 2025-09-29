@@ -33,6 +33,9 @@ MANIFEST
 *.manifest
 *.spec
 
+#Performance profiling
+performance_profiles/
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt

@@ -9,9 +9,23 @@
         "**/.retool_types/**": true,
         "**/*tsconfig.json": true,
         ".cache": true,
-        "retool.config.json": true
+        "retool.config.json": true,
+        "build/": true,
+        "dist/": true,
+        "sdist/": true,
+        "var/": true,
+        "wheels/": true,
+        "share/python-wheels/": true,
+        ".venv/": true,
+        ".pytest_cache/": true,
+        ".hypothesis/": true,
+        ".cache/": true,
+        "__pycache__/": true,
+        "*.egg-info/": true,
+        "*.egg": true,
     },
     "files.associations": {
         "map": "cpp"
-    }
+    },
+    "python.languageServer": "None"
 }

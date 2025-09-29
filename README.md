@@ -49,7 +49,17 @@ tree = create_interval_tree("cpp_boundary") # Force C++ boundary
 ## Installation
 
 ```bash
+# Basic installation
 uv sync
+
+# With profiling tools (flameprof, snakeviz, memory-profiler)
+uv sync --extra profiling
+
+# With visualization tools (matplotlib, numpy, jupyter)
+uv sync --extra visualization
+
+# Full development environment
+uv sync --all-extras
 ```
 
 ## 📚 Documentation & Visualizations
@@ -73,6 +83,43 @@ uv run python examples/visualizations/algorithm_analysis.py
 
 # Jupyter notebook
 jupyter notebook docs/interactive_visualization.ipynb
+```
+
+### Performance Profiling
+- **[Performance Profiling Guide](docs/PERFORMANCE_PROFILING.md)** - Python profiling and optimization
+- **[C++ Profiling Guide](docs/CPP_PROFILING_GUIDE.md)** - C++ profiling with native frame capture
+
+```bash
+# Complete profiling - Python + C++ implementations
+just profile
+
+# Quick Python vs C++ performance comparison  
+just benchmark
+# Output includes:
+#   Python Boundary:         21.90 ms (baseline)
+#   C++ Boundary:             3.74 ms (5.9x faster)
+#   C++ Treap:                5.65 ms (81.7x faster than Python Treap)
+
+# Full performance test suite
+just test-perf
+
+# Generate flame graphs from Python profiles
+just flamegraph
+
+# Visual profiler with ASCII charts
+uv run python tests/performance/visual_profiler.py compare
+```
+
+**C++ Flame Graphs (Native Frame Capture):**
+```bash
+# Install py-spy (shows both Python and C++ frames)
+uv sync --extra profiling
+
+# Generate C++ flame graph with native code profiling
+py-spy record --native -o cpp_flame.svg -- uv run python tests/performance/cpp_profiler.py
+
+# View the flame graph
+open cpp_flame.svg  # or upload to https://www.speedscope.app/
 ```
 
 ## Testing & Validation
