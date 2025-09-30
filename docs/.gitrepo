@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
+;
+[subrepo]
+	remote = git@github.com:josephjohncox/tree-mendous-docs.git
+	branch = main
+	commit = 39d6fb4a82f9bb61f2461e8b70638255e499c62e
+	parent = 0a3c6813eb50867e8359944dd1da9db3fb5c8303
+	method = merge
+	cmdver = 0.4.9
