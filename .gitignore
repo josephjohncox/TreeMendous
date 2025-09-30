@@ -27,6 +27,8 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+scripts/
+
 # PyInstaller
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
@@ -164,3 +166,12 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# Repository Structure - Separate Repos
+# These directories are maintained in separate repositories for better organization
+# Use ./scripts/setup-dev-links.sh to create symlinks for unified development
+examples/
+docs/
+
+# Development symlinks (created by setup-dev-links.sh)  
+# These allow unified development experience while maintaining repo separation
