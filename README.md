@@ -62,32 +62,7 @@ uv sync --extra visualization
 uv sync --all-extras
 ```
 
-## 📚 Documentation & Visualizations
-
-### Core Documentation
-- **[Quick Reference](docs/QUICK_REFERENCE.md)** - One-page guide to get started instantly
-- **[Architecture Guide](docs/ARCHITECTURE_GUIDE.md)** - Deep dive into design patterns and mathematical foundations
-- **[Interval Tree Visualizations](docs/INTERVAL_TREE_VISUALIZATION.md)** - Visual explanations of data structures and algorithms
-- **[Interactive Notebook](examples/interactive_visualization.ipynb)** - Jupyter notebook with matplotlib visualizations
-
-### Practical Examples
-- **[Tree Structure Demo](examples/visualizations/tree_structure_demo.py)** - Interactive demo of all implementations
-- **[Algorithm Analysis](examples/visualizations/algorithm_analysis.py)** - Performance and mathematical analysis
-- **[Backend Comparison](examples/backend_comparison_demo.py)** - Cross-implementation validation
-
-### Run Visualizations
-```bash
-# Interactive demos
-uv run python examples/visualizations/tree_structure_demo.py
-uv run python examples/visualizations/algorithm_analysis.py
-
-# Jupyter notebook
-jupyter notebook docs/interactive_visualization.ipynb
-```
-
 ### Performance Profiling
-- **[Performance Profiling Guide](docs/PERFORMANCE_PROFILING.md)** - Python profiling and optimization
-- **[C++ Profiling Guide](docs/CPP_PROFILING_GUIDE.md)** - C++ profiling with native frame capture
 
 ```bash
 # Complete profiling - Python + C++ implementations
@@ -164,34 +139,7 @@ just demo-backends-treap   # Demo with Python treap
 just demo-backends-cpp     # Demo with C++ boundary
 ```
 
-## Examples
 
-Comprehensive examples in [`examples/`](examples/) demonstrate practical applications:
-- **[Randomized Algorithms](examples/randomized_algorithms/)** - Treaps, Monte Carlo optimization, probabilistic scheduling
-- **[CP-SAT Applications](examples/cp_sat_applications/)** - Job shop scheduling, constraint programming integration  
-- **[Deadline Scheduling](examples/deadline_scheduling/)** - Real-time systems, EDF, response time analysis
-- **[Bellman Iteration](examples/bellman_iteration/)** - Queue networks, dynamic programming, RL integration
-- **[Practical Applications](examples/practical_applications/)** - Manufacturing, cloud computing, supply chain
-
-```bash
-# Run all examples (auto backend selection)
-just run-examples
-
-# Run examples with specific backend
-just run-examples-with-backend py_summary    # Python summary trees
-just run-examples-with-backend cpp_summary   # C++ summary trees (fastest)
-just run-examples-with-backend py_treap      # Python randomized treaps
-
-# Backend management
-just list-backends          # Show available implementations
-just benchmark-backends     # Performance comparison
-just demo-backends          # Backend switching demonstration
-
-# Run specific categories  
-just run-examples-randomized
-just run-examples-deadline
-just run-examples-bellman
-```
 
 ## Development Commands
 
@@ -202,16 +150,6 @@ just build                # Build package
 just clean                # Clean build artifacts
 just status               # Show project status
 ```
-
-## Mathematical Documentation
-
-Comprehensive theoretical analysis available in [`docs/`](docs/):
-- **[Mathematical Analysis](docs/MATHEMATICAL_ANALYSIS.md)** - Category theory, complexity analysis, algorithmic foundations
-- **[Temporal Algebras](docs/TEMPORAL_ALGEBRAS_SCHEDULING.md)** - Process calculi, scheduling theory, temporal logic
-- **[Real-Time Systems](docs/REALTIME_SYSTEMS_THEORY.md)** - Timing analysis, schedulability, fault tolerance
-- **[Optimization Theory](docs/OPTIMIZATION_CP_SAT.md)** - Convex optimization, constraint programming, SAT solving
-- **[Randomized Algorithms](docs/RANDOMIZED_ALGORITHMS.md)** - Probabilistic methods, stochastic optimization, online algorithms
-- **[Queuing Theory](docs/QUEUING_THEORY_OPTIMIZATION.md)** - Stochastic queues, Bellman optimization, RL for queue control
 
 ## Requirements
 
