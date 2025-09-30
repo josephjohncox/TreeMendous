@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from collections import defaultdict
 import time
 import random
+from treemendous.basic.base import IntervalManagerProtocol
 from treemendous.cpp.boundary import IntervalManager as CppIntervalManager
 from treemendous.basic.boundary import IntervalManager as PyIntervalManager
 from treemendous.basic.avl_earliest import EarliestIntervalTree
@@ -22,11 +23,6 @@ class BenchmarkResult:
     op_times: Dict[str, float]
     intervals: List[Tuple[int, int]]
 
-class IntervalManagerProtocol(Protocol):
-    def reserve_interval(self, start: int, end: int) -> None: ...
-    def release_interval(self, start: int, end: int) -> None: ...
-    def find_interval(self, start: int, length: int) -> Tuple[int, int]: ...
-    def get_intervals(self) -> List[Tuple[int, int]]: ...
 
 def benchmark_manager(
     manager_class: Type[IntervalManagerProtocol], 

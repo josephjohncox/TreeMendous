@@ -1,7 +1,8 @@
-from typing import Optional
+from typing import Optional, List
 
 from treemendous.basic.base import IntervalNodeProtocol
 from treemendous.basic.avl import IntervalNode, IntervalTree
+from treemendous.basic.protocols import CoreIntervalManagerProtocol, IntervalResult
 
 class EarliestIntervalNode(IntervalNode, IntervalNodeProtocol):
     def __init__(self, start: int, end: int) -> None:
@@ -28,7 +29,7 @@ class EarliestIntervalNode(IntervalNode, IntervalNodeProtocol):
             self.max_end = max(self.max_end, self.right.max_end)
             self.max_length = max(self.max_length, self.right.max_length)
 
-class EarliestIntervalTree(IntervalTree[EarliestIntervalNode]):
+class EarliestIntervalTree(IntervalTree[EarliestIntervalNode], CoreIntervalManagerProtocol[None]):
     def __init__(self) -> None:
         super().__init__(EarliestIntervalNode)
 
@@ -36,23 +37,54 @@ class EarliestIntervalTree(IntervalTree[EarliestIntervalNode]):
         print(f"{indent}{prefix}{node.start}-{node.end} "
               f"(min_start={node.min_start}, max_end={node.max_end}, max_length={node.max_length})")
 
-    def find_interval(self, point: int, length: int) -> Optional[EarliestIntervalNode]:
-        return self._find_interval(self.root, point, length)
+    def find_interval(self, start: int, length: int) -> Optional[IntervalResult]:
+        node = self._find_interval(self.root, start, length)
+        if node:
+            # Allocate from the requested start point if possible, otherwise from interval start  
+            alloc_start = max(start, node.start)
+            if node.end - alloc_start >= length:
+                return IntervalResult(start=alloc_start, end=alloc_start + length)
+        return None
 
-    def _find_interval(self, node: Optional[EarliestIntervalNode], point: int, 
+    def get_intervals(self) -> List[IntervalResult]:
+        """Get all available intervals as IntervalResult objects"""
+        intervals = super().get_intervals()  # Get List[Tuple[int, int]]
+        return [IntervalResult(start=start, end=end) for start, end in intervals]
+    
+    def _find_interval(self, node: Optional[EarliestIntervalNode], start: int, 
                       length: int) -> Optional[EarliestIntervalNode]:
         if not node:
             return None
-        if node.start >= point and (node.end - node.start) >= length:
-            # Potential candidate
-            left_candidate = self._find_interval(node.left, point, length)
+        
+        # Check if this interval can satisfy the request
+        # Case 1: start is within the interval and there's enough space
+        if node.start <= start < node.end and (node.end - start) >= length:
+            # This interval works, but check if there's an earlier one
+            left_candidate = self._find_interval(node.left, start, length)
             return left_candidate if left_candidate else node
-        elif node.start < point:
-            # Search right subtree
-            return self._find_interval(node.right, point, length)
+        
+        # Case 2: start is before this interval and interval is large enough
+        elif start <= node.start and (node.end - node.start) >= length:
+            # This interval works, but check if there's an earlier one
+            left_candidate = self._find_interval(node.left, start, length)
+            return left_candidate if left_candidate else node
+        
+        # Case 3: start is after this interval's end
+        elif start >= node.end:
+            return self._find_interval(node.right, start, length)
+        
+        # Case 4: start is before this interval's start but interval is too small
+        elif start < node.start:
+            # Check both subtrees
+            left_candidate = self._find_interval(node.left, start, length)
+            if left_candidate:
+                return left_candidate
+            return self._find_interval(node.right, start, length)
+        
+        # Case 5: start is within interval but not enough space remaining
         else:
-            # Node's interval is too short; search right subtree
-            return self._find_interval(node.right, point, length)
+            # Check right subtree for intervals starting after this one
+            return self._find_interval(node.right, start, length)
 
     def _insert(self, node: Optional[EarliestIntervalNode], 
                 new_node: EarliestIntervalNode) -> EarliestIntervalNode:

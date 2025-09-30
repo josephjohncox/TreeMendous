@@ -1,0 +1,37 @@
+# Tree-Mendous MANIFEST.in
+# Ensures all necessary files are included in source distributions
+
+# Include all Python source files
+recursive-include treemendous *.py
+
+# Include all compiled C++ extensions (platform-specific)
+recursive-include treemendous/cpp *.so
+recursive-include treemendous/cpp *.pyd
+recursive-include treemendous/cpp *.dll
+recursive-include treemendous/cpp *.dylib
+
+# Include C++ source files for potential recompilation
+recursive-include treemendous/cpp *.cpp
+recursive-include treemendous/cpp *.h
+
+# Include documentation
+include README.md
+include LICENSE
+recursive-include docs *.md
+
+# Include test files in source distribution (but not wheel)
+recursive-include tests *.py
+
+# Include examples
+recursive-include examples *.py
+
+# Include build system files
+include pyproject.toml
+include build.py
+include Justfile
+
+# Exclude unnecessary files
+global-exclude *.pyc
+global-exclude __pycache__
+global-exclude .DS_Store
+global-exclude *.egg-info

@@ -33,12 +33,12 @@ def test_find_interval(point: int, length: int) -> None:
     manager.reserve_interval(200, 300)
     manager.reserve_interval(400, 500)
 
-    interval: Optional[Tuple[int, int]] = manager.find_interval(point, length)
+    interval = manager.find_interval(point, length)
     if interval:
-        assert interval[1] - interval[0] >= length
-        assert interval[0] >= point
-        assert not (200 <= interval[0] < 300 or 200 < interval[1] <= 300)
-        assert not (400 <= interval[0] < 500 or 400 < interval[1] <= 500)
+        assert interval.length >= length
+        assert interval.start >= point
+        assert not (200 <= interval.start < 300 or 200 < interval.end <= 300)
+        assert not (400 <= interval.start < 500 or 400 < interval.end <= 500)
 
 def test_total_available_length() -> None:
     manager = IntervalManager()
