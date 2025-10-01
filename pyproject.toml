@@ -1,12 +1,6 @@
 [project]
 name = "treemendous"
-<<<<<<< HEAD
 version = "0.2.3"
-||||||| parent of 96a640e (Release v0.2.2)
-version = "0.2.1"
-=======
-version = "0.2.2"
->>>>>>> 96a640e (Release v0.2.2)
 description = "Exploring a diverse collection of interval tree implementations across multiple programming languages to identify the most efficient configurations for varied use cases, such as optimizing for query speed, memory usage, or dynamic updates."
 authors = [{name = "Joseph Cox", email = "joseph@codensity.io"}]
 license = "BSD-3-Clause"
