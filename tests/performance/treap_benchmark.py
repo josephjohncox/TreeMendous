@@ -25,17 +25,17 @@ try:
     backend_manager = get_backend_manager()
     available_backends = backend_manager.get_available_backends()
     BACKEND_SYSTEM_AVAILABLE = True
-    print("✅ Backend management system loaded")
+    print("[OK] Backend management system loaded")
     
     # Print available backends for treap testing
     treap_backends = {k: v for k, v in available_backends.items() if 'treap' in k.lower()}
     if treap_backends:
-        print(f"✅ Treap backends available: {list(treap_backends.keys())}")
+        print(f"[OK] Treap backends available: {list(treap_backends.keys())}")
     else:
-        print("⚠️  No treap backends found")
+        print("[WARN]  No treap backends found")
         
 except ImportError as e:
-    print(f"❌ Backend system failed: {e}")
+    print(f"[FAIL] Backend system failed: {e}")
     BACKEND_SYSTEM_AVAILABLE = False
     backend_manager = None
     available_backends = {}
@@ -44,18 +44,18 @@ except ImportError as e:
 try:
     from treap import IntervalTreap as PyTreap
     py_treap_available = True
-    print("✅ Python Treap loaded (direct)")
+    print("[OK] Python Treap loaded (direct)")
 except ImportError as e:
-    print(f"❌ Python Treap failed: {e}")
+    print(f"[FAIL] Python Treap failed: {e}")
     PyTreap = None
     py_treap_available = False
 
 try:
     from summary import SummaryIntervalTree as PyTree
     py_tree_available = True
-    print("✅ Python Summary Tree loaded (direct)")
+    print("[OK] Python Summary Tree loaded (direct)")
 except ImportError as e:
-    print(f"❌ Python Summary Tree failed: {e}")
+    print(f"[FAIL] Python Summary Tree failed: {e}")
     PyTree = None
     py_tree_available = False
 
@@ -151,7 +151,7 @@ def benchmark_treap_vs_others(num_operations: int = 10_000) -> Dict[str, Dict]:
                 print(f"    {ops_per_second:>8,.0f} ops/sec ({backend_info.language})")
                 
             except Exception as e:
-                print(f"    ❌ Failed: {e}")
+                print(f"    [FAIL] Failed: {e}")
                 results[backend_info.name] = {'error': str(e)}
     
     else:
@@ -211,7 +211,7 @@ def benchmark_treap_specific_operations() -> Dict[str, Any]:
     print("=" * 60)
     
     if not py_treap_available:
-        print("❌ Python Treap not available")
+        print("[FAIL] Python Treap not available")
         return {}
     
     treap = PyTreap(random_seed=42)
@@ -266,11 +266,11 @@ def benchmark_treap_specific_operations() -> Dict[str, Any]:
 
 def benchmark_treap_probabilistic_balance() -> Dict[str, Any]:
     """Benchmark treap balance quality across different insertion patterns"""
-    print(f"\n⚖️ Treap Balance Quality Analysis")
+    print(f"\n[BALANCE] Treap Balance Quality Analysis")
     print("=" * 60)
     
     if not py_treap_available:
-        print("❌ Python Treap not available")
+        print("[FAIL] Python Treap not available")
         return {}
     
     test_patterns = {
@@ -331,11 +331,11 @@ def benchmark_treap_probabilistic_balance() -> Dict[str, Any]:
 
 def benchmark_treap_scaling() -> Dict[str, Any]:
     """Test treap performance scaling with problem size"""
-    print(f"\n📈 Treap Scaling Analysis")
+    print(f"\n[PERF] Treap Scaling Analysis")
     print("=" * 60)
     
     if not py_treap_available:
-        print("❌ Python Treap not available")
+        print("[FAIL] Python Treap not available")
         return {}
     
     sizes = [100, 500, 1000, 5000, 10000]
@@ -393,7 +393,7 @@ def analyze_treap_vs_avl_performance() -> None:
     print("=" * 60)
     
     if not py_treap_available:
-        print("❌ Python Treap not available")
+        print("[FAIL] Python Treap not available")
         return
     
     # Import AVL for comparison (if available)
@@ -402,7 +402,7 @@ def analyze_treap_vs_avl_performance() -> None:
         from avl_earliest import EarliestIntervalTree as AVLTree
         avl_available = True
     except ImportError:
-        print("⚠️  AVL tree not available for comparison")
+        print("[WARN]  AVL tree not available for comparison")
         avl_available = False
         return
     
@@ -484,7 +484,7 @@ def stress_test_treap() -> Dict[str, Any]:
     print("=" * 60)
     
     if not py_treap_available:
-        print("❌ Python Treap not available")
+        print("[FAIL] Python Treap not available")
         return {}
     
     # Stress test parameters
@@ -575,7 +575,7 @@ def main():
     stress_results = stress_test_treap()
     
     # Summary analysis
-    print(f"\n📊 TREAP BENCHMARK SUMMARY")
+    print(f"\n[STATS] TREAP BENCHMARK SUMMARY")
     print("=" * 70)
     
     if comparison_results:
@@ -595,7 +595,7 @@ def main():
         for op_name, metrics in specific_results.items():
             print(f"  {op_name}: {metrics['avg_time_us']:.1f}µs average")
     
-    print(f"\n✅ Treap benchmark suite complete!")
+    print(f"\n[OK] Treap benchmark suite complete!")
     print(f"Key insights:")
     print(f"  • Probabilistic balancing eliminates worst-case behavior")
     print(f"  • O(log n) expected performance with high probability")

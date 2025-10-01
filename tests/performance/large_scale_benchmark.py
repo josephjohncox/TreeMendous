@@ -23,7 +23,7 @@ try:
     PSUTIL_AVAILABLE = True
 except ImportError:
     PSUTIL_AVAILABLE = False
-    print("⚠️  psutil not available - memory monitoring disabled")
+    print("[WARN]  psutil not available - memory monitoring disabled")
 
 # Add paths for import resolution  
 project_root = Path(__file__).parent.parent.parent
@@ -32,9 +32,9 @@ sys.path.insert(0, str(project_root / 'treemendous' / 'basic'))
 
 try:
     from summary import SummaryIntervalTree
-    print("✅ Summary tree loaded successfully")
+    print("[OK] Summary tree loaded successfully")
 except ImportError as e:
-    print(f"❌ Failed to load summary tree: {e}")
+    print(f"[FAIL] Failed to load summary tree: {e}")
     sys.exit(1)
 
 # Test scales - representing total managed space
@@ -170,7 +170,7 @@ def benchmark_large_scale(scale_name: str, total_space: int, num_operations: int
             op_times.append(time.perf_counter() - op_start)
             
         except Exception as e:
-            print(f"   ⚠️  Error in operation {i}: {e}")
+            print(f"   [WARN]  Error in operation {i}: {e}")
             continue
         
         # Progress indicator for long tests
@@ -223,7 +223,7 @@ def benchmark_large_scale(scale_name: str, total_space: int, num_operations: int
 
 def benchmark_scalability_analysis(quick_mode: bool = False):
     """Analyze how performance scales with tree size"""
-    print("\n📈 Scalability Analysis")
+    print("\n[PERF] Scalability Analysis")
     print("=" * 60)
     
     results = []
@@ -249,10 +249,10 @@ def benchmark_scalability_analysis(quick_mode: bool = False):
                   f"{result.avg_op_time_us:>6.1f}µs/op")
                   
         except KeyboardInterrupt:
-            print(f"   ⚠️  Interrupted during {scale_name} test")
+            print(f"   [WARN]  Interrupted during {scale_name} test")
             break
         except Exception as e:
-            print(f"   ❌ Failed {scale_name} test: {e}")
+            print(f"   [FAIL] Failed {scale_name} test: {e}")
             continue
     
     return results
@@ -281,7 +281,7 @@ def benchmark_workload_patterns():
             print(f"   Memory: {result.memory_usage_mb:.1f} MB")
             
         except Exception as e:
-            print(f"   ❌ Failed {pattern} pattern: {e}")
+            print(f"   [FAIL] Failed {pattern} pattern: {e}")
             continue
     
     return results
@@ -328,7 +328,7 @@ def benchmark_memory_efficiency():
             })
             
         except Exception as e:
-            print(f"   ❌ Failed {scale_name} memory test: {e}")
+            print(f"   [FAIL] Failed {scale_name} memory test: {e}")
             continue
     
     return results
@@ -339,7 +339,7 @@ def print_comprehensive_results(scalability_results: List[LargeScaleBenchmarkRes
                                memory_results: List[Dict]):
     """Print comprehensive analysis of all benchmark results"""
     print("\n" + "=" * 80)
-    print("📊 COMPREHENSIVE LARGE-SCALE BENCHMARK RESULTS")
+    print("[STATS] COMPREHENSIVE LARGE-SCALE BENCHMARK RESULTS")
     print("=" * 80)
     
     # Scalability Analysis
@@ -356,7 +356,7 @@ def print_comprehensive_results(scalability_results: List[LargeScaleBenchmarkRes
     # Performance scaling analysis
     if len(scalability_results) > 1:
         baseline = scalability_results[0]
-        print(f"\n📈 Performance Scaling (vs {baseline.scale_name}):")
+        print(f"\n[PERF] Performance Scaling (vs {baseline.scale_name}):")
         for result in scalability_results[1:]:
             space_ratio = result.total_space / baseline.total_space
             perf_ratio = result.operations_per_second / baseline.operations_per_second
@@ -402,7 +402,7 @@ def print_comprehensive_results(scalability_results: List[LargeScaleBenchmarkRes
             avg_bytes_per_interval = statistics.mean([r['bytes_per_interval'] for r in memory_results])
             print(f"   • Memory efficiency: {avg_bytes_per_interval:.0f} bytes/interval average")
     
-    print(f"\n✅ Large-scale benchmark complete!")
+    print(f"\n[OK] Large-scale benchmark complete!")
     print(f"Summary trees maintain performance and memory efficiency at massive scales.")
 
 
@@ -411,9 +411,9 @@ def main():
     # Check for quick mode argument
     quick_mode = len(sys.argv) > 1 and sys.argv[1] == "--quick"
     
-    print("🚀 Tree-Mendous Large-Scale Performance Benchmark")
+    print("=== Tree-Mendous Large-Scale Performance Benchmark")
     if quick_mode:
-        print("⚡ Quick mode: Testing smaller scales (1-50MB)")
+        print("[FAST] Quick mode: Testing smaller scales (1-50MB)")
     else:
         print("Testing interval trees with hundreds of megabytes of managed space")
     print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -424,11 +424,11 @@ def main():
     # Warning for large tests
     scales = QUICK_TEST_SCALES if quick_mode else TEST_SCALES
     total_mb = sum(space / MB for space in scales.values())
-    print(f"⚠️  This benchmark will test up to {total_mb:.0f} MB of managed space")
+    print(f"[WARN]  This benchmark will test up to {total_mb:.0f} MB of managed space")
     print(f"💾 Current memory usage: {get_memory_usage():.1f} MB")
     
     if not quick_mode:
-        print("⏱️  Full benchmark may take 10+ minutes. Use --quick for faster testing.")
+        print("[TIME]  Full benchmark may take 10+ minutes. Use --quick for faster testing.")
     print()
     
     try:
@@ -441,9 +441,9 @@ def main():
         print_comprehensive_results(scalability_results, pattern_results, memory_results)
         
     except KeyboardInterrupt:
-        print("\n⚠️  Benchmark interrupted by user")
+        print("\n[WARN]  Benchmark interrupted by user")
     except Exception as e:
-        print(f"\n❌ Benchmark failed: {e}")
+        print(f"\n[FAIL] Benchmark failed: {e}")
         import traceback
         traceback.print_exc()
     

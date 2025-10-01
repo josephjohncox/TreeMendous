@@ -49,7 +49,7 @@ def benchmark(name, manager_class, operations, iterations=10):
     }
 
 def main():
-    print("🚀 Tree-Mendous: Optimization Benchmark")
+    print("=== Tree-Mendous: Optimization Benchmark")
     print("=" * 70)
     
     # Generate workload
@@ -72,7 +72,7 @@ def main():
         print("🔄 Benchmarking optimized implementation...")
         optimized = benchmark("C++ Boundary-Opt (std::map + micro-opts)", BoundaryOptimized, operations)
         
-        print("\n📊 RESULTS:")
+        print("\n[STATS] RESULTS:")
         print(f"\n  Original:")
         print(f"    Avg time:     {original['avg_ms']:8.3f} ms")
         print(f"    Min time:     {original['min_ms']:8.3f} ms")
@@ -89,13 +89,13 @@ def main():
         improvement_pct = (1 - 1/speedup) * 100
         throughput_gain = optimized['ops_per_sec'] - original['ops_per_sec']
         
-        print(f"\n  🎯 IMPROVEMENT:")
+        print(f"\n  [TARGET] IMPROVEMENT:")
         print(f"    Speedup:      {speedup:.2f}x faster")
         print(f"    Time saved:   {original['avg_ms'] - optimized['avg_ms']:.3f} ms ({improvement_pct:.1f}%)")
         print(f"    Throughput:   +{throughput_gain:,.0f} ops/sec")
         
     except ImportError as e:
-        print(f"\n❌ Could not import Boundary implementations: {e}")
+        print(f"\n[FAIL] Could not import Boundary implementations: {e}")
     
     # Test BoundarySummary implementations
     try:
@@ -112,7 +112,7 @@ def main():
         print("🔄 Benchmarking optimized implementation...")
         optimized = benchmark("C++ BoundarySummary-Opt (std::map + micro-opts)", SummaryOptimized, operations)
         
-        print("\n📊 RESULTS:")
+        print("\n[STATS] RESULTS:")
         print(f"\n  Original:")
         print(f"    Avg time:     {original['avg_ms']:8.3f} ms")
         print(f"    Min time:     {original['min_ms']:8.3f} ms")
@@ -129,16 +129,16 @@ def main():
         improvement_pct = (1 - 1/speedup) * 100
         throughput_gain = optimized['ops_per_sec'] - original['ops_per_sec']
         
-        print(f"\n  🎯 IMPROVEMENT:")
+        print(f"\n  [TARGET] IMPROVEMENT:")
         print(f"    Speedup:      {speedup:.2f}x faster")
         print(f"    Time saved:   {original['avg_ms'] - optimized['avg_ms']:.3f} ms ({improvement_pct:.1f}%)")
         print(f"    Throughput:   +{throughput_gain:,.0f} ops/sec")
         
     except ImportError as e:
-        print(f"\n❌ Could not import BoundarySummary implementations: {e}")
+        print(f"\n[FAIL] Could not import BoundarySummary implementations: {e}")
     
     print("\n" + "=" * 70)
-    print("✅ Benchmark complete!")
+    print("[OK] Benchmark complete!")
     print("=" * 70)
 
 if __name__ == "__main__":

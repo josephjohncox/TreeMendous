@@ -48,7 +48,7 @@ def run_cpp_intensive_workload(iterations: int = 50_000):
         pass
     
     for impl_name, manager in implementations:
-        print(f"\n📊 {impl_name}:")
+        print(f"\n[STATS] {impl_name}:")
         
         start_time = time.perf_counter()
         execute_workload(manager, operations)
@@ -62,14 +62,14 @@ def run_cpp_intensive_workload(iterations: int = 50_000):
 def compare_cpp_vs_python():
     """Compare C++ vs Python performance using unified workload"""
     
-    print("\n⚖️  C++ vs Python Performance Comparison")
+    print("\n[BALANCE]  C++ vs Python Performance Comparison")
     print("=" * 60)
     
     # Generate unified workload - SAME operations for fair comparison
     operations = generate_standard_workload(10_000)
     
     # Benchmark Python
-    print("\n📊 Python Implementation:")
+    print("\n[STATS] Python Implementation:")
     py_manager = PyBoundary()
     
     start_time = time.perf_counter()
@@ -80,7 +80,7 @@ def compare_cpp_vs_python():
     print(f"   Ops/sec: {len(operations)/py_time:,.0f}")
     
     # Benchmark C++
-    print("\n🚀 C++ Implementation:")
+    print("\n=== C++ Implementation:")
     cpp_manager = CppBoundary()
     
     start_time = time.perf_counter()
@@ -92,7 +92,7 @@ def compare_cpp_vs_python():
     
     # Comparison
     speedup = py_time / cpp_time
-    print(f"\n⚡ C++ Speedup: {speedup:.1f}x faster")
+    print(f"\n[FAST] C++ Speedup: {speedup:.1f}x faster")
     print(f"   Python time: {py_time*1000:.2f}ms")
     print(f"   C++ time: {cpp_time*1000:.2f}ms")
     print(f"   Time saved: {(py_time - cpp_time)*1000:.2f}ms")
@@ -124,7 +124,7 @@ def print_profiling_instructions():
     print("For live profiling:")
     print("   py-spy top --native --pid <PID>")
     print()
-    print("📊 macOS Instruments (GUI profiling):")
+    print("[STATS] macOS Instruments (GUI profiling):")
     print("   1. Open Instruments.app")
     print("   2. Choose 'Time Profiler'")
     print("   3. Click record and run: python tests/performance/cpp_profiler.py")
@@ -161,10 +161,10 @@ def main():
     print_profiling_instructions()
     
     print("\n" + "=" * 60)
-    print("✅ C++ Profiler Complete!")
+    print("[OK] C++ Profiler Complete!")
     print("=" * 60)
     print()
-    print("💡 Quick Start:")
+    print("[TIP] Quick Start:")
     print("   py-spy record --native -o flame.svg -- python tests/performance/cpp_profiler.py")
 
 
