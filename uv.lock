@@ -2381,13 +2381,7 @@ wheels = [
 
 [[package]]
 name = "treemendous"
-<<<<<<< HEAD
 version = "0.2.3"
-||||||| parent of 96a640e (Release v0.2.2)
-version = "0.2.1"
-=======
-version = "0.2.2"
->>>>>>> 96a640e (Release v0.2.2)
 source = { editable = "." }
 dependencies = [
     { name = "pybind11" },
