@@ -2381,7 +2381,7 @@ wheels = [
 
 [[package]]
 name = "treemendous"
-version = "0.1.0"
+version = "0.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "pybind11" },
