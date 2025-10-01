@@ -34,7 +34,7 @@ from treemendous.basic.summary import SummaryIntervalTree
 from treemendous.basic.treap import IntervalTreap
 from treemendous.basic.boundary_summary import BoundarySummaryManager
 
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 __author__ = "Joseph Cox"
 __description__ = "High-performance interval tree implementations with unified backend management"
 
