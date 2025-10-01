@@ -1,6 +1,6 @@
 [project]
 name = "treemendous"
-version = "0.2.2"
+version = "0.2.3"
 description = "Exploring a diverse collection of interval tree implementations across multiple programming languages to identify the most efficient configurations for varied use cases, such as optimizing for query speed, memory usage, or dynamic updates."
 authors = [{name = "Joseph Cox", email = "joseph@codensity.io"}]
 license = "BSD-3-Clause"
