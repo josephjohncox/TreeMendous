@@ -28,9 +28,10 @@ jobs:
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
       
-      - name: Install dependencies
+      - name: Create and sync virtual environment
         run: |
-          uv sync --dev
+          uv venv --python ${{ matrix.python-version }}
+          uv sync --dev --all-extras
           
       - name: Build C++ extensions
         run: |
@@ -63,8 +64,10 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
       
-      - name: Install dependencies
-        run: uv sync --dev
+      - name: Create and sync virtual environment
+        run: |
+          uv venv --python 3.12
+          uv sync --dev --all-extras
 
       - name: Build package 
         run: uv build
