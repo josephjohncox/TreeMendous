@@ -41,11 +41,149 @@ jobs:
         run: |
           uv run pytest tests/ -v
 
+      - name: Run performance benchmarks
+        run: |
+          echo "🚀 Running performance benchmarks on ${{ matrix.os }} with Python ${{ matrix.python-version }}"
+          uv run python tests/performance/protocol_benchmark.py > benchmark_results_${{ matrix.os }}_py${{ matrix.python-version }}.txt
+          
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: benchmark_results_${{ matrix.os }}_py${{ matrix.python-version }}.txt
+          retention-days: 30
+
+  performance-report:
+    if: github.event_name == 'pull_request'
+    name: Generate Performance Report
+    needs: test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download all benchmark results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: benchmark-results-*
+          merge-multiple: true
+          
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+          
+      - name: Set up Python
+        run: uv python install 3.12
+        
+      - name: Create performance report
+        run: |
+          uv venv --python 3.12
+          uv sync --dev --all-extras
+          
+          # Create a comprehensive performance report
+          cat > performance_report.md << 'EOF'
+          # 🚀 Performance Benchmark Results
+          
+          This report shows performance characteristics across different platforms and Python versions.
+          
+          ## Platform Comparison
+          
+          EOF
+          
+          # Add results from each platform
+          for file in benchmark_results_*.txt; do
+            if [[ -f "$file" ]]; then
+              platform=$(echo "$file" | sed 's/benchmark_results_\(.*\)_py.*/\1/')
+              python_ver=$(echo "$file" | sed 's/.*_py\([0-9.]*\)\.txt/\1/')
+              
+              echo "### $platform - Python $python_ver" >> performance_report.md
+              echo '```' >> performance_report.md
+              cat "$file" >> performance_report.md
+              echo '```' >> performance_report.md
+              echo "" >> performance_report.md
+            fi
+          done
+          
+          # Add summary section
+          cat >> performance_report.md << 'EOF'
+          
+          ## Key Insights
+          
+          - **Cross-platform consistency**: Compare performance across Ubuntu, macOS, and Windows
+          - **Python version impact**: See how different Python versions affect performance
+          - **Architecture differences**: ARM64 (macOS) vs x86_64 (Ubuntu/Windows) performance
+          - **C++ optimizations**: Validate C++ implementations outperform Python across all platforms
+          
+          ## Usage
+          
+          These benchmarks help ensure consistent performance across deployment environments and guide optimization efforts.
+          
+          EOF
+          
+      - name: Upload performance report
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-report
+          path: performance_report.md
+          retention-days: 30
+          
+      - name: Comment performance report on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'performance_report.md';
+            
+            if (fs.existsSync(path)) {
+              const report = fs.readFileSync(path, 'utf8');
+              
+              // Find existing performance comment
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+              });
+              
+              const botComment = comments.find(comment => 
+                comment.user.type === 'Bot' && 
+                comment.body.includes('🚀 Performance Benchmark Results')
+              );
+              
+              const commentBody = `${report}
+              
+              ---
+              *This performance report was automatically generated for commit ${context.sha}*`;
+              
+              if (botComment) {
+                // Update existing comment
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: botComment.id,
+                  body: commentBody
+                });
+              } else {
+                // Create new comment
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: commentBody
+                });
+              }
+            }
+
   pypi-publish:
     if: github.event_name == 'release'
     name: Publish to PyPI
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ['3.12']
     environment:
         name: pypi
         url: https://pypi.org/p/treemendous
@@ -56,18 +194,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
+      - name: Install system dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3-dev
+          
+      - name: Install system dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          # macOS runners already have Xcode command line tools
+          echo "macOS system dependencies already available"
+          
+      - name: Install system dependencies (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          # Windows runners already have Visual Studio Build Tools
+          echo "Windows system dependencies already available"
+      
       - name: Install uv
         uses: astral-sh/setup-uv@v3
         with:
           version: "latest"
           
       - name: Set up Python
-        run: uv python install 3.12
+        run: uv python install ${{ matrix.python-version }}
       
       - name: Create and sync virtual environment
         run: |
-          uv venv --python 3.12
+          uv venv --python ${{ matrix.python-version }}
           uv sync --dev --all-extras
+          
+      - name: Build C++ extensions
+        run: |
+          uv run python setup.py build_ext --inplace
 
       - name: Build package 
         run: uv build
