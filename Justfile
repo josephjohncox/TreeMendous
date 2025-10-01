@@ -262,26 +262,26 @@ prerelease type="alpha" message="":
     
     echo "✅ Pre-release v$new_version created!"
 
-# Publish to PyPI (manual override - uses Poetry like CI/CD)
+# Publish to PyPI (manual override - uses uv like CI/CD)
 publish-pypi:
     #!/usr/bin/env bash
     set -e
     
     echo "📦 Publishing to PyPI..."
     
-    # Build first using Poetry (same as CI/CD)
-    echo "🔧 Building with Poetry..."
-    poetry build
+    # Build first using uv (same as CI/CD)
+    echo "🔧 Building with uv..."
+    uv build
     
     # Check if we have twine
     if ! command -v twine >/dev/null 2>&1; then
         echo "Installing twine..."
-        pip install twine
+        uv add --dev twine
     fi
     
     # Upload to PyPI
     echo "🚀 Uploading to PyPI..."
-    twine upload dist/*
+    uv run twine upload dist/*
     
     echo "✅ Published to PyPI successfully!"
 
