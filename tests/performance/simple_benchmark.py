@@ -18,9 +18,9 @@ sys.path.insert(0, str(project_root / 'treemendous' / 'basic'))
 
 try:
     from summary import SummaryIntervalTree
-    print("✅ Summary tree loaded successfully")
+    print("[OK] Summary tree loaded successfully")
 except ImportError as e:
-    print(f"❌ Failed to load summary tree: {e}")
+    print(f"[FAIL] Failed to load summary tree: {e}")
     sys.exit(1)
 
 
@@ -121,7 +121,7 @@ def benchmark_summary_operations() -> dict:
 
 def benchmark_scaling() -> dict:
     """Test performance scaling with tree size"""
-    print("\n📈 Testing performance scaling...")
+    print("\n[PERF] Testing performance scaling...")
     
     sizes = [1_000, 5_000, 10_000, 50_000]
     results = {}
@@ -158,14 +158,14 @@ def benchmark_scaling() -> dict:
 
 def main():
     """Run all benchmarks"""
-    print("🚀 Tree-Mendous Summary Tree Performance Benchmark")
+    print("=== Tree-Mendous Summary Tree Performance Benchmark")
     print("=" * 60)
     
     random.seed(42)  # Reproducible results
     
     # Basic operations benchmark
     basic_results = benchmark_basic_operations(10_000)
-    print(f"\n📊 Basic Operations Results:")
+    print(f"\n[STATS] Basic Operations Results:")
     print(f"  Total time: {basic_results['total_time']:.3f}s")
     print(f"  Operations/sec: {basic_results['operations_per_second']:,.0f}")
     print(f"  Average operation times (ms):")
@@ -186,14 +186,14 @@ def main():
     
     # Scaling benchmark
     scaling_results = benchmark_scaling()
-    print(f"\n📈 Scaling Performance:")
+    print(f"\n[PERF] Scaling Performance:")
     print(f"  {'Size':>8} {'Intervals':>10} {'Stats(µs)':>10} {'Find(µs)':>10} {'Util%':>6} {'Frag%':>6}")
     print("  " + "-" * 58)
     for size, metrics in scaling_results.items():
         print(f"  {size:>8,} {metrics['intervals']:>10} {metrics['get_stats_us']:>10.1f} "
               f"{metrics['find_best_fit_us']:>10.1f} {metrics['utilization']*100:>5.1f} {metrics['fragmentation']*100:>5.1f}")
     
-    print(f"\n✅ Benchmark complete!")
+    print(f"\n[OK] Benchmark complete!")
     print(f"Summary trees provide O(1) aggregate statistics and efficient scheduling queries.")
 
 

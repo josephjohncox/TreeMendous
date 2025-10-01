@@ -29,17 +29,17 @@ try:
     available_backends = backend_manager.get_available_backends()
     BACKEND_SYSTEM_AVAILABLE = True
     
-    print(f"✅ Backend system loaded with {len(available_backends)} implementations:")
+    print(f"[OK] Backend system loaded with {len(available_backends)} implementations:")
     for backend_id, info in available_backends.items():
         print(f"  • {info.name} ({info.language}, {info.performance_tier})")
     
 except ImportError as e:
-    print(f"❌ Backend system not available: {e}")
+    print(f"[FAIL] Backend system not available: {e}")
     BACKEND_SYSTEM_AVAILABLE = False
     backend_manager = None
     available_backends = {}
 
-print("📊 Implementation loading complete\n")
+print("[STATS] Implementation loading complete\n")
 
 # Configuration
 INITIAL_INTERVAL_SIZE: Tuple[int, int] = (0, 10_000_000)
@@ -107,7 +107,7 @@ class BenchmarkSuite:
         
         else:
             # Fallback to old system (should not happen in normal usage)
-            print("⚠️  Using fallback implementation registration")
+            print("[WARN]  Using fallback implementation registration")
             implementations["Simple Python"]["Boundary"] = "py_boundary"
             implementations["Simple Python"]["AVL"] = "py_avl"
             
@@ -133,7 +133,7 @@ class BenchmarkSuite:
     
     def benchmark_basic_operations(self, backend_id: str, operations: List[Tuple[str, int, int]], name: str, category: str, language: str) -> BenchmarkResult:
         """Benchmark basic interval operations using backend system"""
-        print(f"  📊 Testing {name}...")
+        print(f"  [STATS] Testing {name}...")
         
         try:
             # Create tree using backend system
@@ -198,7 +198,7 @@ class BenchmarkSuite:
             )
             
         except Exception as e:
-            print(f"    ❌ Failed to benchmark {name}: {e}")
+            print(f"    [FAIL] Failed to benchmark {name}: {e}")
             return BenchmarkResult(
                 name=name,
                 category=category,
@@ -302,7 +302,7 @@ class BenchmarkSuite:
             )
             
         except Exception as e:
-            print(f"    ❌ Failed to benchmark {name}: {e}")
+            print(f"    [FAIL] Failed to benchmark {name}: {e}")
             return BenchmarkResult(
                 name=name,
                 category="Summary",
@@ -318,11 +318,11 @@ class BenchmarkSuite:
             random.seed(seed)
             print(f"🎲 Using random seed: {seed}")
         
-        print("🚀 Starting Comprehensive Tree-Mendous Benchmark")
+        print("=== Starting Comprehensive Tree-Mendous Benchmark")
         print("=" * 70)
         
         if not BACKEND_SYSTEM_AVAILABLE:
-            print("❌ Backend system not available - cannot run comprehensive benchmark")
+            print("[FAIL] Backend system not available - cannot run comprehensive benchmark")
             return
         
         implementations = self.register_implementations()
@@ -363,13 +363,13 @@ class BenchmarkSuite:
                             pass
                     
                 except Exception as e:
-                    print(f"    ❌ Failed to benchmark {impl_name}: {e}")
+                    print(f"    [FAIL] Failed to benchmark {impl_name}: {e}")
                     continue
     
     def print_results(self) -> None:
         """Print comprehensive benchmark results"""
         print("\n" + "=" * 70)
-        print("📊 COMPREHENSIVE BENCHMARK RESULTS")
+        print("[STATS] COMPREHENSIVE BENCHMARK RESULTS")
         print("=" * 70)
         
         # Group results by category
@@ -381,7 +381,7 @@ class BenchmarkSuite:
         
         # Print results by category
         for category, results in categories.items():
-            print(f"\n🏷️  {category} Results:")
+            print(f"\n[TAG]  {category} Results:")
             print("-" * 50)
             
             # Sort by total time (fastest first)
@@ -490,7 +490,7 @@ def main():
         try:
             seed = int(sys.argv[1])
         except ValueError:
-            print("⚠️  Invalid seed, using random")
+            print("[WARN]  Invalid seed, using random")
     
     # Create and run benchmark suite
     suite = BenchmarkSuite()

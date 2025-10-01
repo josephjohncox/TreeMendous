@@ -31,7 +31,7 @@ def profile_with_cprofile(func: Callable, output_file: str) -> pstats.Stats:
     """Profile function with cProfile and save results"""
     profiler = cProfile.Profile()
     
-    print(f"📊 Profiling {func.__name__}...")
+    print(f"[STATS] Profiling {func.__name__}...")
     profiler.enable()
     func()
     profiler.disable()
@@ -155,10 +155,10 @@ def profile_all_implementations(num_operations: int = 10_000) -> Dict[str, pstat
             pass
         
         if cpp_count > 0:
-            print(f"   ✅ C++ implementations included ({cpp_count} total)")
+            print(f"   [OK] C++ implementations included ({cpp_count} total)")
             
     except ImportError:
-        print("   ⚠️  C++ implementations not available")
+        print("   [WARN]  C++ implementations not available")
     
     results = {}
     output_dir = Path("performance_profiles")
@@ -169,7 +169,7 @@ def profile_all_implementations(num_operations: int = 10_000) -> Dict[str, pstat
         stats = profile_with_cprofile(func, output_file)
         results[name] = stats
         
-        print(f"\n✅ {name.upper()} profiling complete")
+        print(f"\n[OK] {name.upper()} profiling complete")
         print(f"   Profile saved to: {output_file}")
         
         # Print top 10 hotspots
@@ -229,29 +229,29 @@ def try_generate_flamegraph(prof_file: str, impl_name: str) -> bool:
             with open(output_file, 'w') as f:
                 f.write(result.stdout)
             
-            print(f"   ✅ Flame graph saved to: {output_file}")
+            print(f"   [OK] Flame graph saved to: {output_file}")
             return True
         else:
             # flameprof can fail on C++ code with minimal Python frames
             if 'cpp' in impl_name.lower():
-                print(f"   ℹ️  C++ code too fast for Python profiler (use py-spy instead)")
+                print(f"   [INFO]  C++ code too fast for Python profiler (use py-spy instead)")
             else:
                 error_msg = result.stderr if result.stderr else "Unknown error"
-                print(f"   ⚠️  flameprof failed: {error_msg[:100]}")
+                print(f"   [WARN]  flameprof failed: {error_msg[:100]}")
             return False
             
     except FileNotFoundError:
-        print(f"   ℹ️  flameprof not installed")
+        print(f"   [INFO]  flameprof not installed")
         return False
     except Exception as e:
-        print(f"   ⚠️  Error generating flame graph: {str(e)[:100]}")
+        print(f"   [WARN]  Error generating flame graph: {str(e)[:100]}")
         return False
 
 
 def compare_implementations_performance() -> None:
     """Compare performance across all implementations (Python and C++)"""
     
-    print("\n⚡ Performance Comparison (Python vs C++)")
+    print("\n[FAST] Performance Comparison (Python vs C++)")
     print("=" * 80)
     
     # Use unified workload for fair comparison
@@ -292,12 +292,12 @@ def compare_implementations_performance() -> None:
                 execute_workload(manager, ops)
             
             implementations.append(("C++ BoundarySummary", lambda: benchmark_cpp_boundary_summary(operations)))
-            print("   ✅ Including C++ implementations for comparison (Boundary, Treap, BoundarySummary)")
+            print("   [OK] Including C++ implementations for comparison (Boundary, Treap, BoundarySummary)")
         except ImportError:
-            print("   ✅ Including C++ implementations for comparison (Boundary, Treap)")
+            print("   [OK] Including C++ implementations for comparison (Boundary, Treap)")
             
     except ImportError:
-        print("   ⚠️  C++ implementations not available")
+        print("   [WARN]  C++ implementations not available")
     
     results = []
     
@@ -336,7 +336,7 @@ def compare_implementations_performance() -> None:
               f"{result['std_time']*1000:<9.2f}ms")
     
     # Calculate relative performance
-    print(f"\n📊 Relative Performance (vs Python Boundary):")
+    print(f"\n[STATS] Relative Performance (vs Python Boundary):")
     baseline = results[0]['avg_time']
     
     for result in results:
@@ -355,7 +355,7 @@ def compare_implementations_performance() -> None:
 def profile_hotspots(impl_name: str, operations: List[Tuple[str, int, int]]) -> None:
     """Deep dive into performance hotspots for specific implementation"""
     
-    print(f"\n🔍 Deep Profiling: {impl_name}")
+    print(f"\n[FIND] Deep Profiling: {impl_name}")
     print("=" * 80)
     
     # Map implementation names to functions
@@ -367,7 +367,7 @@ def profile_hotspots(impl_name: str, operations: List[Tuple[str, int, int]]) -> 
     }
     
     if impl_name not in implementations:
-        print(f"❌ Unknown implementation: {impl_name}")
+        print(f"[FAIL] Unknown implementation: {impl_name}")
         print(f"   Available: {', '.join(implementations.keys())}")
         return
     
@@ -387,7 +387,7 @@ def profile_hotspots(impl_name: str, operations: List[Tuple[str, int, int]]) -> 
     stats.sort_stats('cumulative')
     stats.print_stats(15)
     
-    print("\n⚡ By Total Time:")
+    print("\n[FAST] By Total Time:")
     stats.sort_stats('time')
     stats.print_stats(15)
     
@@ -428,7 +428,7 @@ def main():
             profile_hotspots(command, operations)
         
         else:
-            print(f"❌ Unknown command: {command}")
+            print(f"[FAIL] Unknown command: {command}")
             print("   Available: all, compare, boundary, summary, treap, boundary_summary")
     
     else:
@@ -461,15 +461,15 @@ def main():
         # Check if any C++ profiles were generated
         cpp_profiles = [impl for impl in stats_dict.keys() if 'cpp' in impl.lower()]
         if cpp_profiles:
-            print("\n💡 C++ Profiling Note:")
+            print("\n[TIP] C++ Profiling Note:")
             print("   Python profilers (cProfile, flameprof) can't see into C++ code.")
             print("   For C++ flame graphs with native frames, use py-spy:")
             print()
             print("   py-spy record --native -o cpp_flame.svg -- uv run python tests/performance/cpp_profiler.py")
             print("   open cpp_flame.svg")
         
-        print("\n✅ Profiling complete!")
-        print("\n💡 Usage Tips:")
+        print("\n[OK] Profiling complete!")
+        print("\n[TIP] Usage Tips:")
         print("   • python flamegraph_profiler.py all         - Profile all implementations")
         print("   • python flamegraph_profiler.py compare     - Quick Python vs C++ comparison")
         print("   • python flamegraph_profiler.py boundary    - Deep profile specific impl")

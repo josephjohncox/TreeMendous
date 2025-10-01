@@ -16,6 +16,14 @@ from typing import List, Tuple, Dict, Any, Optional
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# Fix Windows console encoding for Unicode characters
+if sys.platform == "win32":
+    import codecs
+    import io
+    # Set stdout to UTF-8 encoding
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
@@ -160,7 +168,7 @@ def run_comprehensive_benchmark(num_operations: int = 10_000) -> List[BenchmarkR
     results = []
     
     for impl_name, impl_class in implementations:
-        print(f"\n📊 Benchmarking {impl_name}...")
+        print(f"\n[INFO] Benchmarking {impl_name}...")
         
         # Create instance
         impl = impl_class()
@@ -181,7 +189,7 @@ def print_benchmark_report(results: List[BenchmarkResult]) -> None:
     """Print comprehensive benchmark report"""
     
     print("\n" + "=" * 80)
-    print("📈 COMPREHENSIVE BENCHMARK REPORT")
+    print("=== COMPREHENSIVE BENCHMARK REPORT ===")
     print("=" * 80)
     
     # Main performance table with clearer model names
@@ -197,7 +205,7 @@ def print_benchmark_report(results: List[BenchmarkResult]) -> None:
               f"{result.p99_time_us:<8.2f}")
     
     # Relative performance analysis
-    print(f"\n📊 Relative Performance (normalized to fastest):")
+    print(f"\n[STATS] Relative Performance (normalized to fastest):")
     print("-" * 70)
     
     fastest_time = min(r.total_time_ms for r in results)
@@ -227,19 +235,19 @@ def print_benchmark_report(results: List[BenchmarkResult]) -> None:
         print(f"{result.implementation:<22} {result.memory_intervals:<12} ~{bytes_per_interval}")
     
     # Consistency check
-    print(f"\n✅ Consistency Verification:")
+    print(f"\n[VERIFY] Consistency Verification:")
     print("-" * 60)
     
     # Check that all implementations report same total available length
     available_lengths = set(r.final_available_length for r in results)
     
     if len(available_lengths) == 1:
-        print(f"   ✅ All implementations report identical available length: {available_lengths.pop():,} units")
+        print(f"   [OK] All implementations report identical available length: {available_lengths.pop():,} units")
     else:
-        print(f"   ⚠️  Inconsistent available lengths: {available_lengths}")
+        print(f"   [WARN] Inconsistent available lengths: {available_lengths}")
     
     # Performance recommendations
-    print(f"\n🎯 Performance Recommendations:")
+    print(f"\n[RECOMMEND] Performance Recommendations:")
     print("-" * 60)
     
     fastest = min(results, key=lambda r: r.total_time_ms)
@@ -288,7 +296,7 @@ def profile_with_flamegraph(impl_class, impl_name: str, num_operations: int = 10
     # Save profile
     profiler.dump_stats(profile_file)
     
-    print(f"   ✅ Profile saved to: {profile_file}")
+    print(f"   [OK] Profile saved to: {profile_file}")
     
     # Print top functions
     stats = pstats.Stats(profiler)
@@ -327,14 +335,14 @@ def try_generate_flamegraph(profile_file: str) -> bool:
     except FileNotFoundError:
         return False
     except Exception as e:
-        print(f"   ⚠️  Flame graph generation failed: {e}")
+        print(f"   [WARN] Flame graph generation failed: {e}")
         return False
 
 
 def main():
     """Run comprehensive performance benchmarking"""
     
-    print("🚀 Tree-Mendous Protocol-Compliant Performance Benchmark")
+    print("=== Tree-Mendous Protocol-Compliant Performance Benchmark ===")
     print("=" * 80)
     print()
     
@@ -401,10 +409,10 @@ def main():
             print(f"   snakeviz {profile_files[0]}")
     
     else:
-        print("\n💡 Tip: Run with --profile flag for detailed profiling and flame graphs")
+        print("\n[TIP] Run with --profile flag for detailed profiling and flame graphs")
         print(f"   Example: python {Path(__file__).name} --profile")
     
-    print("\n✅ Benchmark complete!")
+    print("\n[COMPLETE] Benchmark complete!")
 
 
 if __name__ == "__main__":

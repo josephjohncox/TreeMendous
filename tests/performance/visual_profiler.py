@@ -170,7 +170,7 @@ def profile_and_visualize(impl_name: str, impl_class, num_operations: int = 10_0
     stats = pstats.Stats(profiler)
     
     # Performance summary
-    print(f"\n⚡ Performance Summary:")
+    print(f"\n[FAST] Performance Summary:")
     print(f"   Total time: {total_time:.3f}s")
     print(f"   Operations: {num_operations:,}")
     print(f"   Ops/sec: {num_operations/total_time:,.0f}")
@@ -269,7 +269,7 @@ def compare_all_implementations() -> None:
         print(f"{duration*1000:.2f}ms")
     
     # Print comparison table
-    print(f"\n📊 Performance Comparison ({num_ops:,} operations)")
+    print(f"\n[STATS] Performance Comparison ({num_ops:,} operations)")
     print("-" * 80)
     print(f"{'Implementation':<25} {'Time(ms)':<12} {'Ops/sec':<15} {'Relative':<10} {'Bar'}")
     print("-" * 80)
@@ -306,14 +306,14 @@ def main():
             name, impl_class = implementations[impl_name]
             profile_and_visualize(name, impl_class)
         else:
-            print(f"❌ Unknown implementation: {impl_name}")
+            print(f"[FAIL] Unknown implementation: {impl_name}")
             print(f"   Available: {', '.join(implementations.keys())}, compare")
     
     else:
         # Default: compare all
         compare_all_implementations()
         
-        print("\n💡 Tip: For detailed profiling of specific implementation:")
+        print("\n[TIP] Tip: For detailed profiling of specific implementation:")
         print("   python visual_profiler.py boundary")
         print("   python visual_profiler.py summary")
         print("   python visual_profiler.py treap")

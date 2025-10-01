@@ -111,20 +111,20 @@ def print_comparison(baseline: BenchmarkResult, optimized: BenchmarkResult):
     print(f"    Std dev:      {optimized.std_dev*1000:8.3f} ms")
     print(f"    Throughput:   {optimized.ops_per_sec:12,.0f} ops/sec")
     
-    print(f"\n  📊 IMPROVEMENT:")
+    print(f"\n  [STATS] IMPROVEMENT:")
     print(f"    Speedup:      {speedup:.2f}x faster")
     print(f"    Time saved:   {(baseline.avg_time - optimized.avg_time)*1000:.3f} ms ({(1 - 1/speedup)*100:.1f}%)")
     print(f"    Throughput:   +{(optimized.ops_per_sec - baseline.ops_per_sec):,.0f} ops/sec")
     
     if optimized.optimization_flags:
-        print(f"\n  🎯 Optimizations Enabled:")
+        print(f"\n  [TARGET] Optimizations Enabled:")
         for flag, enabled in optimized.optimization_flags.items():
             status = "✓" if enabled else "✗"
             print(f"    {status} {flag}")
 
 
 def main():
-    print("🚀 Tree-Mendous: Original vs Optimized Benchmark")
+    print("=== Tree-Mendous: Original vs Optimized Benchmark")
     print("="*70)
     
     # Generate test workload
@@ -164,7 +164,7 @@ def main():
         print("   ✗ Optimized C++ BoundarySummary not available")
     
     if not implementations:
-        print("\n❌ No implementations available. Build C++ extensions first:")
+        print("\n[FAIL] No implementations available. Build C++ extensions first:")
         print("   uv run python setup.py build_ext --inplace")
         return 1
     
@@ -221,7 +221,7 @@ def main():
         print_comparison(baseline, optimized)
     
     print("\n" + "="*70)
-    print("✅ Benchmark complete!")
+    print("[OK] Benchmark complete!")
     print("="*70)
     
     return 0
