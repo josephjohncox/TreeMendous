@@ -103,6 +103,33 @@ test-metal-quick: install-dev
     @echo "🍎 Running quick Metal benchmark..."
     uv run python -c 'from treemendous.cpp.metal import benchmark_metal_speedup, get_metal_info; print(get_metal_info()); print(benchmark_metal_speedup(10000, 5000))'
 
+# Large-scale GPU-optimized benchmarks (all implementations)
+benchmark-gpu-large: install-dev
+    @echo "🚀 Running large-scale GPU-optimized benchmark..."
+    @echo "   Testing: 10K-5M intervals with GPU-friendly workloads"
+    uv run python tests/performance/large_scale_gpu_benchmark.py
+
+benchmark-gpu-quick: install-dev
+    @echo "🚀 Running quick GPU benchmark (up to 500K intervals)..."
+    uv run python tests/performance/large_scale_gpu_benchmark.py --quick
+
+benchmark-gpu-focused: install-dev
+    @echo "🚀 Running GPU-focused benchmark (500K-5M intervals)..."
+    @echo "   Optimized for GPU sweet spot: massive datasets + bulk summaries"
+    uv run python tests/performance/large_scale_gpu_benchmark.py --gpu-only
+
+# GPU stress testing (sustained load, memory pressure, burst testing)
+stress-gpu: install-dev
+    @echo "🔥 Running GPU stress test suite..."
+    @echo "   ⚠️  WARNING: GPU will run at high load!"
+    uv run python tests/performance/gpu_stress_test.py
+
+# Batch operations benchmark (realistic GPU use cases)
+benchmark-batch: install-dev
+    @echo "📦 Running batch operations benchmark..."
+    @echo "   Real-world scenarios: memory allocator, job scheduler, network"
+    uv run python tests/performance/batch_operations_benchmark.py
+
 # Performance profiling with flame graphs (Python + C++)
 profile: install-dev
     @echo "🔥 Profiling all implementations (Python + C++)..."
@@ -395,6 +422,13 @@ help:
     @echo "  profile-cpp      - Profile C++ implementations"
     @echo "  flamegraph       - Generate flame graphs from profiles"
     @echo "  benchmark        - Quick performance comparison"
+    @echo ""
+    @echo "🚀 GPU Large-Scale Benchmarks:"
+    @echo "  benchmark-gpu-large   - Full scale test (10K-5M intervals)"
+    @echo "  benchmark-gpu-quick   - Quick test (up to 500K intervals)"
+    @echo "  benchmark-gpu-focused - GPU sweet spot (500K-5M intervals)"
+    @echo "  benchmark-batch       - Batch operations (realistic GPU use cases)"
+    @echo "  stress-gpu            - GPU stress test (sustained load, memory pressure)"
     @echo ""
     @echo "🚀 Release Management:"
     @echo "  version          - Show current version"

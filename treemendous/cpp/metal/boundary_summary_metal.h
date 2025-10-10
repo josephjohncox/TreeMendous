@@ -62,6 +62,10 @@ public:
     // Core interval operations
     void release_interval(int start, int end);
     void reserve_interval(int start, int end);
+    
+    // Batch operations (GPU-optimized)
+    void batch_reserve(const std::vector<std::pair<int, int>>& intervals);
+    void batch_release(const std::vector<std::pair<int, int>>& intervals);
 
     // Summary operations
     MetalSummary get_summary();

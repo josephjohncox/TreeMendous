@@ -80,6 +80,29 @@ PYBIND11_MODULE(boundary_summary_gpu, m) {
              py::arg("start"), py::arg("end"),
              "Remove interval from available space")
         
+        // Batch operations (GPU-optimized - single Python call)
+        .def("batch_reserve", [](GPUBoundarySummaryManager& self, const py::list& intervals) {
+            std::vector<std::pair<int, int>> cpp_intervals;
+            cpp_intervals.reserve(intervals.size());
+            for (auto item : intervals) {
+                auto interval = item.cast<py::tuple>();
+                cpp_intervals.emplace_back(interval[0].cast<int>(), interval[1].cast<int>());
+            }
+            self.batch_reserve(cpp_intervals);
+        }, py::arg("intervals"),
+           "Reserve multiple intervals in a single call (GPU-optimized)")
+        
+        .def("batch_release", [](GPUBoundarySummaryManager& self, const py::list& intervals) {
+            std::vector<std::pair<int, int>> cpp_intervals;
+            cpp_intervals.reserve(intervals.size());
+            for (auto item : intervals) {
+                auto interval = item.cast<py::tuple>();
+                cpp_intervals.emplace_back(interval[0].cast<int>(), interval[1].cast<int>());
+            }
+            self.batch_release(cpp_intervals);
+        }, py::arg("intervals"),
+           "Release multiple intervals in a single call (GPU-optimized)")
+        
         // Summary operations
         .def("get_summary", &GPUBoundarySummaryManager::get_summary,
              "Get summary statistics (adaptive CPU/GPU selection)")

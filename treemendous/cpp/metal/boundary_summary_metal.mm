@@ -106,6 +106,19 @@ public:
         cpu_intervals_[start] = end;
     }
     
+    // Batch operations for GPU efficiency
+    void batch_reserve(const std::vector<std::pair<int, int>>& intervals) {
+        for (const auto& [start, end] : intervals) {
+            reserve_interval(start, end);
+        }
+    }
+    
+    void batch_release(const std::vector<std::pair<int, int>>& intervals) {
+        for (const auto& [start, end] : intervals) {
+            release_interval(start, end);
+        }
+    }
+    
     void reserve_interval(int start, int end) {
         if (start >= end) return;
         
@@ -113,15 +126,33 @@ public:
         gpu_dirty_ = true;
         
         std::vector<std::pair<int, int>> to_add;
-        std::vector<std::map<int, int>::iterator> to_remove;
         
-        for (auto it = cpu_intervals_.begin(); it != cpu_intervals_.end(); ++it) {
+        // Optimized: use lower_bound instead of iterating all intervals
+        auto it = cpu_intervals_.lower_bound(start);
+        
+        // Check previous interval if it might overlap
+        if (it != cpu_intervals_.begin()) {
+            auto prev = std::prev(it);
+            if (prev->second > start) {
+                it = prev;
+            }
+        }
+        
+        // Process only overlapping intervals
+        std::vector<int> to_remove_keys;
+        to_remove_keys.reserve(4);  // Most reserves affect 0-2 intervals
+        to_add.reserve(4);
+        
+        while (it != cpu_intervals_.end() && it->first < end) {
             int istart = it->first;
             int iend = it->second;
             
-            if (end <= istart || start >= iend) continue;
+            if (iend <= start) {
+                ++it;
+                continue;
+            }
             
-            to_remove.push_back(it);
+            to_remove_keys.push_back(istart);
             
             if (istart < start) {
                 to_add.push_back({istart, start});
@@ -129,10 +160,13 @@ public:
             if (iend > end) {
                 to_add.push_back({end, iend});
             }
+            
+            ++it;
         }
         
-        for (auto it : to_remove) {
-            cpu_intervals_.erase(it);
+        // Apply changes
+        for (int key : to_remove_keys) {
+            cpu_intervals_.erase(key);
         }
         
         for (const auto& [s, e] : to_add) {
@@ -570,13 +604,19 @@ MetalBoundarySummaryManager::~MetalBoundarySummaryManager() {
 }
 
 void MetalBoundarySummaryManager::release_interval(int start, int end) {
-    auto* impl = reinterpret_cast<MetalBoundarySummaryManagerInternal*>(pImpl);
-    impl->release_interval(start, end);
+    reinterpret_cast<MetalBoundarySummaryManagerInternal*>(pImpl)->release_interval(start, end);
 }
 
 void MetalBoundarySummaryManager::reserve_interval(int start, int end) {
-    auto* impl = reinterpret_cast<MetalBoundarySummaryManagerInternal*>(pImpl);
-    impl->reserve_interval(start, end);
+    reinterpret_cast<MetalBoundarySummaryManagerInternal*>(pImpl)->reserve_interval(start, end);
+}
+
+void MetalBoundarySummaryManager::batch_reserve(const std::vector<std::pair<int, int>>& intervals) {
+    reinterpret_cast<MetalBoundarySummaryManagerInternal*>(pImpl)->batch_reserve(intervals);
+}
+
+void MetalBoundarySummaryManager::batch_release(const std::vector<std::pair<int, int>>& intervals) {
+    reinterpret_cast<MetalBoundarySummaryManagerInternal*>(pImpl)->batch_release(intervals);
 }
 
 MetalSummary MetalBoundarySummaryManager::get_summary() {

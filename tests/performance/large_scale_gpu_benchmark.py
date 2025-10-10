@@ -193,6 +193,9 @@ def benchmark_large_scale_implementation(
     summary_times = []
     operation_start = time.perf_counter()
     
+    # Progress reporting for large benchmarks
+    progress_interval = max(num_operations // 10, 1000)
+    
     for i, (op, start, end) in enumerate(operations):
         op_start = time.perf_counter()
         
@@ -221,6 +224,15 @@ def benchmark_large_scale_implementation(
             except:
                 pass
             summary_times.append((time.perf_counter() - summary_start) * 1_000_000)
+        
+        # Progress reporting for long-running tests
+        if (i + 1) % progress_interval == 0 and num_operations >= 50_000:
+            elapsed = time.perf_counter() - operation_start
+            progress_pct = (i + 1) / num_operations * 100
+            est_total = elapsed / (i + 1) * num_operations
+            est_remaining = est_total - elapsed
+            print(f"     Progress: {progress_pct:.0f}% ({i+1:,}/{num_operations:,} ops, "
+                  f"~{est_remaining:.0f}s remaining)")
     
     operation_time = (time.perf_counter() - operation_start) * 1000
     total_time = setup_time + operation_time
@@ -502,9 +514,27 @@ def print_comprehensive_report(all_results: Dict[int, List[LargeScaleBenchmarkRe
 
 def main():
     """Main benchmark execution"""
-    print("🌳 Tree-Mendous: Large-Scale GPU-Friendly Benchmark")
+    print("🌳 Tree-Mendous: Large-Scale GPU-Optimized Benchmark")
     print("Testing implementation hierarchy at massive scales")
     print("=" * 80)
+    
+    # Parse command line arguments
+    import argparse
+    parser = argparse.ArgumentParser(description='Large-scale GPU-optimized benchmark')
+    parser.add_argument('--quick', action='store_true', 
+                       help='Run quick test (skip ultra-large scales)')
+    parser.add_argument('--gpu-only', action='store_true',
+                       help='Focus on GPU-optimal scales (500K+)')
+    args = parser.parse_args()
+    
+    if args.quick:
+        print("🚀 Quick mode: Testing up to 500K intervals")
+    elif args.gpu_only:
+        print("🚀 GPU-focused mode: Testing 500K-5M intervals")
+    else:
+        print("🚀 Full mode: Testing 10K-5M intervals (may take several minutes)")
+    
+    print()
     
     # Set random seed
     random.seed(42)
@@ -516,8 +546,12 @@ def main():
     print_comprehensive_report(results)
     
     print("\n" + "=" * 80)
-    print("✅ Large-scale benchmark complete!")
+    print("✅ Large-scale GPU-optimized benchmark complete!")
     print("=" * 80)
+    print("\n💡 Tips:")
+    print("   • Run with --quick for faster testing")
+    print("   • Run with --gpu-only to focus on GPU sweet spot")
+    print("   • GPU excels at: bulk summaries, massive datasets (1M+ intervals)")
 
 
 if __name__ == "__main__":
