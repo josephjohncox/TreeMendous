@@ -209,6 +209,9 @@ class TreeMendousBackendManager:
         # C++ implementations
         self._register_cpp_backends()
         
+        # GPU implementations (CUDA)
+        self._register_gpu_backends()
+        
         # Validate all registered backends
         self._validate_backends()
     
@@ -320,6 +323,35 @@ class TreeMendousBackendManager:
         for config in cpp_backends:
             self._try_register_backend(config, self._load_cpp_implementation)
     
+    def _register_gpu_backends(self):
+        """Register and test GPU/CUDA implementations"""
+        
+        gpu_backends = [
+            BackendConfiguration(
+                implementation_id="gpu_boundary_summary",
+                name="GPU Boundary Summary (CUDA)",
+                language="C++/CUDA",
+                implementation_type=ImplementationType.BOUNDARY,
+                performance_tier=PerformanceTier.HIGH_PERFORMANCE,
+                features=["core-operations", "gpu-accelerated", "parallel-reduction", 
+                         "summary-stats", "massive-parallelism", "O(1) analytics"],
+                constructor_args={}
+            ),
+            BackendConfiguration(
+                implementation_id="metal_boundary_summary",
+                name="Metal Boundary Summary (MPS)",
+                language="C++/Metal",
+                implementation_type=ImplementationType.BOUNDARY,
+                performance_tier=PerformanceTier.HIGH_PERFORMANCE,
+                features=["core-operations", "gpu-accelerated", "metal-performance-shaders",
+                         "summary-stats", "apple-silicon", "O(1) analytics"],
+                constructor_args={}
+            ),
+        ]
+        
+        for config in gpu_backends:
+            self._try_register_backend(config, self._load_gpu_implementation)
+    
     def _try_register_backend(self, config: BackendConfiguration, loader_func):
         """Try to register a backend implementation"""
         try:
@@ -366,6 +398,33 @@ class TreeMendousBackendManager:
         }
         
         if config.implementation_id not in module_map:
+            return None
+        
+        module_path, class_name = module_map[config.implementation_id]
+        module = __import__(module_path, fromlist=[class_name])
+        return getattr(module, class_name)
+    
+    def _load_gpu_implementation(self, config: BackendConfiguration) -> Optional[Type]:
+        """Load GPU/CUDA or Metal implementation"""
+        module_map = {
+            "gpu_boundary_summary": ("treemendous.cpp.gpu.boundary_summary_gpu", "GPUBoundarySummaryManager"),
+            "metal_boundary_summary": ("treemendous.cpp.metal.boundary_summary_metal", "MetalBoundarySummaryManager"),
+        }
+        
+        if config.implementation_id not in module_map:
+            return None
+        
+        try:
+            # Check availability based on backend type
+            if "gpu" in config.implementation_id:
+                from treemendous.cpp.gpu import is_gpu_available
+                if not is_gpu_available():
+                    return None
+            elif "metal" in config.implementation_id:
+                from treemendous.cpp.metal import is_metal_available
+                if not is_metal_available():
+                    return None
+        except ImportError:
             return None
         
         module_path, class_name = module_map[config.implementation_id]

@@ -69,7 +69,8 @@ class BenchmarkSuite:
             "Simple Python": {},
             "Summary Python": {},
             "Simple C++": {},
-            "Summary C++": {}
+            "Summary C++": {},
+            "GPU": {}
         }
         
         if BACKEND_SYSTEM_AVAILABLE:
@@ -89,8 +90,14 @@ class BenchmarkSuite:
                 else:
                     category = "Simple Python"
                 
+                # Special handling for GPU implementations
+                if 'gpu-accelerated' in str(backend_info.features) or backend_info.language == "C++/CUDA":
+                    category = "GPU"
+                
                 # Use a clean name for the implementation
-                if 'treap' in backend_id:
+                if 'gpu' in backend_id:
+                    impl_name = "GPU Boundary"
+                elif 'treap' in backend_id:
                     impl_name = "Treap"
                 elif 'summary' in backend_id:
                     impl_name = "Summary Tree"

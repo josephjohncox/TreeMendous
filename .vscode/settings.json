@@ -22,7 +22,7 @@
         ".cache/": true,
         "__pycache__/": true,
         "*.egg-info/": true,
-        "*.egg": true,
+        "*.egg": true
     },
     "files.associations": {
         "map": "cpp",

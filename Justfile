@@ -35,6 +35,33 @@ build-cpp-icl: install clean-cpp
     TREE_MENDOUS_WITH_ICL=1 uv run python build.py
     @echo "✅ C++ extensions built with ICL support"
 
+# Build GPU/CUDA extensions (Linux/Windows)
+build-gpu: install-dev clean-cpp
+    @echo "🔧 Building GPU/CUDA extensions..."
+    @echo "   Requires: CUDA Toolkit installed"
+    WITH_CUDA=1 uv run python setup_gpu.py build_ext --inplace
+    @echo "✅ GPU extensions built"
+
+# Build Metal extensions (macOS)
+build-metal: install-dev clean-cpp
+    @echo "🍎 Building Metal/MPS extensions for macOS..."
+    @echo "   Requires: Xcode Command Line Tools"
+    uv run python setup_metal.py build_ext --inplace
+    @echo "✅ Metal extensions built"
+
+# Clean GPU build artifacts
+clean-gpu:
+    @echo "🧹 Cleaning GPU build artifacts..."
+    rm -rf treemendous/cpp/gpu/*.o treemendous/cpp/gpu/*.so treemendous/cpp/gpu/__pycache__
+    @echo "✅ GPU artifacts cleaned"
+
+# Clean Metal build artifacts
+clean-metal:
+    @echo "🧹 Cleaning Metal build artifacts..."
+    rm -rf treemendous/cpp/metal/*.o treemendous/cpp/metal/*.so treemendous/cpp/metal/__pycache__
+    rm -rf treemendous/cpp/metal/*.air treemendous/cpp/metal/*.metallib
+    @echo "✅ Metal artifacts cleaned"
+
 # Testing System
 test: install-dev
     uv run pytest
@@ -57,6 +84,24 @@ test-perf: install-dev
 
 test-perf-full: install-dev
     timeout 600 uv run python tests/performance/comprehensive_benchmark.py
+
+# GPU performance testing (CUDA - Linux/Windows)
+test-gpu: install-dev
+    @echo "🎮 Running GPU performance benchmarks..."
+    uv run python tests/performance/gpu_benchmark.py
+
+test-gpu-quick: install-dev
+    @echo "🎮 Running quick GPU benchmark..."
+    uv run python -c 'from treemendous.cpp.gpu import benchmark_gpu_speedup, get_gpu_info; print(get_gpu_info()); print(benchmark_gpu_speedup(10000, 5000))'
+
+# Metal performance testing (macOS)
+test-metal: install-dev
+    @echo "🍎 Running Metal performance benchmarks..."
+    uv run python tests/performance/metal_benchmark.py
+
+test-metal-quick: install-dev
+    @echo "🍎 Running quick Metal benchmark..."
+    uv run python -c 'from treemendous.cpp.metal import benchmark_metal_speedup, get_metal_info; print(get_metal_info()); print(benchmark_metal_speedup(10000, 5000))'
 
 # Performance profiling with flame graphs (Python + C++)
 profile: install-dev
@@ -328,13 +373,21 @@ help:
     @echo "  build            - Build package with C++ extensions"
     @echo "  build-cpp        - Build C++ extensions for development"
     @echo "  build-cpp-icl    - Build with Boost ICL support"
+    @echo "  build-gpu        - Build GPU/CUDA extensions (Linux/Windows)"
+    @echo "  build-metal      - Build Metal/MPS extensions (macOS)"
     @echo "  clean-cpp        - Clean C++ build artifacts"
+    @echo "  clean-gpu        - Clean GPU build artifacts"
+    @echo "  clean-metal      - Clean Metal build artifacts"
     @echo ""
     @echo "🧪 Testing:"
     @echo "  test             - Run complete test suite"
     @echo "  test-unified     - Cross-implementation validation"
     @echo "  test-protocols   - Test unified protocol system"
     @echo "  test-perf        - Performance benchmarks"
+    @echo "  test-gpu         - GPU performance benchmarks (CUDA)"
+    @echo "  test-gpu-quick   - Quick GPU availability check (CUDA)"
+    @echo "  test-metal       - Metal performance benchmarks (macOS)"
+    @echo "  test-metal-quick - Quick Metal availability check (macOS)"
     @echo "  validate         - Quick validation"
     @echo ""
     @echo "📊 Profiling & Benchmarks:"
