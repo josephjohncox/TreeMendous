@@ -196,15 +196,61 @@ public:
     }
     
     // Batch operations for GPU efficiency (amortize Python overhead)
-    void batch_reserve(const std::vector<std::pair<int, int>>& intervals) {
-        for (const auto& [start, end] : intervals) {
+    void batch_reserve(const std::vector<std::pair<int, int>>& reserves) {
+        if (reserves.empty()) return;
+        
+        // Optimized: process all reserves in one pass
+        for (const auto& [start, end] : reserves) {
             reserve_interval(start, end);
         }
     }
     
-    void batch_release(const std::vector<std::pair<int, int>>& intervals) {
-        for (const auto& [start, end] : intervals) {
-            release_interval(start, end);
+    void batch_release(const std::vector<std::pair<int, int>>& releases) {
+        if (releases.empty()) return;
+        
+        // Optimized batch release: sort + merge in one pass
+        if (cpu_intervals_.size() > 100 && releases.size() > 100) {
+            // Sort releases
+            std::vector<std::pair<int, int>> sorted_releases = releases;
+            std::sort(sorted_releases.begin(), sorted_releases.end());
+            
+            // Merge all intervals (existing + new) efficiently
+            std::vector<std::pair<int, int>> all_intervals;
+            all_intervals.reserve(cpu_intervals_.size() + sorted_releases.size());
+            
+            for (const auto& [s, e] : cpu_intervals_) {
+                all_intervals.emplace_back(s, e);
+            }
+            for (const auto& [s, e] : sorted_releases) {
+                all_intervals.emplace_back(s, e);
+            }
+            
+            std::sort(all_intervals.begin(), all_intervals.end());
+            
+            // Merge overlapping/adjacent intervals
+            cpu_intervals_.clear();
+            if (!all_intervals.empty()) {
+                int current_start = all_intervals[0].first;
+                int current_end = all_intervals[0].second;
+                
+                for (size_t i = 1; i < all_intervals.size(); i++) {
+                    if (all_intervals[i].first <= current_end) {
+                        current_end = std::max(current_end, all_intervals[i].second);
+                    } else {
+                        cpu_intervals_[current_start] = current_end;
+                        current_start = all_intervals[i].first;
+                        current_end = all_intervals[i].second;
+                    }
+                }
+                cpu_intervals_[current_start] = current_end;
+            }
+            
+            gpu_dirty_ = true;
+        } else {
+            // Small batch: use individual operations
+            for (const auto& [start, end] : releases) {
+                release_interval(start, end);
+            }
         }
     }
     

@@ -28,6 +28,113 @@ struct SummaryData {
 };
 
 // ============================================================================
+// KERNEL: PARALLEL BATCH MERGE (for release operations)
+// Merges overlapping/adjacent intervals in parallel
+// ============================================================================
+
+kernel void batch_merge_intervals(
+    device const Interval* input [[buffer(0)]],
+    device Interval* output [[buffer(1)]],
+    device atomic_int* output_count [[buffer(2)]],
+    constant uint& input_count [[buffer(3)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    if (gid >= input_count) return;
+    
+    Interval current = input[gid];
+    
+    // Check if this interval should be merged with next
+    bool should_output = true;
+    
+    if (gid + 1 < input_count) {
+        Interval next = input[gid + 1];
+        // If overlapping or adjacent, let the earlier one handle merging
+        if (current.end >= next.start) {
+            should_output = false;
+        }
+    }
+    
+    // Check if merged with previous
+    if (gid > 0) {
+        Interval prev = input[gid - 1];
+        if (prev.end >= current.start) {
+            // Already handled by previous interval
+            return;
+        }
+    }
+    
+    if (should_output) {
+        // Extend to include all overlapping intervals
+        int end = current.end;
+        for (uint i = gid + 1; i < input_count; i++) {
+            if (input[i].start <= end) {
+                end = max(end, input[i].end);
+            } else {
+                break;
+            }
+        }
+        
+        int idx = atomic_fetch_add_explicit(output_count, 1, memory_order_relaxed);
+        output[idx] = Interval{current.start, end};
+    }
+}
+
+// ============================================================================
+// KERNEL: PARALLEL BATCH SPLIT (for reserve operations)
+// Splits intervals that overlap with reserves in parallel
+// ============================================================================
+
+kernel void batch_split_intervals(
+    device const Interval* intervals [[buffer(0)]],
+    device const Interval* reserves [[buffer(1)]],
+    device Interval* output [[buffer(2)]],
+    device atomic_int* output_count [[buffer(3)]],
+    constant uint& interval_count [[buffer(4)]],
+    constant uint& reserve_count [[buffer(5)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    if (gid >= interval_count) return;
+    
+    Interval current = intervals[gid];
+    int start = current.start;
+    int end = current.end;
+    
+    // Check against all reserves for splits
+    bool has_overlap = false;
+    
+    for (uint i = 0; i < reserve_count; i++) {
+        Interval reserve = reserves[i];
+        
+        // No overlap
+        if (end <= reserve.start || start >= reserve.end) {
+            continue;
+        }
+        
+        has_overlap = true;
+        
+        // Output left fragment if exists
+        if (start < reserve.start) {
+            int idx = atomic_fetch_add_explicit(output_count, 1, memory_order_relaxed);
+            output[idx] = Interval{start, reserve.start};
+        }
+        
+        // Update remaining interval
+        if (end > reserve.end) {
+            start = reserve.end;
+        } else {
+            // Fully consumed
+            return;
+        }
+    }
+    
+    // Output remaining part (or whole interval if no overlap)
+    if (!has_overlap || start < end) {
+        int idx = atomic_fetch_add_explicit(output_count, 1, memory_order_relaxed);
+        output[idx] = Interval{start, end};
+    }
+}
+
+// ============================================================================
 // KERNEL: COMPUTE INTERVAL LENGTHS
 // ============================================================================
 
