@@ -58,6 +58,17 @@ private:
     id<MTLBuffer> intervals_buffer_;
     id<MTLBuffer> lengths_buffer_;
     id<MTLBuffer> gaps_buffer_;
+    size_t buffer_capacity_ = 0;
+    
+    // Reusable result buffers (avoid per-call allocations)
+    id<MTLBuffer> total_length_buffer_;
+    id<MTLBuffer> min_length_buffer_;
+    id<MTLBuffer> max_length_buffer_;
+    id<MTLBuffer> earliest_start_buffer_;
+    id<MTLBuffer> latest_end_buffer_;
+    id<MTLBuffer> gap_count_buffer_;
+    id<MTLBuffer> best_index_buffer_;
+    id<MTLBuffer> best_waste_buffer_;
     
     // Performance tracking
     int operation_count_ = 0;
@@ -259,27 +270,16 @@ public:
         ++gpu_operations_;
         
         @autoreleasepool {
+            ensure_result_buffers();
             id<MTLCommandBuffer> command_buffer = [command_queue_ commandBuffer];
             command_buffer.label = @"Summary Computation";
             
-            // Allocate result buffers
-            id<MTLBuffer> total_length_buffer = [device_ newBufferWithLength:sizeof(int)
-                                                                     options:MTLResourceStorageModeShared];
-            id<MTLBuffer> min_length_buffer = [device_ newBufferWithLength:sizeof(int)
-                                                                   options:MTLResourceStorageModeShared];
-            id<MTLBuffer> max_length_buffer = [device_ newBufferWithLength:sizeof(int)
-                                                                   options:MTLResourceStorageModeShared];
-            id<MTLBuffer> earliest_start_buffer = [device_ newBufferWithLength:sizeof(int)
-                                                                       options:MTLResourceStorageModeShared];
-            id<MTLBuffer> latest_end_buffer = [device_ newBufferWithLength:sizeof(int)
-                                                                   options:MTLResourceStorageModeShared];
-            
             // Initialize buffers
-            *static_cast<int*>(total_length_buffer.contents) = 0;
-            *static_cast<int*>(min_length_buffer.contents) = INT_MAX;
-            *static_cast<int*>(max_length_buffer.contents) = INT_MIN;
-            *static_cast<int*>(earliest_start_buffer.contents) = INT_MAX;
-            *static_cast<int*>(latest_end_buffer.contents) = INT_MIN;
+            *static_cast<int*>(total_length_buffer_.contents) = 0;
+            *static_cast<int*>(min_length_buffer_.contents) = INT_MAX;
+            *static_cast<int*>(max_length_buffer_.contents) = INT_MIN;
+            *static_cast<int*>(earliest_start_buffer_.contents) = INT_MAX;
+            *static_cast<int*>(latest_end_buffer_.contents) = INT_MIN;
             
             // Use fused kernel for better performance
             id<MTLComputeCommandEncoder> encoder = [command_buffer computeCommandEncoder];
@@ -290,11 +290,11 @@ public:
             
             uint32_t count = static_cast<uint32_t>(n);
             [encoder setBytes:&count length:sizeof(uint32_t) atIndex:1];
-            [encoder setBuffer:total_length_buffer offset:0 atIndex:2];
-            [encoder setBuffer:min_length_buffer offset:0 atIndex:3];
-            [encoder setBuffer:max_length_buffer offset:0 atIndex:4];
-            [encoder setBuffer:earliest_start_buffer offset:0 atIndex:5];
-            [encoder setBuffer:latest_end_buffer offset:0 atIndex:6];
+            [encoder setBuffer:total_length_buffer_ offset:0 atIndex:2];
+            [encoder setBuffer:min_length_buffer_ offset:0 atIndex:3];
+            [encoder setBuffer:max_length_buffer_ offset:0 atIndex:4];
+            [encoder setBuffer:earliest_start_buffer_ offset:0 atIndex:5];
+            [encoder setBuffer:latest_end_buffer_ offset:0 atIndex:6];
             
             // Set threadgroup memory
             [encoder setThreadgroupMemoryLength:THREADGROUP_SIZE * sizeof(int) atIndex:0];
@@ -309,21 +309,16 @@ public:
             [encoder endEncoding];
             
             // Compute gaps
-            id<MTLBuffer> gap_count_buffer = [device_ newBufferWithLength:sizeof(int)
-                                                                  options:MTLResourceStorageModeShared];
-            *static_cast<int*>(gap_count_buffer.contents) = 0;
+            *static_cast<int*>(gap_count_buffer_.contents) = 0;
             
             if (n > 1) {
-                id<MTLBuffer> gaps_buffer = [device_ newBufferWithLength:n * sizeof(int)
-                                                                 options:MTLResourceStorageModeShared];
-                
                 id<MTLComputeCommandEncoder> gap_encoder = [command_buffer computeCommandEncoder];
                 gap_encoder.label = @"Compute Gaps";
                 
                 [gap_encoder setComputePipelineState:gaps_pipeline_];
                 [gap_encoder setBuffer:intervals_buffer_ offset:0 atIndex:0];
-                [gap_encoder setBuffer:gaps_buffer offset:0 atIndex:1];
-                [gap_encoder setBuffer:gap_count_buffer offset:0 atIndex:2];
+                [gap_encoder setBuffer:gaps_buffer_ offset:0 atIndex:1];
+                [gap_encoder setBuffer:gap_count_buffer_ offset:0 atIndex:2];
                 [gap_encoder setBytes:&count length:sizeof(uint32_t) atIndex:3];
                 
                 [gap_encoder dispatchThreads:MTLSizeMake(n - 1, 1, 1)
@@ -338,12 +333,20 @@ public:
             // Collect results
             MetalSummary summary;
             summary.interval_count = static_cast<int>(n);
-            summary.total_free_length = *static_cast<int*>(total_length_buffer.contents);
-            summary.smallest_interval_length = *static_cast<int*>(min_length_buffer.contents);
-            summary.largest_interval_length = *static_cast<int*>(max_length_buffer.contents);
-            summary.earliest_start = *static_cast<int*>(earliest_start_buffer.contents);
-            summary.latest_end = *static_cast<int*>(latest_end_buffer.contents);
-            summary.total_gaps = *static_cast<int*>(gap_count_buffer.contents);
+            summary.total_free_length = *static_cast<int*>(total_length_buffer_.contents);
+            summary.smallest_interval_length = *static_cast<int*>(min_length_buffer_.contents);
+            summary.largest_interval_length = *static_cast<int*>(max_length_buffer_.contents);
+            summary.earliest_start = *static_cast<int*>(earliest_start_buffer_.contents);
+            summary.latest_end = *static_cast<int*>(latest_end_buffer_.contents);
+            summary.total_gaps = *static_cast<int*>(gap_count_buffer_.contents);
+            if (summary.total_gaps > 0) {
+                int total_gap_size = 0;
+                int* gaps = static_cast<int*>(gaps_buffer_.contents);
+                for (int i = 0; i < summary.total_gaps; ++i) {
+                    total_gap_size += gaps[i];
+                }
+                summary.avg_gap_size = static_cast<double>(total_gap_size) / summary.total_gaps;
+            }
             
             // Find start of largest interval (CPU is fine for this)
             for (const auto& [start, end] : cpu_intervals_) {
@@ -450,30 +453,16 @@ public:
         if (n == 0) return std::nullopt;
         
         @autoreleasepool {
-            // Compute lengths first
+            ensure_result_buffers();
             id<MTLCommandBuffer> command_buffer = [command_queue_ commandBuffer];
-            id<MTLComputeCommandEncoder> encoder = [command_buffer computeCommandEncoder];
-            
-            [encoder setComputePipelineState:length_pipeline_];
-            [encoder setBuffer:intervals_buffer_ offset:0 atIndex:0];
-            [encoder setBuffer:lengths_buffer_ offset:0 atIndex:1];
             
             uint32_t count = static_cast<uint32_t>(n);
-            [encoder setBytes:&count length:sizeof(uint32_t) atIndex:2];
-            
             MTLSize grid_size = MTLSizeMake(n, 1, 1);
             MTLSize threadgroup_size = MTLSizeMake(std::min((size_t)THREADGROUP_SIZE, n), 1, 1);
-            [encoder dispatchThreads:grid_size threadsPerThreadgroup:threadgroup_size];
-            [encoder endEncoding];
             
-            // Best fit search
-            id<MTLBuffer> best_index_buffer = [device_ newBufferWithLength:sizeof(int)
-                                                                   options:MTLResourceStorageModeShared];
-            id<MTLBuffer> best_waste_buffer = [device_ newBufferWithLength:sizeof(int)
-                                                                   options:MTLResourceStorageModeShared];
-            
-            *static_cast<int*>(best_index_buffer.contents) = INT_MAX;
-            *static_cast<int*>(best_waste_buffer.contents) = INT_MAX;
+            // Best fit search (lengths already populated during sync)
+            *static_cast<int*>(best_index_buffer_.contents) = INT_MAX;
+            *static_cast<int*>(best_waste_buffer_.contents) = INT_MAX;
             
             id<MTLComputeCommandEncoder> fit_encoder = [command_buffer computeCommandEncoder];
             [fit_encoder setComputePipelineState:best_fit_pipeline_];
@@ -482,8 +471,8 @@ public:
             [fit_encoder setBytes:&count length:sizeof(uint32_t) atIndex:2];
             [fit_encoder setBytes:&length length:sizeof(int) atIndex:3];
             [fit_encoder setBytes:&prefer_early length:sizeof(bool) atIndex:4];
-            [fit_encoder setBuffer:best_index_buffer offset:0 atIndex:5];
-            [fit_encoder setBuffer:best_waste_buffer offset:0 atIndex:6];
+            [fit_encoder setBuffer:best_index_buffer_ offset:0 atIndex:5];
+            [fit_encoder setBuffer:best_waste_buffer_ offset:0 atIndex:6];
             
             [fit_encoder dispatchThreads:grid_size threadsPerThreadgroup:threadgroup_size];
             [fit_encoder endEncoding];
@@ -491,7 +480,7 @@ public:
             [command_buffer commit];
             [command_buffer waitUntilCompleted];
             
-            int idx = *static_cast<int*>(best_index_buffer.contents);
+            int idx = *static_cast<int*>(best_index_buffer_.contents);
             if (idx == INT_MAX) return std::nullopt;
             
             // Get interval from CPU map (indexed access)
@@ -624,25 +613,17 @@ private:
             return;
         }
         
-        // Convert map to array
-        std::vector<MetalInterval> intervals;
-        intervals.reserve(n);
+        ensure_interval_buffers(n);
         
+        // Copy intervals into shared buffer and precompute lengths
+        auto* interval_ptr = static_cast<MetalInterval*>(intervals_buffer_.contents);
+        auto* lengths_ptr = static_cast<int*>(lengths_buffer_.contents);
+        size_t idx = 0;
         for (const auto& [start, end] : cpu_intervals_) {
-            intervals.push_back({start, end});
+            interval_ptr[idx] = MetalInterval{start, end};
+            lengths_ptr[idx] = end - start;
+            ++idx;
         }
-        
-        // Create/update buffers
-        size_t buffer_size = n * sizeof(MetalInterval);
-        intervals_buffer_ = [device_ newBufferWithBytes:intervals.data()
-                                                 length:buffer_size
-                                                options:MTLResourceStorageModeShared];
-        
-        lengths_buffer_ = [device_ newBufferWithLength:n * sizeof(int)
-                                               options:MTLResourceStorageModeShared];
-        
-        gaps_buffer_ = [device_ newBufferWithLength:n * sizeof(int)
-                                            options:MTLResourceStorageModeShared];
         
         gpu_dirty_ = false;
     }
@@ -654,6 +635,63 @@ private:
         } else {
             managed_start_ = std::min(managed_start_, start);
             managed_end_ = std::max(managed_end_, end);
+        }
+    }
+    
+    void ensure_interval_buffers(size_t n) {
+        if (n == 0) {
+            return;
+        }
+        if (buffer_capacity_ >= n && intervals_buffer_ && lengths_buffer_ && gaps_buffer_) {
+            return;
+        }
+        
+        size_t new_capacity = buffer_capacity_ > 0 ? buffer_capacity_ : 1;
+        while (new_capacity < n) {
+            new_capacity <<= 1;
+        }
+        buffer_capacity_ = new_capacity;
+        
+        intervals_buffer_ = [device_ newBufferWithLength:buffer_capacity_ * sizeof(MetalInterval)
+                                                 options:MTLResourceStorageModeShared];
+        lengths_buffer_ = [device_ newBufferWithLength:buffer_capacity_ * sizeof(int)
+                                               options:MTLResourceStorageModeShared];
+        gaps_buffer_ = [device_ newBufferWithLength:buffer_capacity_ * sizeof(int)
+                                            options:MTLResourceStorageModeShared];
+    }
+    
+    void ensure_result_buffers() {
+        if (!total_length_buffer_) {
+            total_length_buffer_ = [device_ newBufferWithLength:sizeof(int)
+                                                       options:MTLResourceStorageModeShared];
+        }
+        if (!min_length_buffer_) {
+            min_length_buffer_ = [device_ newBufferWithLength:sizeof(int)
+                                                     options:MTLResourceStorageModeShared];
+        }
+        if (!max_length_buffer_) {
+            max_length_buffer_ = [device_ newBufferWithLength:sizeof(int)
+                                                     options:MTLResourceStorageModeShared];
+        }
+        if (!earliest_start_buffer_) {
+            earliest_start_buffer_ = [device_ newBufferWithLength:sizeof(int)
+                                                         options:MTLResourceStorageModeShared];
+        }
+        if (!latest_end_buffer_) {
+            latest_end_buffer_ = [device_ newBufferWithLength:sizeof(int)
+                                                     options:MTLResourceStorageModeShared];
+        }
+        if (!gap_count_buffer_) {
+            gap_count_buffer_ = [device_ newBufferWithLength:sizeof(int)
+                                                     options:MTLResourceStorageModeShared];
+        }
+        if (!best_index_buffer_) {
+            best_index_buffer_ = [device_ newBufferWithLength:sizeof(int)
+                                                     options:MTLResourceStorageModeShared];
+        }
+        if (!best_waste_buffer_) {
+            best_waste_buffer_ = [device_ newBufferWithLength:sizeof(int)
+                                                     options:MTLResourceStorageModeShared];
         }
     }
 };
@@ -753,4 +791,3 @@ std::map<std::string, std::string> get_metal_device_info() {
     
     return info;
 }
-

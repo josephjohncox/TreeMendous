@@ -7,7 +7,7 @@ provides the best of both worlds: simple implementation with advanced analytics.
 """
 
 from dataclasses import dataclass
-from typing import Optional, List, Tuple, Dict, Any
+from typing import Optional, List, Tuple, Dict, Any, Callable
 import math
 
 from sortedcontainers import SortedDict
@@ -73,17 +73,17 @@ class BoundarySummary:
         
         # Basic interval statistics
         interval_count = len(intervals)
-        total_free = sum(end - start for start, end in intervals.items())
+        total_free = sum(end - start for start, (end, _) in intervals.items())
         
         # Find largest and smallest intervals
-        interval_lengths = [end - start for start, end in intervals.items()]
+        interval_lengths = [end - start for start, (end, _) in intervals.items()]
         largest_length = max(interval_lengths)
         smallest_length = min(interval_lengths)
         avg_length = total_free / interval_count if interval_count > 0 else 0.0
         
         # Find largest interval start
         largest_start = None
-        for start, end in intervals.items():
+        for start, (end, _) in intervals.items():
             if end - start == largest_length:
                 largest_start = start
                 break
@@ -93,7 +93,7 @@ class BoundarySummary:
         gaps = []
         
         for i in range(len(sorted_intervals) - 1):
-            current_end = sorted_intervals[i][1]
+            current_end = sorted_intervals[i][1][0]
             next_start = sorted_intervals[i + 1][0]
             if next_start > current_end:
                 gaps.append(next_start - current_end)
@@ -106,7 +106,7 @@ class BoundarySummary:
         
         # Bounds
         earliest_start = min(intervals.keys()) if intervals else None
-        latest_end = max(intervals.values()) if intervals else None
+        latest_end = max(end for end, _ in intervals.values()) if intervals else None
         
         # Utilization calculation
         utilization = 0.0
@@ -134,12 +134,12 @@ class BoundarySummary:
         )
 
 
-class BoundarySummaryManager(EnhancedIntervalManagerProtocol[None], PerformanceTrackingProtocol):
+class BoundarySummaryManager(EnhancedIntervalManagerProtocol[Any], PerformanceTrackingProtocol):
     """Boundary manager enhanced with comprehensive summary statistics"""
     
-    def __init__(self):
+    def __init__(self, merge_fn: Optional[Callable[[Any, Any], Any]] = None):
         # Core boundary management
-        self.intervals: SortedDict[int, int] = SortedDict()
+        self.intervals: SortedDict[int, Tuple[int, Optional[Any]]] = SortedDict()
         
         # Summary statistics caching
         self._cached_summary: Optional[BoundarySummary] = None
@@ -152,8 +152,20 @@ class BoundarySummaryManager(EnhancedIntervalManagerProtocol[None], PerformanceT
         # Performance tracking
         self._operation_count = 0
         self._cache_hits = 0
+        self._merge_fn = merge_fn
+
+    def _merge_data(self, data1: Optional[Any], data2: Optional[Any]) -> Optional[Any]:
+        if data1 is None:
+            return data2
+        if data2 is None:
+            return data1
+        if self._merge_fn is None:
+            if isinstance(data1, set) and isinstance(data2, set):
+                return data1 | data2
+            return data1
+        return self._merge_fn(data1, data2)
     
-    def release_interval(self, start: int, end: int) -> None:
+    def release_interval(self, start: int, end: int, data: Optional[Any] = None) -> None:
         """Add interval to available space with summary update"""
         if start >= end:
             return
@@ -164,30 +176,33 @@ class BoundarySummaryManager(EnhancedIntervalManagerProtocol[None], PerformanceT
         
         # Find insertion position
         idx = self.intervals.bisect_left(start)
+        merged_data = data
         
         # Merge with previous interval if overlapping or adjacent
         if idx > 0:
             prev_start = self.intervals.keys()[idx - 1]
-            prev_end = self.intervals[prev_start]
+            prev_end, prev_data = self.intervals[prev_start]
             if prev_end >= start:
                 start = prev_start
                 end = max(end, prev_end)
+                merged_data = self._merge_data(merged_data, prev_data)
                 idx -= 1
                 del self.intervals[prev_start]
         
         # Merge with following intervals if overlapping
         while idx < len(self.intervals):
             curr_start = self.intervals.keys()[idx]
-            curr_end = self.intervals[curr_start]
+            curr_end, curr_data = self.intervals[curr_start]
             if curr_start > end:
                 break
             end = max(end, curr_end)
+            merged_data = self._merge_data(merged_data, curr_data)
             del self.intervals[curr_start]
         
         # Insert merged interval
-        self.intervals[start] = end
+        self.intervals[start] = (end, merged_data)
     
-    def reserve_interval(self, start: int, end: int) -> None:
+    def reserve_interval(self, start: int, end: int, data: Optional[Any] = None) -> None:
         """Remove interval from available space with summary update"""
         if start >= end:
             return
@@ -200,17 +215,17 @@ class BoundarySummaryManager(EnhancedIntervalManagerProtocol[None], PerformanceT
         
         if idx > 0:
             prev_start = self.intervals.keys()[idx - 1]
-            prev_end = self.intervals[prev_start]
+            prev_end, _ = self.intervals[prev_start]
             if prev_end > start:
                 idx -= 1
         
-        intervals_to_add = []
+        intervals_to_add: List[Tuple[int, int, Optional[Any]]] = []
         keys_to_delete = []
         
         keys = list(self.intervals.keys())
         while idx < len(keys):
             curr_start = keys[idx]
-            curr_end = self.intervals[curr_start]
+            curr_end, curr_data = self.intervals[curr_start]
             
             if curr_start >= end:
                 break
@@ -223,9 +238,9 @@ class BoundarySummaryManager(EnhancedIntervalManagerProtocol[None], PerformanceT
                 
                 # Add non-overlapping parts
                 if curr_start < start:
-                    intervals_to_add.append((curr_start, start))
+                    intervals_to_add.append((curr_start, start, curr_data))
                 if curr_end > end:
-                    intervals_to_add.append((end, curr_end))
+                    intervals_to_add.append((end, curr_end, curr_data))
             
             idx += 1
         
@@ -233,8 +248,8 @@ class BoundarySummaryManager(EnhancedIntervalManagerProtocol[None], PerformanceT
         for key in keys_to_delete:
             del self.intervals[key]
         
-        for s, e in intervals_to_add:
-            self.intervals[s] = e
+        for s, e, interval_data in intervals_to_add:
+            self.intervals[s] = (e, interval_data)
     
     def find_interval(self, start: int, length: int) -> Optional[IntervalResult]:
         """Find suitable interval using boundary-based search"""
@@ -243,21 +258,21 @@ class BoundarySummaryManager(EnhancedIntervalManagerProtocol[None], PerformanceT
         # Check interval at idx
         if idx < len(self.intervals):
             s = self.intervals.keys()[idx]
-            e = self.intervals[s]
+            e, data = self.intervals[s]
             if s <= start < e and e - start >= length:
-                return IntervalResult(start=start, end=start + length)
+                return IntervalResult(start=start, end=start + length, data=data)
             elif s > start and e - s >= length:
-                return IntervalResult(start=s, end=s + length)
+                return IntervalResult(start=s, end=s + length, data=data)
         
         # Check previous interval
         if idx > 0:
             idx -= 1
             s = self.intervals.keys()[idx]
-            e = self.intervals[s]
+            e, data = self.intervals[s]
             if s <= start < e and e - start >= length:
-                return IntervalResult(start=start, end=start + length)
+                return IntervalResult(start=start, end=start + length, data=data)
             elif start < s and e - s >= length:
-                return IntervalResult(start=s, end=s + length)
+                return IntervalResult(start=s, end=s + length, data=data)
         
         return None
     
@@ -266,16 +281,16 @@ class BoundarySummaryManager(EnhancedIntervalManagerProtocol[None], PerformanceT
         best_interval = None
         best_size = float('inf')
         
-        for start, end in self.intervals.items():
+        for start, (end, data) in self.intervals.items():
             available_length = end - start
             if available_length >= length:
                 if available_length < best_size:
                     best_size = available_length
-                    best_interval = (start, end)
+                    best_interval = (start, end, data)
         
         if best_interval:
-            start, end = best_interval
-            return IntervalResult(start=start, end=start + length, length=length)
+            start, end, data = best_interval
+            return IntervalResult(start=start, end=start + length, length=length, data=data)
         
         return None
     
@@ -287,21 +302,22 @@ class BoundarySummaryManager(EnhancedIntervalManagerProtocol[None], PerformanceT
         largest_interval = None
         largest_size = 0
         
-        for start, end in self.intervals.items():
+        for start, (end, data) in self.intervals.items():
             size = end - start
             if size > largest_size:
                 largest_size = size
-                largest_interval = (start, end)
+                largest_interval = (start, end, data)
         
         if largest_interval:
-            start, end = largest_interval
-            return IntervalResult(start=start, end=end, length=end - start)
+            start, end, data = largest_interval
+            return IntervalResult(start=start, end=end, length=end - start, data=data)
         
         return None
     
     def get_intervals(self) -> List[IntervalResult]:
         """Get all available intervals"""
-        return [IntervalResult(start=start, end=end) for start, end in self.intervals.items()]
+        return [IntervalResult(start=start, end=end, data=data)
+                for start, (end, data) in self.intervals.items()]
     
     def get_total_available_length(self) -> int:
         """Get total available space (with caching)"""
@@ -347,17 +363,17 @@ class BoundarySummaryManager(EnhancedIntervalManagerProtocol[None], PerformanceT
         best_fit_size = float('inf')
         best_start = float('inf')
         
-        for start, end in self.intervals.items():
+        for start, (end, data) in self.intervals.items():
             available = end - start
             if available >= length:
                 if prefer_early:
                     if start < best_start:
-                        best_candidate = IntervalResult(start=start, end=start + length)
+                        best_candidate = IntervalResult(start=start, end=start + length, data=data)
                         best_start = start
                 else:
                     # Best fit: smallest interval that satisfies requirement
                     if available < best_fit_size:
-                        best_candidate = IntervalResult(start=start, end=start + length)
+                        best_candidate = IntervalResult(start=start, end=start + length, data=data)
                         best_fit_size = available
         
         return best_candidate
@@ -370,9 +386,9 @@ class BoundarySummaryManager(EnhancedIntervalManagerProtocol[None], PerformanceT
             return None
         
         # Find the interval with largest size
-        for start, end in self.intervals.items():
+        for start, (end, data) in self.intervals.items():
             if (end - start) == summary.largest_interval_length:
-                return IntervalResult(start=start, end=end)
+                return IntervalResult(start=start, end=end, data=data)
         
         return None
     
@@ -402,8 +418,9 @@ class BoundarySummaryManager(EnhancedIntervalManagerProtocol[None], PerformanceT
         print("Boundary-Based Summary Interval Manager:")
         print(f"Available intervals ({len(self.intervals)}):")
         
-        for start, end in self.intervals.items():
-            print(f"  [{start}, {end}) length={end-start}")
+        for start, (end, data) in self.intervals.items():
+            suffix = f" data={data}" if data is not None else ""
+            print(f"  [{start}, {end}) length={end-start}{suffix}")
         
         summary = self.get_summary()
         print(f"\nSummary Statistics:")
@@ -414,7 +431,7 @@ class BoundarySummaryManager(EnhancedIntervalManagerProtocol[None], PerformanceT
         print(f"  Utilization: {summary.utilization:.2%}")
         
         perf = self.get_performance_stats()
-        print(f"  Cache hit rate: {perf['cache_hit_rate']:.1%}")
+        print(f"  Cache hit rate: {perf.cache_hit_rate:.1%}")
 
 
 # Convenience functions for different use cases

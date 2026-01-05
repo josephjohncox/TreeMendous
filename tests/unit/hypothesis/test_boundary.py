@@ -60,7 +60,7 @@ def test_interval_merging() -> None:
 
     expected_intervals = [(0, 10), (15, 35), (40, 100)]
     intervals: List[Tuple[int, int]] = []
-    for start, end in manager.intervals.items():
+    for start, (end, _) in manager.intervals.items():
         intervals.append((start, end))
 
     assert intervals == expected_intervals
@@ -76,7 +76,7 @@ def test_adjacent_intervals() -> None:
     manager.release_interval(100, 200)
     
     # Should merge into single interval
-    intervals = [(s,e) for s,e in manager.intervals.items()]
+    intervals = [(s, e) for s, (e, _) in manager.intervals.items()]
     assert intervals == [(0, 200)]
     assert manager.get_total_available_length() == 200
 
@@ -88,7 +88,7 @@ def test_overlapping_release() -> None:
     # Release overlapping both sides
     manager.release_interval(20, 80)
     
-    intervals = [(s,e) for s,e in manager.intervals.items()]
+    intervals = [(s, e) for s, (e, _) in manager.intervals.items()]
     assert intervals == [(0, 100)]
     assert manager.get_total_available_length() == 100
 

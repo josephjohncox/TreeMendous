@@ -1,27 +1,41 @@
 from sortedcontainers import SortedDict
-from typing import List, Optional, Tuple
-from .protocols import CoreIntervalManagerProtocol, IntervalResult, AvailabilityStats
+from typing import Any, Callable, List, Optional, Tuple
+from .protocols import CoreIntervalManagerProtocol, IntervalResult
 
-class IntervalManager(CoreIntervalManagerProtocol[None]):
-    def __init__(self) -> None:
-        # Intervals are stored as {start: end}
-        self.intervals: SortedDict[int, int] = SortedDict()
+class IntervalManager(CoreIntervalManagerProtocol[Any]):
+    def __init__(self, merge_fn: Optional[Callable[[Any, Any], Any]] = None) -> None:
+        # Intervals are stored as {start: (end, data)}
+        self.intervals: SortedDict[int, Tuple[int, Optional[Any]]] = SortedDict()
         self.total_available_length: int = 0
+        self._merge_fn = merge_fn
 
-    def release_interval(self, start: int, end: int) -> None:
+    def _merge_data(self, data1: Optional[Any], data2: Optional[Any]) -> Optional[Any]:
+        if data1 is None:
+            return data2
+        if data2 is None:
+            return data1
+        if self._merge_fn is None:
+            if isinstance(data1, set) and isinstance(data2, set):
+                return data1 | data2
+            return data1
+        return self._merge_fn(data1, data2)
+
+    def release_interval(self, start: int, end: int, data: Optional[Any] = None) -> None:
         if start >= end:
             return
 
         # Find position to insert or merge
         idx = self.intervals.bisect_left(start)
+        merged_data = data
 
         # Check and merge with previous interval if overlapping or adjacent
         if idx > 0:
             prev_start = self.intervals.keys()[idx - 1]
-            prev_end = self.intervals[prev_start]
+            prev_end, prev_data = self.intervals[prev_start]
             if prev_end >= start:
                 start = prev_start
                 end = max(end, prev_end)
+                merged_data = self._merge_data(merged_data, prev_data)
                 idx -= 1
                 del self.intervals[prev_start]
                 self.total_available_length -= prev_end - prev_start
@@ -29,18 +43,19 @@ class IntervalManager(CoreIntervalManagerProtocol[None]):
         # Merge with next intervals if overlapping
         while idx < len(self.intervals):
             curr_start = self.intervals.keys()[idx]
-            curr_end = self.intervals[curr_start]
+            curr_end, curr_data = self.intervals[curr_start]
             if curr_start > end:
                 break
             end = max(end, curr_end)
+            merged_data = self._merge_data(merged_data, curr_data)
             del self.intervals[curr_start]
             self.total_available_length -= curr_end - curr_start
 
         # Insert the new merged interval
-        self.intervals[start] = end
+        self.intervals[start] = (end, merged_data)
         self.total_available_length += end - start
 
-    def reserve_interval(self, start: int, end: int) -> None:
+    def reserve_interval(self, start: int, end: int, data: Optional[Any] = None) -> None:
         if start >= end:
             return
 
@@ -48,16 +63,16 @@ class IntervalManager(CoreIntervalManagerProtocol[None]):
 
         if idx > 0:
             prev_start = self.intervals.keys()[idx - 1]
-            prev_end = self.intervals[prev_start]
+            prev_end, _ = self.intervals[prev_start]
             if prev_end > start:
                 idx -= 1
 
-        intervals_to_add: List[Tuple[int, int]] = []
+        intervals_to_add: List[Tuple[int, int, Optional[Any]]] = []
         keys_to_delete: List[int] = []
 
         while idx < len(self.intervals):
             curr_start = self.intervals.keys()[idx]
-            curr_end = self.intervals[curr_start]
+            curr_end, curr_data = self.intervals[curr_start]
 
             if curr_start >= end:
                 break
@@ -72,9 +87,9 @@ class IntervalManager(CoreIntervalManagerProtocol[None]):
 
                 # Add non-overlapping intervals
                 if curr_start < start:
-                    intervals_to_add.append((curr_start, start))
+                    intervals_to_add.append((curr_start, start, curr_data))
                 if curr_end > end:
-                    intervals_to_add.append((end, curr_end))
+                    intervals_to_add.append((end, curr_end, curr_data))
 
             idx += 1
 
@@ -83,8 +98,8 @@ class IntervalManager(CoreIntervalManagerProtocol[None]):
             del self.intervals[key]
 
         # Add new intervals
-        for s, e in intervals_to_add:
-            self.intervals[s] = e
+        for s, e, interval_data in intervals_to_add:
+            self.intervals[s] = (e, interval_data)
             self.total_available_length += e - s
 
     def find_interval(self, start: int, length: int) -> Optional[IntervalResult]:
@@ -94,21 +109,21 @@ class IntervalManager(CoreIntervalManagerProtocol[None]):
         # Check the interval at idx
         if idx < len(intervals_keys):
             s = intervals_keys[idx]
-            e = self.intervals[s]
+            e, data = self.intervals[s]
             if s <= start < e and e - start >= length:
-                return IntervalResult(start=start, end=start + length)
+                return IntervalResult(start=start, end=start + length, data=data)
             elif s > start and e - s >= length:
-                return IntervalResult(start=s, end=s + length)
+                return IntervalResult(start=s, end=s + length, data=data)
 
         # Check the previous interval
         if idx > 0:
             idx -= 1
             s = intervals_keys[idx]
-            e = self.intervals[s]
+            e, data = self.intervals[s]
             if s <= start < e and e - start >= length:
-                return IntervalResult(start=start, end=start + length)
+                return IntervalResult(start=start, end=start + length, data=data)
             elif start < s and e - s >= length:
-                return IntervalResult(start=s, end=s + length)
+                return IntervalResult(start=s, end=s + length, data=data)
 
         return None
 
@@ -117,12 +132,14 @@ class IntervalManager(CoreIntervalManagerProtocol[None]):
 
     def print_intervals(self) -> None:
         print("Available intervals:")
-        for s, e in self.intervals.items():
-            print(f"[{s}, {e})")
+        for s, (e, data) in self.intervals.items():
+            suffix = f" data={data}" if data is not None else ""
+            print(f"[{s}, {e}){suffix}")
         print(f"Total available length: {self.total_available_length}")
     
     def get_intervals(self) -> List[IntervalResult]:
-        return [IntervalResult(start=start, end=end) for start, end in self.intervals.items()]
+        return [IntervalResult(start=start, end=end, data=data)
+                for start, (end, data) in self.intervals.items()]
 
 # Example usage:
 if __name__ == "__main__":

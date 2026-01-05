@@ -7,7 +7,7 @@ the free space distribution in its subtree, allowing for fast "best fit" operati
 """
 
 from dataclasses import dataclass
-from typing import Generic, Optional, List, Tuple, TypeVar, cast, Protocol
+from typing import Any, Callable, Generic, Optional, List, Tuple, TypeVar, cast, Protocol
 try:
     from treemendous.basic.base import IntervalNodeBase, IntervalNodeProtocol, IntervalTreeBase
     from treemendous.basic.protocols import CoreIntervalManagerProtocol, EnhancedIntervalManagerProtocol, IntervalResult, AvailabilityStats
@@ -105,11 +105,11 @@ class TreeSummary:
         )
 
 
-class SummaryIntervalNode(IntervalNodeBase['SummaryIntervalNode', None]):
+class SummaryIntervalNode(IntervalNodeBase['SummaryIntervalNode', Any]):
     """AVL tree node with comprehensive summary statistics"""
     
-    def __init__(self, start: int, end: int) -> None:
-        super().__init__(start, end)
+    def __init__(self, start: int, end: int, data: Optional[Any] = None) -> None:
+        super().__init__(start, end, data)
         self.summary: TreeSummary = TreeSummary.from_interval(start, end)
         self.height: int = 1
         self.total_length: int = end - start  # For compatibility
@@ -143,11 +143,11 @@ class SummaryIntervalNode(IntervalNodeBase['SummaryIntervalNode', None]):
         return node.height if node else 0
 
 
-class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode, None], EnhancedIntervalManagerProtocol[None]):
+class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode, Any], EnhancedIntervalManagerProtocol[Any]):
     """AVL interval tree with summary statistics for efficient scheduling"""
     
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, merge_fn: Optional[Callable[[Any, Any], Any]] = None) -> None:
+        super().__init__(merge_fn=merge_fn)
         self.root: Optional[SummaryIntervalNode] = None
         self._managed_space_start: Optional[int] = None
         self._managed_space_end: Optional[int] = None
@@ -186,11 +186,11 @@ class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode, None], EnhancedI
         return base_summary
     
     # Implement required abstract methods
-    def reserve_interval(self, start: int, end: int, data=None) -> None:
+    def reserve_interval(self, start: int, end: int, data: Optional[Any] = None) -> None:
         """Mark interval as occupied (remove from free space)"""
         self.root = self._delete_interval(self.root, start, end)
         
-    def release_interval(self, start: int, end: int, data=None) -> None:
+    def release_interval(self, start: int, end: int, data: Optional[Any] = None) -> None:
         """Mark interval as free (add to available space)"""
         # Track managed space bounds
         self._update_managed_bounds(start, end)
@@ -199,12 +199,14 @@ class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode, None], EnhancedI
         self.root = self._delete_overlaps(self.root, start, end, overlapping_nodes)
         
         # Merge with overlapping intervals
+        merged_data = data
         for node in overlapping_nodes:
             start = min(start, node.start)
             end = max(end, node.end)
+            merged_data = self.merge_data(merged_data, node.data)
             
         # Insert merged interval
-        new_node = SummaryIntervalNode(start, end)
+        new_node = SummaryIntervalNode(start, end, merged_data)
         self.root = self._insert(self.root, new_node)
     
     def _update_managed_bounds(self, start: int, end: int) -> None:
@@ -275,20 +277,20 @@ class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode, None], EnhancedI
             'bounds': (summary.earliest_free_start, summary.latest_free_end)
         }
     
-    def get_intervals(self) -> List[Tuple[int, int, None]]:
+    def get_intervals(self) -> List[Tuple[int, int, Optional[Any]]]:
         """Get all free intervals"""
-        intervals: List[Tuple[int, int, None]] = []
+        intervals: List[Tuple[int, int, Optional[Any]]] = []
         self._collect_intervals(self.root, intervals)
         return intervals
         
     def _collect_intervals(self, node: Optional[SummaryIntervalNode], 
-                          intervals: List[Tuple[int, int, None]]) -> None:
+                          intervals: List[Tuple[int, int, Optional[Any]]]) -> None:
         """Collect all intervals via in-order traversal"""
         if not node:
             return
             
         self._collect_intervals(node.left, intervals)
-        intervals.append((node.start, node.end, None))
+        intervals.append((node.start, node.end, node.data))
         self._collect_intervals(node.right, intervals)
     
     def _find_interval_optimized(self, node: Optional[SummaryIntervalNode], 
@@ -400,12 +402,12 @@ class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode, None], EnhancedI
             
             # Create left remainder if exists
             if node.start < start:
-                left_node = SummaryIntervalNode(node.start, start)
+                left_node = SummaryIntervalNode(node.start, start, node.data)
                 nodes_to_insert.append(left_node)
                 
             # Create right remainder if exists  
             if node.end > end:
-                right_node = SummaryIntervalNode(end, node.end)
+                right_node = SummaryIntervalNode(end, node.end, node.data)
                 nodes_to_insert.append(right_node)
                 
             # Remove current node and process subtrees

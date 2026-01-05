@@ -43,6 +43,7 @@ print(f"   Compute: {gpu_info.get('compute_capability', 'Unknown')}")
 # Import implementations
 from treemendous.cpp.gpu.boundary_summary_gpu import GPUBoundarySummaryManager
 from treemendous.cpp.boundary_summary import BoundarySummaryManager as CPUBoundarySummaryManager
+from tests.performance.workload import generate_realistic_workload, iter_workload
 
 
 @dataclass
@@ -56,16 +57,7 @@ class BenchmarkResult:
     memory_mb: float
 
 
-def generate_workload(num_operations: int, range_size: int = 1_000_000) -> List[Tuple[str, int, int]]:
-    """Generate realistic interval management workload"""
-    operations = []
-    for _ in range(num_operations):
-        op_type = random.choice(['reserve', 'release'])
-        start = random.randint(0, range_size - 1000)
-        length = random.randint(10, 5000)
-        end = start + length
-        operations.append((op_type, start, end))
-    return operations
+WORKLOAD_PROFILE = "allocator"
 
 
 def benchmark_cpu_implementation(num_intervals: int, num_operations: int) -> BenchmarkResult:
@@ -76,16 +68,24 @@ def benchmark_cpu_implementation(num_intervals: int, num_operations: int) -> Ben
     manager.release_interval(0, num_intervals * 100)
     
     # Generate workload
-    workload = generate_workload(num_operations, num_intervals * 100)
+    workload = generate_realistic_workload(
+        num_operations,
+        profile=WORKLOAD_PROFILE,
+        space_range=(0, num_intervals * 100),
+        seed=42,
+        include_data=False
+    )
     
     # Time operations
     start_time = time.perf_counter()
-    for op, start, end in workload:
+    for op, start, end, _ in iter_workload(workload):
         try:
             if op == 'reserve':
                 manager.reserve_interval(start, end)
-            else:
+            elif op == 'release':
                 manager.release_interval(start, end)
+            elif op == 'find':
+                manager.find_interval(start, end - start)
         except:
             pass
     total_time = (time.perf_counter() - start_time) * 1000  # ms
@@ -119,11 +119,17 @@ def benchmark_gpu_implementation(num_intervals: int, num_operations: int) -> Ben
     manager.release_interval(0, num_intervals * 100)
     
     # Generate workload
-    workload = generate_workload(num_operations, num_intervals * 100)
+    workload = generate_realistic_workload(
+        num_operations,
+        profile=WORKLOAD_PROFILE,
+        space_range=(0, num_intervals * 100),
+        seed=42,
+        include_data=False
+    )
     
     # Time operations
     start_time = time.perf_counter()
-    for op, start, end in workload:
+    for op, start, end, _ in iter_workload(workload):
         try:
             if op == 'reserve':
                 manager.reserve_interval(start, end)
@@ -312,4 +318,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

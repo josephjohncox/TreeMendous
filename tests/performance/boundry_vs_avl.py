@@ -1,4 +1,4 @@
-from typing import List, Tuple, Callable, Dict, Type, Protocol
+from typing import List, Tuple, Callable, Dict, Type, Protocol, Any
 from dataclasses import dataclass
 from collections import defaultdict
 import time
@@ -7,6 +7,7 @@ from treemendous.basic.base import IntervalManagerProtocol
 from treemendous.cpp.boundary import IntervalManager as CppIntervalManager
 from treemendous.basic.boundary import IntervalManager as PyIntervalManager
 from treemendous.basic.avl_earliest import EarliestIntervalTree
+from tests.performance.workload import generate_realistic_workload
 
 # Try to import CppICIntervalManager, set to None if import fails
 try:
@@ -22,6 +23,17 @@ class BenchmarkResult:
     total_time: float
     op_times: Dict[str, float]
     intervals: List[Tuple[int, int]]
+
+
+def normalize_intervals(intervals: List[Any]) -> List[Tuple[int, int]]:
+    """Normalize interval list to (start, end) tuples."""
+    normalized: List[Tuple[int, int]] = []
+    for interval in intervals:
+        if hasattr(interval, 'start') and hasattr(interval, 'end'):
+            normalized.append((interval.start, interval.end))
+        elif isinstance(interval, tuple) and len(interval) >= 2:
+            normalized.append((interval[0], interval[1]))
+    return normalized
 
 
 def benchmark_manager(
@@ -46,18 +58,18 @@ def benchmark_manager(
     return BenchmarkResult(
         total_time=sum(sum(times) for times in op_times.values()),
         op_times=avg_times,
-        intervals=sorted(manager.get_intervals())
+        intervals=sorted(normalize_intervals(manager.get_intervals()))
     )
 
 def generate_operations(num_operations: int) -> List[Tuple[str, int, int]]:
-    operations: List[Tuple[str, int, int]] = []
-    for _ in range(num_operations):
-        op_type: str = random.choice(['reserve', 'release', 'find'])
-        start: int = random.randint(0, 9_999_899)
-        length: int = random.randint(1, 1000)
-        end: int = start + length
-        operations.append((op_type, start, end))
-    return operations
+    return generate_realistic_workload(
+        num_operations=num_operations,
+        profile="allocator",
+        space_range=(0, 9_999_900),
+        operation_mix={'reserve': 0.4, 'release': 0.4, 'find': 0.2},
+        seed=42,
+        include_data=False
+    )
 
 def merge_intervals(intervals: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
     if not intervals:

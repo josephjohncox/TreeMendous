@@ -1,11 +1,13 @@
 from typing import List, Tuple
-import random
+
+from tests.performance.workload import generate_realistic_workload
 
 def generate_operations(num_operations: int) -> List[Tuple[str, int, int]]:
-    operations: List[Tuple[str, int, int]] = []
-    for _ in range(num_operations):
-        op_type: str = random.choice(['reserve', 'release', 'find'])
-        start: int = random.randint(0, 999_900)
-        end: int = start + random.randint(1, 100)
-        operations.append((op_type, start, end))
-    return operations
+    return generate_realistic_workload(
+        num_operations=num_operations,
+        profile="scheduler",
+        space_range=(0, 999_900),
+        operation_mix={'reserve': 0.4, 'release': 0.4, 'find': 0.2},
+        seed=42,
+        include_data=False
+    )

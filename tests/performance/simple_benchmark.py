@@ -10,6 +10,7 @@ import time
 import random
 import statistics
 from pathlib import Path
+from tests.performance.workload import generate_realistic_workload
 
 # Add paths for import resolution  
 project_root = Path(__file__).parent.parent.parent
@@ -25,15 +26,14 @@ except ImportError as e:
 
 
 def generate_operations(num_ops: int) -> list:
-    """Generate random interval operations"""
-    operations = []
-    for _ in range(num_ops):
-        op_type = random.choice(['reserve', 'release', 'find'])
-        start = random.randint(0, 999_900)
-        length = random.randint(1, 1000)
-        end = start + length
-        operations.append((op_type, start, end))
-    return operations
+    """Generate realistic interval operations"""
+    return generate_realistic_workload(
+        num_operations=num_ops,
+        profile="scheduler",
+        space_range=(0, 1_000_000),
+        seed=42,
+        include_data=False
+    )
 
 
 def benchmark_basic_operations(num_ops: int = 10_000) -> dict:

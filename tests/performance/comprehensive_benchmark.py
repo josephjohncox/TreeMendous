@@ -14,6 +14,7 @@ import random
 import statistics
 import sys
 from pathlib import Path
+from tests.performance.workload import generate_realistic_workload
 
 # Add paths for import resolution
 project_root = Path(__file__).parent.parent.parent
@@ -124,19 +125,15 @@ class BenchmarkSuite:
         """Generate randomized operations with configurable mix"""
         if operation_mix is None:
             operation_mix = {'reserve': 0.4, 'release': 0.4, 'find': 0.2}
-            
-        operations = []
-        op_types = list(operation_mix.keys())
-        op_weights = list(operation_mix.values())
         
-        for _ in range(num_operations):
-            op_type = random.choices(op_types, weights=op_weights)[0]
-            start = random.randint(0, 9_999_900)
-            length = random.randint(1, 1000)
-            end = start + length
-            operations.append((op_type, start, end))
-            
-        return operations
+        return generate_realistic_workload(
+            num_operations=num_operations,
+            profile="allocator",
+            space_range=(0, 9_999_900),
+            operation_mix=operation_mix,
+            seed=42,
+            include_data=False
+        )
     
     def benchmark_basic_operations(self, backend_id: str, operations: List[Tuple[str, int, int]], name: str, category: str, language: str) -> BenchmarkResult:
         """Benchmark basic interval operations using backend system"""

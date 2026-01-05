@@ -3,6 +3,8 @@
 #include <pybind11/stl.h>
 #include <random>
 #include <chrono>
+#include <algorithm>
+#include <iterator>
 
 // Include the C++ header (implementation is in the .mm file)
 #include "boundary_summary_metal.h"
@@ -135,50 +137,104 @@ PYBIND11_MODULE(boundary_summary_metal, m) {
             auto intervals = self.get_intervals();
             py::list result;
             for (const auto& [start, end] : intervals) {
-                py::dict interval;
-                interval["start"] = start;
-                interval["end"] = end;
-                result.append(interval);
+                result.append(py::make_tuple(start, end));
             }
             return result;
         }, "Get all available intervals")
         
         .def("find_interval", [](MetalBoundarySummaryManager& self, int start, int length) -> py::object {
-            // Compatibility method for find_interval(start, length) -> interval or None
-            auto result = self.find_best_fit_gpu(length, true);
-            if (result.has_value()) {
-                py::dict interval;
-                interval["start"] = result->first;
-                interval["end"] = result->second;
-                return interval;
+            if (length <= 0) {
+                return py::none();
             }
+            
+            auto intervals = self.get_intervals();
+            if (intervals.empty()) {
+                return py::none();
+            }
+            
+            auto it = std::lower_bound(
+                intervals.begin(),
+                intervals.end(),
+                start,
+                [](const std::pair<int, int>& interval, int value) {
+                    return interval.first < value;
+                }
+            );
+            
+            bool found = false;
+            int result_start = 0;
+            int result_end = 0;
+            
+            if (it != intervals.end()) {
+                int s = it->first;
+                int e = it->second;
+                if (s <= start && start < e && e - start >= length) {
+                    result_start = start;
+                    result_end = start + length;
+                    found = true;
+                } else if (s > start && e - s >= length) {
+                    result_start = s;
+                    result_end = s + length;
+                    found = true;
+                }
+            }
+            
+            if (!found && it != intervals.begin()) {
+                auto prev = std::prev(it);
+                int s = prev->first;
+                int e = prev->second;
+                if (s <= start && start < e && e - start >= length) {
+                    result_start = start;
+                    result_end = start + length;
+                    found = true;
+                } else if (start < s && e - s >= length) {
+                    result_start = s;
+                    result_end = s + length;
+                    found = true;
+                }
+            }
+            
+            if (found) {
+                return py::make_tuple(result_start, result_end);
+            }
+            
             return py::none();
         }, py::arg("start"), py::arg("length"),
            "Find interval of given length (compatibility method)")
         
-        .def("find_best_fit", [](MetalBoundarySummaryManager& self, int length, bool prefer_early = true) {
-            auto result = self.find_best_fit_gpu(length, prefer_early);
-            if (result.has_value()) {
-                py::dict interval;
-                interval["start"] = result->first;
-                interval["end"] = result->second;
-                interval["length"] = result->second - result->first;
-                return interval;
+        .def("find_best_fit", [](MetalBoundarySummaryManager& self, int length, bool prefer_early = true) -> py::object {
+            if (length <= 0) {
+                return py::none();
             }
-            return py::dict();
+            
+            if (prefer_early) {
+                // Earliest-fit path to match CPU boundary summary semantics
+                auto intervals = self.get_intervals();
+                for (const auto& [start, end] : intervals) {
+                    if (end - start >= length) {
+                        return py::make_tuple(start, start + length);
+                    }
+                }
+                return py::none();
+            }
+            
+            auto result = self.find_best_fit_gpu(length, false);
+            if (result.has_value()) {
+                return py::make_tuple(result->first, result->first + length);
+            }
+            return py::none();
         }, py::arg("length"), py::arg("prefer_early") = true,
            "Find best-fit interval")
         
-        .def("find_largest_available", [](MetalBoundarySummaryManager& self) {
+        .def("find_largest_available", [](MetalBoundarySummaryManager& self) -> py::object {
             auto summary = self.get_summary();
             if (summary.largest_interval_length > 0) {
-                py::dict interval;
-                interval["start"] = summary.largest_interval_start;
-                interval["end"] = summary.largest_interval_start + summary.largest_interval_length;
-                interval["length"] = summary.largest_interval_length;
-                return interval;
+                return py::make_tuple(
+                    summary.largest_interval_start,
+                    summary.largest_interval_start + summary.largest_interval_length
+                );
             }
-            return py::dict();
+            return py::none();
         }, "Find largest available interval")
         
         .def("__repr__", [](const MetalBoundarySummaryManager&) {
@@ -248,4 +304,3 @@ PYBIND11_MODULE(boundary_summary_metal, m) {
     }, py::arg("num_intervals") = 10000, py::arg("num_operations") = 5000,
        "Benchmark Metal vs CPU speedup");
 }
-
