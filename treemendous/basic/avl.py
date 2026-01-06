@@ -27,8 +27,22 @@ class IntervalNode(IntervalNodeBase['IntervalNode', Any]):
 
 R = TypeVar('R', bound=IntervalNode)
 class IntervalTree(Generic[R], IntervalTreeBase[R, Any]):
-    def __init__(self, node_class: type[R], merge_fn: Optional[Callable[[Any, Any], Any]] = None) -> None:
-        super().__init__(merge_fn=merge_fn)
+    def __init__(
+        self,
+        node_class: type[R],
+        merge_fn: Optional[Callable[[Any, Any], Any]] = None,
+        split_fn: Optional[Callable[[Any, int, int, int, int], Any]] = None,
+        can_merge: Optional[Callable[[Optional[Any], Optional[Any]], bool]] = None,
+        merge_idempotent: bool = False,
+        split_idempotent: bool = False,
+    ) -> None:
+        super().__init__(
+            merge_fn=merge_fn,
+            split_fn=split_fn,
+            can_merge=can_merge,
+            merge_idempotent=merge_idempotent,
+            split_idempotent=split_idempotent,
+        )
         self.node_class = node_class
         self.root: Optional[R] = None
 
@@ -70,12 +84,14 @@ class IntervalTree(Generic[R], IntervalTreeBase[R, Any]):
 
             if node.start < start:
                 # Left part remains
-                left_node = self.node_class(node.start, start, node.data)
+                left_data = self.split_data(node.data, node.start, node.end, node.start, start)
+                left_node = self.node_class(node.start, start, left_data)
                 nodes_to_insert.append(left_node)
 
             if node.end > end:
                 # Right part remains
-                right_node = self.node_class(end, node.end, node.data)
+                right_data = self.split_data(node.data, node.start, node.end, end, node.end)
+                right_node = self.node_class(end, node.end, right_data)
                 nodes_to_insert.append(right_node)
 
             # Delete the current node and replace it with left and right parts

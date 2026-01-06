@@ -347,6 +347,16 @@ class TreeMendousBackendManager:
                          "summary-stats", "apple-silicon", "O(1) analytics"],
                 constructor_args={}
             ),
+            BackendConfiguration(
+                implementation_id="metal_boundary_summary_mixed",
+                name="Metal Boundary Summary (Mixed)",
+                language="C++/Metal",
+                implementation_type=ImplementationType.BOUNDARY,
+                performance_tier=PerformanceTier.HIGH_PERFORMANCE,
+                features=["core-operations", "mixed-policy", "gpu-best-fit", "cpu-summary",
+                         "apple-silicon", "cached-analytics"],
+                constructor_args={}
+            ),
         ]
         
         for config in gpu_backends:
@@ -409,6 +419,7 @@ class TreeMendousBackendManager:
         module_map = {
             "gpu_boundary_summary": ("treemendous.cpp.gpu.boundary_summary_gpu", "GPUBoundarySummaryManager"),
             "metal_boundary_summary": ("treemendous.cpp.metal.boundary_summary_metal", "MetalBoundarySummaryManager"),
+            "metal_boundary_summary_mixed": ("treemendous.cpp.metal.mixed", "MixedBoundarySummaryManager"),
         }
         
         if config.implementation_id not in module_map:

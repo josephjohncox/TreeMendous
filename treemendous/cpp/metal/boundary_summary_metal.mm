@@ -301,11 +301,11 @@ public:
             [encoder setThreadgroupMemoryLength:THREADGROUP_SIZE * sizeof(int) atIndex:1];
             [encoder setThreadgroupMemoryLength:THREADGROUP_SIZE * sizeof(int) atIndex:2];
             
-            // Dispatch
-            MTLSize grid_size = MTLSizeMake(n, 1, 1);
+            // Dispatch full threadgroups so threadgroup memory is initialized for all lanes.
             MTLSize threadgroup_size = MTLSizeMake(THREADGROUP_SIZE, 1, 1);
-            
-            [encoder dispatchThreads:grid_size threadsPerThreadgroup:threadgroup_size];
+            size_t threadgroup_count = (n + THREADGROUP_SIZE - 1) / THREADGROUP_SIZE;
+            MTLSize threadgroups = MTLSizeMake(threadgroup_count, 1, 1);
+            [encoder dispatchThreadgroups:threadgroups threadsPerThreadgroup:threadgroup_size];
             [encoder endEncoding];
             
             // Compute gaps

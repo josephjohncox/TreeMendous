@@ -30,8 +30,22 @@ class EarliestIntervalNode(IntervalNode, IntervalNodeProtocol):
             self.max_length = max(self.max_length, self.right.max_length)
 
 class EarliestIntervalTree(IntervalTree[EarliestIntervalNode], CoreIntervalManagerProtocol[Any]):
-    def __init__(self, merge_fn: Optional[Callable[[Any, Any], Any]] = None) -> None:
-        super().__init__(EarliestIntervalNode, merge_fn=merge_fn)
+    def __init__(
+        self,
+        merge_fn: Optional[Callable[[Any, Any], Any]] = None,
+        split_fn: Optional[Callable[[Any, int, int, int, int], Any]] = None,
+        can_merge: Optional[Callable[[Optional[Any], Optional[Any]], bool]] = None,
+        merge_idempotent: bool = False,
+        split_idempotent: bool = False,
+    ) -> None:
+        super().__init__(
+            EarliestIntervalNode,
+            merge_fn=merge_fn,
+            split_fn=split_fn,
+            can_merge=can_merge,
+            merge_idempotent=merge_idempotent,
+            split_idempotent=split_idempotent,
+        )
 
     def _print_node(self, node: EarliestIntervalNode, indent: str, prefix: str) -> None:
         print(f"{indent}{prefix}{node.start}-{node.end} "

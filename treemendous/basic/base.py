@@ -59,9 +59,21 @@ class IntervalNodeBase(Generic[T, D]):
 
 
 class IntervalTreeBase(Generic[T, D], ABC, IntervalManagerProtocol[D]):
-    def __init__(self, root: Optional[T] = None, merge_fn: Optional[Callable[[D, D], D]] = None) -> None:
+    def __init__(
+        self,
+        root: Optional[T] = None,
+        merge_fn: Optional[Callable[[D, D], D]] = None,
+        split_fn: Optional[Callable[[D, int, int, int, int], D]] = None,
+        can_merge: Optional[Callable[[Optional[D], Optional[D]], bool]] = None,
+        merge_idempotent: bool = False,
+        split_idempotent: bool = False,
+    ) -> None:
         self.root: Optional[T] = root
         self.merge_fn: Optional[Callable[[D, D], D]] = merge_fn
+        self.split_fn: Optional[Callable[[D, int, int, int, int], D]] = split_fn
+        self.can_merge_fn: Optional[Callable[[Optional[D], Optional[D]], bool]] = can_merge
+        self.merge_idempotent = merge_idempotent
+        self.split_idempotent = split_idempotent
 
     def print_tree(self) -> None:
         self._print_tree(self.root)
@@ -86,12 +98,33 @@ class IntervalTreeBase(Generic[T, D], ABC, IntervalManagerProtocol[D]):
             return data2
         if data2 is None:
             return data1
+        if self.merge_idempotent and (data1 is data2 or data1 == data2):
+            return data1
         if self.merge_fn is None:
             # Default behavior: treat data as sets and merge via union
             if isinstance(data1, set) and isinstance(data2, set):
                 return data1 | data2
             return data1  # If not sets, keep first value
         return self.merge_fn(data1, data2)
+
+    def split_data(
+        self,
+        data: Optional[D],
+        old_start: int,
+        old_end: int,
+        new_start: int,
+        new_end: int,
+    ) -> Optional[D]:
+        if data is None:
+            return None
+        if self.split_fn is None or self.split_idempotent:
+            return data
+        return self.split_fn(data, old_start, old_end, new_start, new_end)
+
+    def can_merge_data(self, data1: Optional[D], data2: Optional[D]) -> bool:
+        if self.can_merge_fn is None:
+            return True
+        return self.can_merge_fn(data1, data2)
 
     @abstractmethod
     def _print_node(self, node: T, indent: str, prefix: str) -> None: ...

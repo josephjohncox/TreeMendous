@@ -54,6 +54,7 @@ print(f"   Max Threads/Group: {metal_info.get('max_threads_per_threadgroup', 'Un
 
 # Import implementations
 from treemendous.cpp.metal.boundary_summary_metal import MetalBoundarySummaryManager
+from treemendous.cpp.metal import MixedBoundarySummaryManager
 from treemendous.basic.boundary_summary import BoundarySummary, BoundarySummaryManager as CPUBoundarySummaryManager
 from tests.performance.workload import generate_realistic_workload, iter_workload
 
@@ -84,6 +85,12 @@ def _sum_intervals(intervals: List[Tuple[int, int]]) -> int:
 
 WORKLOAD_PROFILE = "allocator"
 EXTENDED_BENCH = os.environ.get("METAL_BENCH_EXTENDED") == "1"
+
+MIXED_BEST_FIT_MIN_INTERVALS = int(os.environ.get("TREEMENDOUS_MIXED_BEST_FIT_MIN_INTERVALS", "10000"))
+MIXED_SUMMARY_MIN_INTERVALS = int(os.environ.get("TREEMENDOUS_MIXED_SUMMARY_MIN_INTERVALS", "50000"))
+MIXED_SYNC_CPU = os.environ.get("TREEMENDOUS_MIXED_SYNC_CPU", "1").strip().lower() in {"1", "true", "yes", "y", "on"}
+MIXED_SUMMARY_PATH = os.environ.get("TREEMENDOUS_MIXED_SUMMARY_PATH", "cpu")
+MIXED_BEST_FIT_PATH = os.environ.get("TREEMENDOUS_MIXED_BEST_FIT_PATH", "gpu")
 
 
 def benchmark_cpu_implementation(num_intervals: int, num_operations: int) -> BenchmarkResult:
@@ -181,13 +188,75 @@ def benchmark_metal_implementation(num_intervals: int, num_operations: int) -> B
     )
 
 
-def print_comparison(cpu_result: BenchmarkResult, metal_result: BenchmarkResult):
+def benchmark_mixed_implementation(num_intervals: int, num_operations: int) -> BenchmarkResult:
+    """Benchmark mixed CPU/Metal implementation"""
+    print(f"  🧩 Benchmarking Mixed (intervals={num_intervals:,}, ops={num_operations:,})...")
+    
+    manager = MixedBoundarySummaryManager(
+        summary_path=MIXED_SUMMARY_PATH,
+        best_fit_path=MIXED_BEST_FIT_PATH,
+        best_fit_min_intervals=MIXED_BEST_FIT_MIN_INTERVALS,
+        summary_min_intervals=MIXED_SUMMARY_MIN_INTERVALS,
+        sync_cpu=MIXED_SYNC_CPU,
+    )
+    manager.release_interval(0, num_intervals * 100)
+    
+    workload = generate_realistic_workload(
+        num_operations,
+        profile=WORKLOAD_PROFILE,
+        space_range=(0, num_intervals * 100),
+        seed=42,
+        include_data=False
+    )
+    
+    start_time = time.perf_counter()
+    for op, start, end, _ in iter_workload(workload):
+        try:
+            if op == 'reserve':
+                manager.reserve_interval(start, end)
+            elif op == 'release':
+                manager.release_interval(start, end)
+            elif op == 'find':
+                manager.find_interval(start, end - start)
+        except:
+            pass
+    total_time = (time.perf_counter() - start_time) * 1000
+    
+    interval_count = len(manager.get_intervals())
+    summary_first_us = _time_us(manager.get_availability_stats, iterations=1)
+    summary_warm_us = _time_us(manager.get_availability_stats, iterations=100)
+    ops_per_second = num_operations / (total_time / 1000)
+    
+    perf_stats = manager.get_performance_stats()
+    memory_mb = perf_stats.gpu_memory_used / (1024 * 1024)
+    
+    return BenchmarkResult(
+        name="Mixed",
+        dataset_size=num_intervals,
+        interval_count=interval_count,
+        num_operations=num_operations,
+        total_time_ms=total_time,
+        operations_per_second=ops_per_second,
+        summary_first_us=summary_first_us,
+        summary_warm_us=summary_warm_us,
+        memory_mb=memory_mb
+    )
+
+
+def print_comparison(
+    cpu_result: BenchmarkResult,
+    metal_result: BenchmarkResult,
+    mixed_result: BenchmarkResult | None = None,
+):
     """Print detailed comparison between CPU and Metal results"""
     cold_speedup = cpu_result.summary_first_us / metal_result.summary_first_us if metal_result.summary_first_us > 0 else 0.0
     warm_speedup = cpu_result.summary_warm_us / metal_result.summary_warm_us if metal_result.summary_warm_us > 0 else 0.0
     
     print(f"\n  📊 Results for {cpu_result.dataset_size:,} intervals:")
-    print(f"     Interval count: CPU={cpu_result.interval_count:,}, Metal={metal_result.interval_count:,}")
+    if mixed_result:
+        print(f"     Interval count: CPU={cpu_result.interval_count:,}, Metal={metal_result.interval_count:,}, Mixed={mixed_result.interval_count:,}")
+    else:
+        print(f"     Interval count: CPU={cpu_result.interval_count:,}, Metal={metal_result.interval_count:,}")
     print(f"     CPU summary (first): {cpu_result.summary_first_us:,.1f} μs")
     print(f"     CPU summary (warm):  {cpu_result.summary_warm_us:,.1f} μs")
     print(f"     Metal summary (first): {metal_result.summary_first_us:,.1f} μs")
@@ -202,6 +271,14 @@ def print_comparison(cpu_result: BenchmarkResult, metal_result: BenchmarkResult)
             print(f"     ⚠️  Metal is {1/cold_speedup:.1f}x slower on cold summary")
     
     print(f"     Metal memory: {metal_result.memory_mb:.2f} MB")
+    
+    if mixed_result:
+        mixed_cold = cpu_result.summary_first_us / mixed_result.summary_first_us if mixed_result.summary_first_us > 0 else 0.0
+        mixed_warm = cpu_result.summary_warm_us / mixed_result.summary_warm_us if mixed_result.summary_warm_us > 0 else 0.0
+        print(f"     Mixed summary (first): {mixed_result.summary_first_us:,.1f} μs")
+        print(f"     Mixed summary (warm):  {mixed_result.summary_warm_us:,.1f} μs")
+        print(f"     ⚡ Mixed speedup (first): {mixed_cold:.2f}x")
+        print(f"     ⚡ Mixed speedup (warm):  {mixed_warm:.2f}x")
 
 
 def run_scaling_benchmark():
@@ -225,24 +302,26 @@ def run_scaling_benchmark():
         
         cpu_result = benchmark_cpu_implementation(num_intervals, num_ops)
         metal_result = benchmark_metal_implementation(num_intervals, num_ops)
+        mixed_result = benchmark_mixed_implementation(num_intervals, num_ops)
         
-        print_comparison(cpu_result, metal_result)
+        print_comparison(cpu_result, metal_result, mixed_result)
         
-        results.append((cpu_result, metal_result))
+        results.append((cpu_result, metal_result, mixed_result))
     
-    print("\n" + "=" * 70)
+    print("\n" + "=" * 110)
     print("SUMMARY: METAL SPEEDUP BY DATASET SIZE")
-    print("=" * 70)
-    print(f"{'Dataset Size':>15} | {'Intervals':>10} | {'CPU first (μs)':>15} | {'Metal first (μs)':>17} | {'Speedup':>8}")
-    print("-" * 70)
+    print("=" * 110)
+    print(f"{'Dataset Size':>15} | {'Intervals':>10} | {'CPU first (μs)':>15} | {'Metal first (μs)':>17} | {'Mixed first (μs)':>17} | {'Metal Spd':>9} | {'Mixed Spd':>9}")
+    print("-" * 110)
     
-    for cpu_result, metal_result in results:
+    for cpu_result, metal_result, mixed_result in results:
         speedup = cpu_result.summary_first_us / metal_result.summary_first_us if metal_result.summary_first_us > 0 else 0.0
+        mixed_speedup = cpu_result.summary_first_us / mixed_result.summary_first_us if mixed_result.summary_first_us > 0 else 0.0
         print(f"{cpu_result.dataset_size:>15,} | {cpu_result.interval_count:>10,} | {cpu_result.summary_first_us:>15,.1f} | "
-              f"{metal_result.summary_first_us:>17,.1f} | {speedup:>7.2f}x")
+              f"{metal_result.summary_first_us:>17,.1f} | {mixed_result.summary_first_us:>17,.1f} | {speedup:>8.2f}x | {mixed_speedup:>8.2f}x")
     
     print("\n📌 Key Insights:")
-    for cpu_result, metal_result in results:
+    for cpu_result, metal_result, _mixed_result in results:
         speedup = cpu_result.summary_first_us / metal_result.summary_first_us if metal_result.summary_first_us > 0 else 0.0
         if speedup >= 1.0:
             print(f"   • Metal becomes faster at ~{cpu_result.dataset_size:,} intervals ({speedup:.1f}x speedup)")
@@ -250,7 +329,7 @@ def run_scaling_benchmark():
     
     best_speedup = max(
         cpu.summary_first_us / metal.summary_first_us
-        for cpu, metal in results
+        for cpu, metal, _mixed in results
         if metal.summary_first_us > 0
     ) if results else 0.0
     print(f"   • Maximum speedup achieved: {best_speedup:.1f}x")
@@ -268,13 +347,22 @@ def run_feature_benchmark():
     
     cpu_manager = CPUBoundarySummaryManager()
     metal_manager = MetalBoundarySummaryManager()
+    mixed_manager = MixedBoundarySummaryManager(
+        summary_path=MIXED_SUMMARY_PATH,
+        best_fit_path=MIXED_BEST_FIT_PATH,
+        best_fit_min_intervals=MIXED_BEST_FIT_MIN_INTERVALS,
+        summary_min_intervals=MIXED_SUMMARY_MIN_INTERVALS,
+        sync_cpu=MIXED_SYNC_CPU,
+    )
     
     cpu_manager.release_interval(0, num_intervals * 100)
     metal_manager.release_interval(0, num_intervals * 100)
+    mixed_manager.release_interval(0, num_intervals * 100)
     
     for i in range(0, num_intervals * 100, 200):
         cpu_manager.reserve_interval(i, i + 50)
         metal_manager.reserve_interval(i, i + 50)
+        mixed_manager.reserve_interval(i, i + 50)
     
     print("\n🔍 Summary Statistics:")
     
@@ -287,18 +375,29 @@ def run_feature_benchmark():
     for _ in range(1000):
         metal_stats = metal_manager.compute_summary_gpu()
     metal_time = (time.perf_counter() - metal_start) * 1000
+
+    mixed_start = time.perf_counter()
+    for _ in range(1000):
+        mixed_stats = mixed_manager.get_availability_stats()
+    mixed_time = (time.perf_counter() - mixed_start) * 1000
     
     print(f"   CPU: {cpu_time:.2f} ms (1000 calls)")
     print(f"   Metal: {metal_time:.2f} ms (1000 calls)")
-    print(f"   Speedup: {cpu_time / metal_time:.2f}x")
+    print(f"   Mixed: {mixed_time:.2f} ms (1000 calls)")
+    print(f"   Metal speedup: {cpu_time / metal_time:.2f}x")
+    print(f"   Mixed speedup: {cpu_time / mixed_time:.2f}x")
     
     cpu_stats = cpu_manager.get_availability_stats()
     metal_stats_dict = metal_manager.get_availability_stats()
+    mixed_stats_dict = mixed_manager.get_availability_stats()
     
     print(f"\n✓ Verification (results should match):")
     print(f"   Total free - CPU: {cpu_stats['total_free']:,}, Metal: {metal_stats_dict['total_free']:,}")
+    print(f"   Total free - Mixed: {mixed_stats_dict['total_free']:,}")
     print(f"   Fragmentation - CPU: {cpu_stats['fragmentation']:.3f}, Metal: {metal_stats_dict['fragmentation']:.3f}")
+    print(f"   Fragmentation - Mixed: {mixed_stats_dict['fragmentation']:.3f}")
     print(f"   Largest chunk - CPU: {cpu_stats['largest_chunk']:,}, Metal: {metal_stats_dict['largest_chunk']:,}")
+    print(f"   Largest chunk - Mixed: {mixed_stats_dict['largest_chunk']:,}")
     cpu_interval_total = _sum_intervals(_normalize_intervals(cpu_manager.get_intervals()))
     metal_interval_total = _sum_intervals(_normalize_intervals(metal_manager.get_intervals()))
     print(f"   Interval sum - CPU: {cpu_interval_total:,}, Metal: {metal_interval_total:,}")
@@ -404,6 +503,13 @@ def run_best_fit_benchmark():
     for num_intervals, num_queries in configs:
         cpu_manager = CPUBoundarySummaryManager()
         metal_manager = MetalBoundarySummaryManager()
+        mixed_manager = MixedBoundarySummaryManager(
+            summary_path=MIXED_SUMMARY_PATH,
+            best_fit_path=MIXED_BEST_FIT_PATH,
+            best_fit_min_intervals=MIXED_BEST_FIT_MIN_INTERVALS,
+            summary_min_intervals=MIXED_SUMMARY_MIN_INTERVALS,
+            sync_cpu=MIXED_SYNC_CPU,
+        )
         
         # Create many non-overlapping intervals with varied sizes
         for i in range(num_intervals):
@@ -412,6 +518,7 @@ def run_best_fit_benchmark():
             end = start + length
             cpu_manager.release_interval(start, end)
             metal_manager.release_interval(start, end)
+            mixed_manager.release_interval(start, end)
         
         cpu_intervals, cpu_starts = _build_interval_index(
             _normalize_intervals(cpu_manager.get_intervals())
@@ -432,11 +539,16 @@ def run_best_fit_benchmark():
         metal_start = time.perf_counter()
         metal_results = [metal_manager.find_best_fit(length, prefer_early=False) for length in lengths]
         metal_time = (time.perf_counter() - metal_start) * 1000
+
+        # Mixed best-fit (GPU path enabled)
+        mixed_start = time.perf_counter()
+        mixed_results = [mixed_manager.find_best_fit(length, prefer_early=False) for length in lengths]
+        mixed_time = (time.perf_counter() - mixed_start) * 1000
         
         # Validate results
         mismatched = 0
         invalid_allocations = 0
-        for length, cpu_result, metal_result in zip(lengths, cpu_results, metal_results):
+        for length, cpu_result, metal_result, mixed_result in zip(lengths, cpu_results, metal_results, mixed_results):
             cpu_found = cpu_result is not None
             metal_found = metal_result is not None
             if cpu_found != metal_found:
@@ -448,14 +560,28 @@ def run_best_fit_benchmark():
                     invalid_allocations += 1
                 elif not _allocation_fits(metal_intervals, metal_starts, m_start, m_end):
                     invalid_allocations += 1
+
+            mixed_found = mixed_result is not None
+            if mixed_found:
+                if hasattr(mixed_result, 'start') and hasattr(mixed_result, 'end'):
+                    mix_start, mix_end = mixed_result.start, mixed_result.end
+                else:
+                    mix_start, mix_end = mixed_result
+                if (mix_end - mix_start) != length:
+                    invalid_allocations += 1
+                elif not _allocation_fits(metal_intervals, metal_starts, mix_start, mix_end):
+                    invalid_allocations += 1
         
         print(f"\n🔎 Best-Fit Queries: {num_queries:,} (intervals={num_intervals:,})")
         print(f"   CPU time:   {cpu_time:.2f} ms")
         print(f"   Metal time: {metal_time:.2f} ms")
+        print(f"   Mixed time: {mixed_time:.2f} ms")
         if metal_time > 0:
-            print(f"   Speedup:    {cpu_time / metal_time:.2f}x")
+            print(f"   Metal speedup: {cpu_time / metal_time:.2f}x")
+        if mixed_time > 0:
+            print(f"   Mixed speedup: {cpu_time / mixed_time:.2f}x")
         print(f"   Result mismatches (CPU vs Metal found/not found): {mismatched}")
-        print(f"   Invalid Metal allocations: {invalid_allocations}")
+        print(f"   Invalid allocations (Metal/Mixed): {invalid_allocations}")
 
 
 def main():

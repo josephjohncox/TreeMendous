@@ -146,8 +146,21 @@ class SummaryIntervalNode(IntervalNodeBase['SummaryIntervalNode', Any]):
 class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode, Any], EnhancedIntervalManagerProtocol[Any]):
     """AVL interval tree with summary statistics for efficient scheduling"""
     
-    def __init__(self, merge_fn: Optional[Callable[[Any, Any], Any]] = None) -> None:
-        super().__init__(merge_fn=merge_fn)
+    def __init__(
+        self,
+        merge_fn: Optional[Callable[[Any, Any], Any]] = None,
+        split_fn: Optional[Callable[[Any, int, int, int, int], Any]] = None,
+        can_merge: Optional[Callable[[Optional[Any], Optional[Any]], bool]] = None,
+        merge_idempotent: bool = False,
+        split_idempotent: bool = False,
+    ) -> None:
+        super().__init__(
+            merge_fn=merge_fn,
+            split_fn=split_fn,
+            can_merge=can_merge,
+            merge_idempotent=merge_idempotent,
+            split_idempotent=split_idempotent,
+        )
         self.root: Optional[SummaryIntervalNode] = None
         self._managed_space_start: Optional[int] = None
         self._managed_space_end: Optional[int] = None
@@ -402,12 +415,14 @@ class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode, Any], EnhancedIn
             
             # Create left remainder if exists
             if node.start < start:
-                left_node = SummaryIntervalNode(node.start, start, node.data)
+                left_data = self.split_data(node.data, node.start, node.end, node.start, start)
+                left_node = SummaryIntervalNode(node.start, start, left_data)
                 nodes_to_insert.append(left_node)
                 
             # Create right remainder if exists  
             if node.end > end:
-                right_node = SummaryIntervalNode(end, node.end, node.data)
+                right_data = self.split_data(node.data, node.start, node.end, end, node.end)
+                right_node = SummaryIntervalNode(end, node.end, right_data)
                 nodes_to_insert.append(right_node)
                 
             # Remove current node and process subtrees

@@ -38,23 +38,56 @@ from treemendous.basic.avl import IntervalTree, IntervalNode
 from treemendous.basic.protocols import IntervalResult
 from tests.performance.workload import generate_standard_workload, execute_workload
 
-# C++ implementations (assumed available)
-from treemendous.cpp.boundary import IntervalManager as CppBoundary
-from treemendous.cpp.treap import IntervalTreap as CppTreap
-CPP_BOUNDARY_AVAILABLE = True
-CPP_TREAP_AVAILABLE = True
+# C++ implementations (optional; may not be built)
+CPP_ERRORS: List[str] = []
+CPP_BOUNDARY_AVAILABLE = False
+CPP_TREAP_AVAILABLE = False
+CPP_BOUNDARY_SUMMARY_AVAILABLE = False
+CPP_BOUNDARY_OPTIMIZED_AVAILABLE = False
+CPP_BOUNDARY_SUMMARY_OPTIMIZED_AVAILABLE = False
 
-from treemendous.cpp.boundary_summary import BoundarySummaryManager as CppBoundarySummary
-from treemendous.cpp.boundary_optimized import IntervalManager as CppBoundaryOptimized
-from treemendous.cpp.boundary_summary_optimized import BoundarySummaryManager as CppBoundarySummaryOptimized
-CPP_BOUNDARY_SUMMARY_AVAILABLE = True
-CPP_BOUNDARY_OPTIMIZED_AVAILABLE = True
-CPP_BOUNDARY_SUMMARY_OPTIMIZED_AVAILABLE = True
+CppBoundary = None
+CppTreap = None
+CppBoundarySummary = None
+CppBoundaryOptimized = None
+CppBoundarySummaryOptimized = None
+
+try:
+    from treemendous.cpp.boundary import IntervalManager as CppBoundary
+    CPP_BOUNDARY_AVAILABLE = True
+except ImportError as e:
+    CPP_ERRORS.append(f"C++ Boundary unavailable: {e}")
+
+try:
+    from treemendous.cpp.treap import IntervalTreap as CppTreap
+    CPP_TREAP_AVAILABLE = True
+except ImportError as e:
+    CPP_ERRORS.append(f"C++ Treap unavailable: {e}")
+
+try:
+    from treemendous.cpp.boundary_summary import BoundarySummaryManager as CppBoundarySummary
+    CPP_BOUNDARY_SUMMARY_AVAILABLE = True
+except ImportError as e:
+    CPP_ERRORS.append(f"C++ BoundarySummary unavailable: {e}")
+
+try:
+    from treemendous.cpp.boundary_optimized import IntervalManager as CppBoundaryOptimized
+    CPP_BOUNDARY_OPTIMIZED_AVAILABLE = True
+except ImportError as e:
+    CPP_ERRORS.append(f"C++ Boundary-Opt unavailable: {e}")
+
+try:
+    from treemendous.cpp.boundary_summary_optimized import BoundarySummaryManager as CppBoundarySummaryOptimized
+    CPP_BOUNDARY_SUMMARY_OPTIMIZED_AVAILABLE = True
+except ImportError as e:
+    CPP_ERRORS.append(f"C++ BoundarySummary-Opt unavailable: {e}")
 
 # GPU implementations (platform-specific)
 GPU_AVAILABLE = False
 GPU_TYPE = None
 GpuBoundarySummary = None
+MIXED_AVAILABLE = False
+MixedBoundarySummary = None
 
 if platform.system() == 'Darwin':
     # macOS - try Metal
@@ -62,6 +95,13 @@ if platform.system() == 'Darwin':
         from treemendous.cpp.metal.boundary_summary_metal import MetalBoundarySummaryManager as GpuBoundarySummary
         GPU_AVAILABLE = True
         GPU_TYPE = 'Metal'
+    except ImportError:
+        pass
+    try:
+        from treemendous.cpp.metal import is_metal_available
+        if is_metal_available():
+            from treemendous.cpp.metal.mixed import MixedBoundarySummaryManager as MixedBoundarySummary
+            MIXED_AVAILABLE = True
     except ImportError:
         pass
 else:
@@ -149,6 +189,10 @@ def run_comprehensive_benchmark(num_operations: int = 10_000) -> List[BenchmarkR
     print(f"🔥 Running comprehensive benchmark with {num_operations:,} operations")
     if GPU_AVAILABLE:
         print(f"🚀 GPU Acceleration: {GPU_TYPE} enabled")
+    if CPP_ERRORS:
+        print("⚠️  C++ backends unavailable (build with `just build-cpp`):")
+        for err in CPP_ERRORS:
+            print(f"   - {err}")
     print("=" * 80)
     
     # Generate unified workload - SAME for all implementations
@@ -182,6 +226,8 @@ def run_comprehensive_benchmark(num_operations: int = 10_000) -> List[BenchmarkR
     # GPU accelerated implementations
     if GPU_AVAILABLE:
         implementations.append((f"GPU {GPU_TYPE} BoundarySummary", GpuBoundarySummary))
+    if MIXED_AVAILABLE and GPU_TYPE == 'Metal':
+        implementations.append(("Metal Mixed BoundarySummary", MixedBoundarySummary))
     
     results = []
     

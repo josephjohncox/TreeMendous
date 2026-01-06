@@ -3,22 +3,54 @@ from typing import Any, Callable, List, Optional, Tuple
 from .protocols import CoreIntervalManagerProtocol, IntervalResult
 
 class IntervalManager(CoreIntervalManagerProtocol[Any]):
-    def __init__(self, merge_fn: Optional[Callable[[Any, Any], Any]] = None) -> None:
+    def __init__(
+        self,
+        merge_fn: Optional[Callable[[Any, Any], Any]] = None,
+        split_fn: Optional[Callable[[Any, int, int, int, int], Any]] = None,
+        can_merge: Optional[Callable[[Optional[Any], Optional[Any]], bool]] = None,
+        merge_idempotent: bool = False,
+        split_idempotent: bool = False,
+    ) -> None:
         # Intervals are stored as {start: (end, data)}
         self.intervals: SortedDict[int, Tuple[int, Optional[Any]]] = SortedDict()
         self.total_available_length: int = 0
         self._merge_fn = merge_fn
+        self._split_fn = split_fn
+        self._can_merge = can_merge
+        self._merge_idempotent = merge_idempotent
+        self._split_idempotent = split_idempotent
 
     def _merge_data(self, data1: Optional[Any], data2: Optional[Any]) -> Optional[Any]:
         if data1 is None:
             return data2
         if data2 is None:
             return data1
+        if self._merge_idempotent and (data1 is data2 or data1 == data2):
+            return data1
         if self._merge_fn is None:
             if isinstance(data1, set) and isinstance(data2, set):
                 return data1 | data2
             return data1
         return self._merge_fn(data1, data2)
+
+    def _split_data(
+        self,
+        data: Optional[Any],
+        old_start: int,
+        old_end: int,
+        new_start: int,
+        new_end: int,
+    ) -> Optional[Any]:
+        if data is None:
+            return None
+        if self._split_fn is None or self._split_idempotent:
+            return data
+        return self._split_fn(data, old_start, old_end, new_start, new_end)
+
+    def _can_merge_data(self, data1: Optional[Any], data2: Optional[Any]) -> bool:
+        if self._can_merge is None:
+            return True
+        return self._can_merge(data1, data2)
 
     def release_interval(self, start: int, end: int, data: Optional[Any] = None) -> None:
         if start >= end:
@@ -32,7 +64,7 @@ class IntervalManager(CoreIntervalManagerProtocol[Any]):
         if idx > 0:
             prev_start = self.intervals.keys()[idx - 1]
             prev_end, prev_data = self.intervals[prev_start]
-            if prev_end >= start:
+            if prev_end > start or (prev_end == start and self._can_merge_data(prev_data, merged_data)):
                 start = prev_start
                 end = max(end, prev_end)
                 merged_data = self._merge_data(merged_data, prev_data)
@@ -45,6 +77,8 @@ class IntervalManager(CoreIntervalManagerProtocol[Any]):
             curr_start = self.intervals.keys()[idx]
             curr_end, curr_data = self.intervals[curr_start]
             if curr_start > end:
+                break
+            if curr_start == end and not self._can_merge_data(merged_data, curr_data):
                 break
             end = max(end, curr_end)
             merged_data = self._merge_data(merged_data, curr_data)
@@ -87,9 +121,11 @@ class IntervalManager(CoreIntervalManagerProtocol[Any]):
 
                 # Add non-overlapping intervals
                 if curr_start < start:
-                    intervals_to_add.append((curr_start, start, curr_data))
+                    left_data = self._split_data(curr_data, curr_start, curr_end, curr_start, start)
+                    intervals_to_add.append((curr_start, start, left_data))
                 if curr_end > end:
-                    intervals_to_add.append((end, curr_end, curr_data))
+                    right_data = self._split_data(curr_data, curr_start, curr_end, end, curr_end)
+                    intervals_to_add.append((end, curr_end, right_data))
 
             idx += 1
 

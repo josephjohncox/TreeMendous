@@ -24,15 +24,15 @@ clean-cpp:
     @echo "✅ C++ artifacts cleaned"
 
 # Build all C++ extensions (always clean first for reliability)
-build-cpp: install clean-cpp
+build-cpp: install-dev clean-cpp
     @echo "🔧 Building all C++ extensions..."
-    uv run python setup.py
+    uv run python setup.py build_ext --inplace
     @echo "✅ All C++ extensions built"
 
 # Build C++ extensions with Boost ICL support  
-build-cpp-icl: install clean-cpp
+build-cpp-icl: install-dev clean-cpp
     @echo "🔧 Building C++ extensions with Boost ICL..."
-    TREE_MENDOUS_WITH_ICL=1 uv run python build.py
+    TREE_MENDOUS_WITH_ICL=1 uv run python setup.py build_ext --inplace
     @echo "✅ C++ extensions built with ICL support"
 
 # Build GPU/CUDA extensions (Linux/Windows)

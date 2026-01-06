@@ -17,11 +17,14 @@ if IS_MACOS:
     try:
         from . import boundary_summary_metal
         METAL_AVAILABLE = boundary_summary_metal.METAL_AVAILABLE
+        from .mixed import MixedBoundarySummaryManager
     except ImportError as e:
         _import_error = str(e)
         boundary_summary_metal = None
+        MixedBoundarySummaryManager = None
 else:
     boundary_summary_metal = None
+    MixedBoundarySummaryManager = None
 
 
 def is_metal_available() -> bool:
@@ -64,6 +67,28 @@ def create_metal_manager():
     return boundary_summary_metal.MetalBoundarySummaryManager()
 
 
+def create_mixed_metal_manager(
+    summary_path: Optional[str] = None,
+    best_fit_path: Optional[str] = None,
+    best_fit_min_intervals: Optional[int] = None,
+    summary_min_intervals: Optional[int] = None,
+    sync_cpu: Optional[bool] = None,
+):
+    """Create a mixed CPU/Metal boundary summary manager."""
+    if not METAL_AVAILABLE:
+        raise ImportError(
+            "Metal acceleration not available. "
+            "Build with: python setup_metal.py build_ext --inplace"
+        )
+    return MixedBoundarySummaryManager(
+        summary_path=summary_path,
+        best_fit_path=best_fit_path,
+        best_fit_min_intervals=best_fit_min_intervals,
+        summary_min_intervals=summary_min_intervals,
+        sync_cpu=sync_cpu,
+    )
+
+
 def benchmark_metal_speedup(num_intervals: int = 10000, num_operations: int = 5000) -> dict:
     """
     Benchmark Metal vs CPU speedup
@@ -91,6 +116,7 @@ __all__ = [
     'is_metal_available',
     'get_metal_info',
     'create_metal_manager',
+    'create_mixed_metal_manager',
     'benchmark_metal_speedup',
 ]
 
@@ -98,5 +124,5 @@ __all__ = [
 if METAL_AVAILABLE:
     __all__.extend([
         'boundary_summary_metal',
+        'MixedBoundarySummaryManager',
     ])
-

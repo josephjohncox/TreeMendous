@@ -65,8 +65,22 @@ class TreapNode(IntervalNodeBase['TreapNode', Any]):
 class IntervalTreap(IntervalTreeBase[TreapNode, Any], CoreIntervalManagerProtocol[Any], RandomizedProtocol):
     """Randomized interval tree using treap structure"""
     
-    def __init__(self, random_seed: Optional[int] = None, merge_fn: Optional[Callable[[Any, Any], Any]] = None):
-        super().__init__(merge_fn=merge_fn)
+    def __init__(
+        self,
+        random_seed: Optional[int] = None,
+        merge_fn: Optional[Callable[[Any, Any], Any]] = None,
+        split_fn: Optional[Callable[[Any, int, int, int, int], Any]] = None,
+        can_merge: Optional[Callable[[Optional[Any], Optional[Any]], bool]] = None,
+        merge_idempotent: bool = False,
+        split_idempotent: bool = False,
+    ):
+        super().__init__(
+            merge_fn=merge_fn,
+            split_fn=split_fn,
+            can_merge=can_merge,
+            merge_idempotent=merge_idempotent,
+            split_idempotent=split_idempotent,
+        )
         self.root: Optional[TreapNode] = None
         
         if random_seed is not None:
@@ -219,13 +233,15 @@ class IntervalTreap(IntervalTreeBase[TreapNode, Any], CoreIntervalManagerProtoco
             # Create left remainder if needed
             if node.start < start:
                 # Use a priority lower than the original node to maintain heap property
-                left_remainder = TreapNode(node.start, start, node.data, priority=node.priority * 0.5)
+                left_data = self.split_data(node.data, node.start, node.end, node.start, start)
+                left_remainder = TreapNode(node.start, start, left_data, priority=node.priority * 0.5)
                 nodes_to_insert.append(left_remainder)
             
             # Create right remainder if needed
             if node.end > end:
                 # Use a priority lower than the original node to maintain heap property
-                right_remainder = TreapNode(end, node.end, node.data, priority=node.priority * 0.5)
+                right_data = self.split_data(node.data, node.start, node.end, end, node.end)
+                right_remainder = TreapNode(end, node.end, right_data, priority=node.priority * 0.5)
                 nodes_to_insert.append(right_remainder)
             
             # Delete current node and process subtrees
