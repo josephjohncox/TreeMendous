@@ -198,6 +198,7 @@ def benchmark_mixed_implementation(num_intervals: int, num_operations: int) -> B
         best_fit_min_intervals=MIXED_BEST_FIT_MIN_INTERVALS,
         summary_min_intervals=MIXED_SUMMARY_MIN_INTERVALS,
         sync_cpu=MIXED_SYNC_CPU,
+        track_allocations=True,
     )
     manager.release_interval(0, num_intervals * 100)
     
@@ -206,14 +207,14 @@ def benchmark_mixed_implementation(num_intervals: int, num_operations: int) -> B
         profile=WORKLOAD_PROFILE,
         space_range=(0, num_intervals * 100),
         seed=42,
-        include_data=False
+        include_data=True
     )
     
     start_time = time.perf_counter()
-    for op, start, end, _ in iter_workload(workload):
+    for op, start, end, payload in iter_workload(workload):
         try:
             if op == 'reserve':
-                manager.reserve_interval(start, end)
+                manager.reserve_interval(start, end, payload)
             elif op == 'release':
                 manager.release_interval(start, end)
             elif op == 'find':
@@ -353,6 +354,7 @@ def run_feature_benchmark():
         best_fit_min_intervals=MIXED_BEST_FIT_MIN_INTERVALS,
         summary_min_intervals=MIXED_SUMMARY_MIN_INTERVALS,
         sync_cpu=MIXED_SYNC_CPU,
+        track_allocations=True,
     )
     
     cpu_manager.release_interval(0, num_intervals * 100)
@@ -362,7 +364,7 @@ def run_feature_benchmark():
     for i in range(0, num_intervals * 100, 200):
         cpu_manager.reserve_interval(i, i + 50)
         metal_manager.reserve_interval(i, i + 50)
-        mixed_manager.reserve_interval(i, i + 50)
+        mixed_manager.reserve_interval(i, i + 50, {"id": i})
     
     print("\n🔍 Summary Statistics:")
     
@@ -509,6 +511,7 @@ def run_best_fit_benchmark():
             best_fit_min_intervals=MIXED_BEST_FIT_MIN_INTERVALS,
             summary_min_intervals=MIXED_SUMMARY_MIN_INTERVALS,
             sync_cpu=MIXED_SYNC_CPU,
+            track_allocations=True,
         )
         
         # Create many non-overlapping intervals with varied sizes

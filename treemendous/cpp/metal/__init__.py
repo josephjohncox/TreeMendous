@@ -73,6 +73,7 @@ def create_mixed_metal_manager(
     best_fit_min_intervals: Optional[int] = None,
     summary_min_intervals: Optional[int] = None,
     sync_cpu: Optional[bool] = None,
+    track_allocations: Optional[bool] = None,
 ):
     """Create a mixed CPU/Metal boundary summary manager."""
     if not METAL_AVAILABLE:
@@ -86,6 +87,7 @@ def create_mixed_metal_manager(
         best_fit_min_intervals=best_fit_min_intervals,
         summary_min_intervals=summary_min_intervals,
         sync_cpu=sync_cpu,
+        track_allocations=track_allocations,
     )
 
 

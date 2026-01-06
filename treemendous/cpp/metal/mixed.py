@@ -5,15 +5,17 @@ Routes latency-sensitive operations to the fastest path:
 - CPU (cached) for summary/availability stats
 - Metal GPU for best-fit queries when enabled
 
-Maintains a CPU boundary summary manager for cached stats and payload retention,
-plus a Metal manager for GPU acceleration. Interval updates are applied to both
-unless sync_cpu=False.
+Maintains a CPU boundary summary manager for cached stats and a Metal manager
+for GPU acceleration. Payloads for reserved intervals can be tracked in a
+separate allocated-interval store when track_allocations=True. Interval updates
+are applied to both unless sync_cpu=False.
 """
 
 import os
 from typing import Optional, Any, Dict
 
 from treemendous.basic.boundary_summary import BoundarySummaryManager, BoundarySummary, IntervalResult
+from treemendous.basic.boundary import IntervalManager as AllocationIntervalManager
 
 try:
     from treemendous.cpp.metal.boundary_summary_metal import MetalBoundarySummaryManager
@@ -32,6 +34,7 @@ class MixedBoundarySummaryManager:
         best_fit_min_intervals: Optional[int] = None,
         summary_min_intervals: Optional[int] = None,
         sync_cpu: Optional[bool] = None,
+        track_allocations: Optional[bool] = None,
     ) -> None:
         if MetalBoundarySummaryManager is None:
             raise ImportError(
@@ -60,6 +63,11 @@ class MixedBoundarySummaryManager:
             if sync_cpu is not None
             else _read_bool_env("TREEMENDOUS_MIXED_SYNC_CPU", True)
         )
+        self.track_allocations = (
+            track_allocations
+            if track_allocations is not None
+            else _read_bool_env("TREEMENDOUS_MIXED_TRACK_ALLOCATIONS", True)
+        )
 
         if not self.sync_cpu:
             if self.summary_path == "cpu":
@@ -69,6 +77,11 @@ class MixedBoundarySummaryManager:
 
         self.cpu_manager = BoundarySummaryManager()
         self.metal_manager = MetalBoundarySummaryManager()
+        self.allocated_manager = (
+            AllocationIntervalManager(can_merge=lambda a, b: a == b)
+            if self.track_allocations
+            else None
+        )
 
         if self.summary_path not in {"cpu", "gpu", "auto"}:
             raise ValueError("summary_path must be 'cpu', 'gpu', or 'auto'")
@@ -140,23 +153,33 @@ class MixedBoundarySummaryManager:
         if self.sync_cpu:
             self.cpu_manager.release_interval(start, end, data)
         self.metal_manager.release_interval(start, end)
+        if self.allocated_manager is not None:
+            self.allocated_manager.reserve_interval(start, end)
 
     def reserve_interval(self, start: int, end: int, data: Optional[Any] = None) -> None:
         if self.sync_cpu:
             self.cpu_manager.reserve_interval(start, end)
         self.metal_manager.reserve_interval(start, end)
+        if self.allocated_manager is not None:
+            self.allocated_manager.release_interval(start, end, data)
 
     def batch_reserve(self, intervals) -> None:
         if self.sync_cpu:
             for start, end in intervals:
                 self.cpu_manager.reserve_interval(start, end)
         self.metal_manager.batch_reserve(intervals)
+        if self.allocated_manager is not None:
+            for start, end in intervals:
+                self.allocated_manager.release_interval(start, end)
 
     def batch_release(self, intervals) -> None:
         if self.sync_cpu:
             for start, end in intervals:
                 self.cpu_manager.release_interval(start, end)
         self.metal_manager.batch_release(intervals)
+        if self.allocated_manager is not None:
+            for start, end in intervals:
+                self.allocated_manager.reserve_interval(start, end)
 
     # Queries
     def find_interval(self, start: int, length: int) -> Optional[IntervalResult]:
@@ -206,6 +229,11 @@ class MixedBoundarySummaryManager:
         if self.sync_cpu:
             return self.cpu_manager.get_intervals()
         return self.metal_manager.get_intervals()
+
+    def get_allocated_intervals(self):
+        if self.allocated_manager is None:
+            return []
+        return self.allocated_manager.get_intervals()
 
     def get_total_available_length(self) -> int:
         if self._should_use_gpu_summary():
