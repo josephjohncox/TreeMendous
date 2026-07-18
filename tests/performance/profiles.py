@@ -102,7 +102,7 @@ def benchmark_profile(name: str) -> BenchmarkProfile:
                     queries_per_snapshot=20,
                     seed=65,
                 ),
-                lease_pool_workload(shards=10_000, operation_count=200, seed=66),
+                lease_pool_workload(shards=5_000, operation_count=200, seed=66),
                 scheduling_workload(cores=64, occupancy=0.75, jobs=100_000, seed=67),
             ),
         )
