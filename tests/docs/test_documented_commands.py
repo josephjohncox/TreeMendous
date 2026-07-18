@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -22,6 +23,14 @@ DOCUMENTS = (
 
 
 def _just_recipes() -> set[str]:
+    if shutil.which("just") is None:
+        return set(
+            re.findall(
+                r"^([a-zA-Z0-9_-]+)(?:\s+[^:\n]+)?:",
+                (ROOT / "justfile").read_text(),
+                re.MULTILINE,
+            )
+        )
     completed = subprocess.run(
         ["just", "--list", "--unsorted"],
         cwd=ROOT,

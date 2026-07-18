@@ -195,6 +195,8 @@ jobs:
           wheel=$(find dist -name '*.whl' -print -quit)
           TREEMENDOUS_WHEEL="$PWD/$wheel" TREEMENDOUS_REQUIRE_METAL=1 \
             uv run pytest tests/packaging/test_wheel_install.py -q
+      - name: Build Metal extension in place for source contract tests
+        run: uv run python setup_metal.py build_ext --inplace
       - name: Metal hardware contract
         env:
           TREEMENDOUS_METAL_HARDWARE_TEST: "1"
