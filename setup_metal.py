@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import os
 import platform
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -105,17 +104,15 @@ class BuildMetalExtension(PortableBuildExt):
         return outputs
 
     def _install_metallibs(self, extension: MetalExtension) -> None:
+        package_path = Path(*extension.name.split(".")[:-1])
         destinations = {
-            Path(self.build_lib) / "treemendous/cpp/metal/resources",
+            Path(self.build_lib) / package_path / "resources",
+            package_path / "resources",
         }
-        if self.inplace:
-            build_py = self.get_finalized_command("build_py")
-            package_dir = Path(build_py.get_package_dir("treemendous.cpp.metal"))
-            destinations.add(package_dir / "resources")
         for destination in destinations:
             destination.mkdir(parents=True, exist_ok=True)
             for metallib in extension.metallib_files:
-                shutil.copy2(metallib, destination / metallib.name)
+                self.copy_file(str(metallib), str(destination / metallib.name))
 
 
 metal_extension = MetalExtension(
