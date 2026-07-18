@@ -1,6 +1,6 @@
 [project]
 name = "treemendous"
-version = "0.2.5"
+version = "0.3.0"
 description = "Alpha integer range-set library with interchangeable Python and native CPU backends."
 authors = [{ name = "Joseph Cox", email = "joseph@codensity.io" }]
 license = "BSD-3-Clause"
@@ -20,9 +20,17 @@ classifiers = [
 dependencies = ["sortedcontainers>=2.4.0"]
 
 [project.optional-dependencies]
+build = ["build>=1.2.2", "pybind11>=2.13.6", "setuptools>=83.0.0"]
+quality = [
+  "mypy>=1.15.0",
+  "pip-audit>=2.8.0",
+  "ruff>=0.11.0",
+  "sortedcontainers-stubs>=2.4.2",
+]
+# Backward-compatible local developer extra. CI and release select the explicit
+# build, quality, and test extras instead of installing every optional feature.
 dev = [
   "build>=1.2.2",
-  "flameprof>=0.4",
   "mypy>=1.15.0",
   "pip-audit>=2.8.0",
   "pybind11>=2.13.6",

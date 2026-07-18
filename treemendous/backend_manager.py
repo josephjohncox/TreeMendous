@@ -26,6 +26,7 @@ from treemendous.basic.protocols import (
     IntervalResult,
     PerformanceStats,
     PerformanceTier,
+    standardize_availability_stats,
     standardize_interval_result,
     standardize_performance_stats,
 )
@@ -40,6 +41,83 @@ _CAPABILITY_NAMES = {
     Capability.BEST_FIT: "best-fit",
     Capability.RANDOM_SAMPLE: "random-sampling",
     Capability.ATOMIC_ALLOCATE: "atomic-allocate",
+}
+
+# Deprecated string metadata remains a compatibility view only. Selection and
+# semantic probing continue to use BackendSpec.capabilities, never these labels.
+_LEGACY_FEATURES: dict[str, tuple[str, ...]] = {
+    "py_boundary": ("core-operations",),
+    "py_avl_earliest": ("core-operations", "self-balancing", "earliest-fit"),
+    "py_summary": ("core-operations", "summary-stats", "best-fit", "analytics"),
+    "py_treap": (
+        "core-operations",
+        "probabilistic-balance",
+        "random-sampling",
+    ),
+    "py_boundary_summary": (
+        "core-operations",
+        "summary-stats",
+        "caching",
+        "best-fit",
+        "analytics",
+    ),
+    "cpp_boundary": ("core-operations", "native-performance"),
+    "cpp_treap": (
+        "core-operations",
+        "native-performance",
+        "probabilistic-balance",
+    ),
+    "cpp_boundary_summary": (
+        "core-operations",
+        "native-performance",
+        "summary-stats",
+        "caching",
+    ),
+    "cpp_boundary_optimized": (
+        "core-operations",
+        "native-performance",
+        "small-vector",
+        "branch-hints",
+    ),
+    "cpp_boundary_summary_optimized": (
+        "core-operations",
+        "native-performance",
+        "summary-stats",
+        "caching",
+        "small-vector",
+        "branch-hints",
+    ),
+    "gpu_boundary_summary": (
+        "core-operations",
+        "gpu-accelerated",
+        "parallel-reduction",
+        "summary-stats",
+        "massive-parallelism",
+        "O(1) analytics",
+    ),
+    "metal_boundary_summary": (
+        "core-operations",
+        "gpu-accelerated",
+        "metal-performance-shaders",
+        "summary-stats",
+        "apple-silicon",
+        "O(1) analytics",
+    ),
+    "metal_boundary_summary_mixed": (
+        "core-operations",
+        "mixed-policy",
+        "gpu-best-fit",
+        "cpu-summary",
+        "apple-silicon",
+        "cached-analytics",
+    ),
+}
+
+_DETECTED_METHOD_FEATURES = {
+    "get_availability_stats": "availability-stats",
+    "find_best_fit": "best-fit",
+    "sample_random_interval": "random-sampling",
+    "get_performance_stats": "performance-tracking",
 }
 
 
@@ -87,8 +165,13 @@ class UnifiedIntervalManager(RangeSet):
             self.discard(span)
             self._operation_count += 1
 
-    def get_availability_stats(self) -> AvailabilityStats:
-        return self.stats()
+    def get_availability_stats(self) -> AvailabilityStats | None:
+        """Return legacy raw-backend analytics without requiring a domain."""
+        with self._lock:
+            raw = self._adapter.implementation
+            if not hasattr(raw, "get_availability_stats"):
+                return None
+            return standardize_availability_stats(raw.get_availability_stats())
 
     def find_best_fit(
         self, length: int, prefer_early: bool = True
@@ -164,11 +247,21 @@ class TreeMendousBackendManager:
     def _info(self, spec: BackendSpec) -> RuntimeBackendInfo:
         probe = self._probes[spec.id]
         available = isinstance(probe, Available)
-        features = tuple(sorted(_CAPABILITY_NAMES[cap] for cap in spec.capabilities))
+        capability_features = tuple(
+            sorted(_CAPABILITY_NAMES[cap] for cap in spec.capabilities)
+        )
+        features = tuple(
+            dict.fromkeys((*capability_features, *_LEGACY_FEATURES.get(spec.id, ())))
+        )
         try:
             implementation_class = spec.loader()
         except Exception:
             implementation_class = object
+        detected_features = tuple(
+            label
+            for method, label in _DETECTED_METHOD_FEATURES.items()
+            if hasattr(implementation_class, method)
+        )
         reason = (
             None
             if available
@@ -195,8 +288,8 @@ class TreeMendousBackendManager:
             implementation_class,
             available,
             available,
-            features,
-            features,
+            detected_features,
+            detected_features,
             tier,
             reason,
         )
@@ -300,7 +393,7 @@ class TreeMendousBackendManager:
         return {
             key: info
             for key, info in self.get_available_backends().items()
-            if feature in info.config.features
+            if feature in info.config.features or feature in info.detected_features
         }
 
     def print_backend_status(self) -> None:

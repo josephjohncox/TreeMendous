@@ -6,6 +6,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
+from tests.performance import harness
 from tests.performance.accelerator_benchmark import (
     HardwareUnavailableError,
     _load_accelerator_class,
@@ -138,6 +139,34 @@ def test_scheduling_trace_reports_success_and_fairness(cores, occupancy):
     assert "cancel" in latency_kinds
 
 
+def test_checksum_serialization_delay_is_excluded_from_execution_timing(
+    monkeypatch,
+):
+    workload = BenchmarkWorkload(
+        "timing-isolation",
+        ((0, 100),),
+        (),
+        (Operation("add", start=0, end=10),),
+        100,
+    )
+    clock = [0]
+    checksum = harness._checksum
+
+    def delayed_checksum(value):
+        result = checksum(value)
+        clock[0] += 1_000_000_000
+        return result
+
+    monkeypatch.setattr(harness.time, "perf_counter_ns", lambda: clock[0])
+    monkeypatch.setattr(harness, "_checksum", delayed_checksum)
+
+    sample = run_validated_sample("py_boundary", workload)
+
+    assert sample.execution_ns == 0
+    assert sample.validation_ns >= 1_000_000_000
+    assert sample.summary.actual_interval_count == 1
+
+
 def test_statistics_use_robust_summary_and_confidence_interval():
     result = timing_statistics([10, 11, 12, 13, 1_000])
 
@@ -194,9 +223,9 @@ def test_batch_grouping_preserves_noncommuting_interleaved_order():
 
 def test_cuda_requires_explicit_availability_and_runtime_flags():
     module = ModuleType("fake_cuda")
-    module.GPU_AVAILABLE = True
-    module.CUDA_RUNTIME_VALIDATED = False
-    module.get_cuda_device_info = lambda: {"device_count": 1}
+    setattr(module, "GPU_AVAILABLE", True)
+    setattr(module, "CUDA_RUNTIME_VALIDATED", False)
+    setattr(module, "get_cuda_device_info", lambda: {"device_count": 1})
 
     with pytest.raises(HardwareUnavailableError, match="CUDA_RUNTIME_VALIDATED"):
         _validate_runtime_flags("gpu_boundary_summary", module)
@@ -204,17 +233,18 @@ def test_cuda_requires_explicit_availability_and_runtime_flags():
 
 def test_metal_resource_initialization_failure_is_unavailable(monkeypatch):
     module = ModuleType("fake_metal")
-    module.METAL_AVAILABLE = True
-    module.get_metal_device_info = lambda: {
-        "available": "true",
-        "device_name": "fake",
-    }
+    setattr(module, "METAL_AVAILABLE", True)
+    setattr(
+        module,
+        "get_metal_device_info",
+        lambda: {"available": "true", "device_name": "fake"},
+    )
 
     class BrokenMetal:
         def __init__(self):
             raise RuntimeError("missing metallib")
 
-    module.MetalBoundarySummaryManager = BrokenMetal
+    setattr(module, "MetalBoundarySummaryManager", BrokenMetal)
     monkeypatch.setattr(
         "tests.performance.accelerator_benchmark.importlib.import_module",
         lambda _: module,
@@ -227,11 +257,12 @@ def test_metal_resource_initialization_failure_is_unavailable(monkeypatch):
 def test_accelerator_runtime_probe_forces_synchronized_summary(monkeypatch):
     calls = []
     module = ModuleType("fake_metal")
-    module.METAL_AVAILABLE = True
-    module.get_metal_device_info = lambda: {
-        "available": "true",
-        "device_name": "fake",
-    }
+    setattr(module, "METAL_AVAILABLE", True)
+    setattr(
+        module,
+        "get_metal_device_info",
+        lambda: {"available": "true", "device_name": "fake"},
+    )
 
     class FakeSummaryManager:
         def release_interval(self, start, end):
@@ -251,7 +282,7 @@ def test_accelerator_runtime_probe_forces_synchronized_summary(monkeypatch):
                 latest_end=2,
             )
 
-    module.MetalBoundarySummaryManager = FakeSummaryManager
+    setattr(module, "MetalBoundarySummaryManager", FakeSummaryManager)
     monkeypatch.setattr(
         "tests.performance.accelerator_benchmark.importlib.import_module",
         lambda _: module,
@@ -278,7 +309,8 @@ def test_multiprocess_harness_initializes_warmups_in_sampling_worker(monkeypatch
         def __enter__(self):
             return self
 
-        def __exit__(self, exc_type, exc_value, traceback):
+        def __exit__(self, type, value, traceback):
+            del type, value, traceback
             return False
 
         def map(self, function, values):
@@ -294,6 +326,11 @@ def test_multiprocess_harness_initializes_warmups_in_sampling_worker(monkeypatch
     assert initialized[0][0] == 2
     assert initialized[0][1] == 3
     assert report["methodology"]["independent_runs"] == 20
+    assert (
+        "separate equivalent validation replay"
+        in report["methodology"]["execution_timing"]
+    )
+    assert "validation_overhead" in report["results"]["py_boundary"]
     operation = report["results"]["py_boundary"]["operation_latency"]["add"]
     assert operation["per_run_median"]["independent_runs"] == 20
     assert "confidence_95_ns" not in operation["invocation_distribution_descriptive"]

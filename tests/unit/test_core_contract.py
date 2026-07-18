@@ -8,7 +8,15 @@ from threading import Event, Thread
 import pytest
 
 import treemendous
-from treemendous.backends import CATALOG, Available, Invalid, Maturity, probe_backend
+from treemendous.backend_manager import TreeMendousBackendManager
+from treemendous.backends import (
+    CATALOG,
+    CATALOG_BY_ID,
+    Available,
+    Invalid,
+    Maturity,
+    probe_backend,
+)
 from treemendous.backends.adapters import PythonBackendAdapter
 from treemendous.basic.avl import IntervalNode, IntervalTree
 from treemendous.basic.avl_earliest import EarliestIntervalTree
@@ -16,7 +24,13 @@ from treemendous.basic.boundary import IntervalManager
 from treemendous.basic.boundary_summary import BoundarySummaryManager
 from treemendous.basic.summary import SummaryIntervalTree
 from treemendous.basic.treap import IntervalTreap, TreapNode
-from treemendous.domain import ManagedDomain, Span, UnsupportedCapabilityError
+from treemendous.domain import (
+    AvailabilityStats,
+    ManagedDomain,
+    ManagedDomainRequiredError,
+    Span,
+    UnsupportedCapabilityError,
+)
 from treemendous.policies import (
     JoinPayloadPolicy,
     OrderedPayloadPolicy,
@@ -115,7 +129,7 @@ def test_unordered_treap_merge_is_rejected_without_mutation():
 def test_backend_info_is_immutable():
     info = next(iter(treemendous.list_available_backends().values()))
     with pytest.raises(FrozenInstanceError):
-        info.basic_ops_working = False
+        info.basic_ops_working = False  # type: ignore[misc]
 
 
 def test_adapter_does_not_retry_type_error():
@@ -173,7 +187,9 @@ def test_mutation_result_reports_exact_changed_geometry():
 
 
 def test_payload_policy_laws_and_endpoint_segmentation():
-    join = JoinPayloadPolicy(lambda left, right: left | right, frozenset())
+    join: JoinPayloadPolicy[frozenset[str]] = JoinPayloadPolicy(
+        lambda left, right: left | right, frozenset()
+    )
     a, b, c = (frozenset({value}) for value in "ABC")
     assert join.combine(join.combine(a, b), c) == join.combine(a, join.combine(b, c))
     assert join.combine(a, join.bottom) == a
@@ -213,7 +229,9 @@ def test_uniform_and_ordered_payload_semantics_are_atomic_and_ordered():
     uniform.add(Span(5, 15), "A")
     assert uniform.intervals()[0].span == Span(0, 15)
 
-    ordered_policy = OrderedPayloadPolicy(lambda left, right: left + right, ())
+    ordered_policy: OrderedPayloadPolicy[tuple[str, ...]] = OrderedPayloadPolicy(
+        lambda left, right: left + right, ()
+    )
     ordered = RangeSet(
         PythonBackendAdapter(IntervalManager()),
         capabilities=capabilities,
@@ -233,7 +251,7 @@ def test_ordered_payload_is_permutation_and_regrouping_invariant():
     capabilities = frozenset(
         {treemendous.Capability.CORE, treemendous.Capability.PAYLOADS}
     )
-    policy = OrderedPayloadPolicy(
+    policy: OrderedPayloadPolicy[tuple[str, ...]] = OrderedPayloadPolicy(
         lambda left, right: left + right,
         (),
         event_key_fn=lambda value: value,
@@ -313,7 +331,9 @@ def test_payload_first_fit_spans_segments_and_returns_ordered_data():
 
 
 def test_public_create_range_set_options_are_not_backend_constructor_args():
-    policy = JoinPayloadPolicy(lambda left, right: left | right, frozenset())
+    policy: JoinPayloadPolicy[frozenset[str]] = JoinPayloadPolicy(
+        lambda left, right: left | right, frozenset()
+    )
     ranges = treemendous.create_range_set(
         (0, 10),
         backend="py_boundary",
@@ -401,9 +421,108 @@ def test_treap_verifier_propagates_endpoint_bounds_and_merge_allows_adjacency():
     assert merged.verify_treap_properties()
 
 
-def test_legacy_mutations_share_allocate_lock_and_return_none():
+def test_legacy_availability_stats_delegate_or_return_none_without_a_domain():
+    unsupported = treemendous.create_interval_tree("py_boundary")
+    unsupported.release_interval(0, 10)
+    assert unsupported.get_availability_stats() is None
+    with pytest.raises(ManagedDomainRequiredError):
+        unsupported.stats()
+
+    for backend in ("py_summary", "py_boundary_summary"):
+        manager = treemendous.create_interval_tree(backend)
+        manager.release_interval(0, 10)
+        manager.release_interval(20, 25)
+        stats = manager.get_availability_stats()
+        assert isinstance(stats, AvailabilityStats)
+        assert stats.total_free == 15
+        assert stats.free_chunks == 2
+        with pytest.raises(ManagedDomainRequiredError):
+            manager.stats()
+
+
+def test_legacy_availability_stats_share_the_facade_lock(monkeypatch):
+    manager = treemendous.create_interval_tree("py_summary")
+    manager.release_interval(0, 10)
+    raw = manager.get_raw_implementation()
+    original = raw.get_availability_stats
+    entered = Event()
+    proceed = Event()
+    mutation_done = Event()
+
+    def paused_stats():
+        entered.set()
+        assert proceed.wait(timeout=2)
+        return original()
+
+    def mutate():
+        manager.release_interval(20, 30)
+        mutation_done.set()
+
+    monkeypatch.setattr(raw, "get_availability_stats", paused_stats)
+    reader = Thread(target=manager.get_availability_stats)
+    mutation = Thread(target=mutate)
+    reader.start()
+    assert entered.wait(timeout=2)
+    mutation.start()
+    assert not mutation_done.wait(timeout=0.05)
+    proceed.set()
+    reader.join(timeout=2)
+    mutation.join(timeout=2)
+    assert mutation_done.is_set()
+
+
+def test_legacy_feature_aliases_remain_compatibility_metadata_only():
+    backend_manager = TreeMendousBackendManager()
+    expected_queries = {
+        "analytics": {"py_summary", "py_boundary_summary"},
+        "self-balancing": {"py_avl_earliest"},
+        "earliest-fit": {"py_avl_earliest"},
+        "caching": {"py_boundary_summary"},
+    }
+    for feature, expected in expected_queries.items():
+        assert set(backend_manager.get_backends_with_feature(feature)) == expected
+        for backend in expected:
+            assert backend_manager.create_manager(backend).supports_feature(feature)
+
+    stable_native = {
+        backend
+        for backend in ("cpp_boundary", "cpp_boundary_optimized")
+        if backend in backend_manager.get_available_backends()
+    }
+    assert set(backend_manager.get_backends_with_feature("native-performance")) == (
+        stable_native
+    )
+
+    accelerator_labels = {
+        "gpu_boundary_summary": {
+            "gpu-accelerated",
+            "parallel-reduction",
+            "massive-parallelism",
+            "O(1) analytics",
+        },
+        "metal_boundary_summary": {
+            "gpu-accelerated",
+            "metal-performance-shaders",
+            "apple-silicon",
+            "O(1) analytics",
+        },
+        "metal_boundary_summary_mixed": {
+            "mixed-policy",
+            "gpu-best-fit",
+            "cpu-summary",
+            "apple-silicon",
+            "cached-analytics",
+        },
+    }
+    for backend, labels in accelerator_labels.items():
+        assert labels <= set(backend_manager._infos[backend].config.features)
+        assert not backend_manager._infos[backend].config.available
+        assert not CATALOG_BY_ID[backend].capabilities
+
+
+def test_legacy_mutations_share_allocate_lock_and_return_none(monkeypatch):
     manager = treemendous.create_interval_tree("py_boundary")
-    assert manager.release_interval(0, 100) is None
+    assert getattr(manager, "release_interval")(0, 100) is None
     entered = Event()
     proceed = Event()
     mutation_done = Event()
@@ -415,14 +534,13 @@ def test_legacy_mutations_share_allocate_lock_and_return_none():
         assert proceed.wait(timeout=2)
         return result
 
-    manager.first_fit = paused_first_fit
+    def mutate():
+        manager.release_interval(200, 210)
+        mutation_done.set()
+
+    monkeypatch.setattr(manager, "first_fit", paused_first_fit)
     allocation = Thread(target=lambda: manager.allocate(10, not_before=0))
-    mutation = Thread(
-        target=lambda: (
-            manager.release_interval(200, 210),
-            mutation_done.set(),
-        )
-    )
+    mutation = Thread(target=mutate)
     allocation.start()
     assert entered.wait(timeout=2)
     mutation.start()
@@ -454,11 +572,22 @@ def test_adapter_backed_reads_share_mutation_lock():
     add_done = Event()
     stats_done = Event()
     total_done = Event()
-    mutation = Thread(target=lambda: (ranges.add(Span(0, 10)), add_done.set()))
-    stats_reader = Thread(target=lambda: (ranges.stats(), stats_done.set()))
-    total_reader = Thread(
-        target=lambda: (ranges.get_total_available_length(), total_done.set())
-    )
+
+    def add_range():
+        ranges.add(Span(0, 10))
+        add_done.set()
+
+    def read_stats():
+        ranges.stats()
+        stats_done.set()
+
+    def read_total():
+        ranges.get_total_available_length()
+        total_done.set()
+
+    mutation = Thread(target=add_range)
+    stats_reader = Thread(target=read_stats)
+    total_reader = Thread(target=read_total)
     mutation.start()
     assert raw.entered.wait(timeout=2)
     stats_reader.start()
@@ -480,7 +609,8 @@ def test_false_declared_capability_is_invalid():
     )
     state = probe_backend(false_claim)
     assert isinstance(state, Invalid)
-    if "random-sampling API is absent" not in state.error:
+    expected_error = "random-sampling API " + "is absent"
+    if expected_error not in state.error:
         pytest.fail(f"unexpected probe error: {state.error}")
 
 

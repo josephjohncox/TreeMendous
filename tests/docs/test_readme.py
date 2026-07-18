@@ -71,7 +71,15 @@ def test_maintained_relative_links_resolve() -> None:
 
 def test_installed_version_matches_project_metadata() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    assert project["project"]["version"] == "0.3.0"
     assert version("treemendous") == project["project"]["version"]
+
+
+def test_release_tag_contract_tracks_the_releasable_minor_version() -> None:
+    workflow = (ROOT / ".github/workflows/release.yml").read_text()
+    assert 'expected="v${version}"' in workflow
+    assert 'GITHUB_REF_NAME" != "$expected' in workflow
+    assert 'version = "0.3.0"' in (ROOT / "pyproject.toml").read_text()
 
 
 def test_version_resolution_uses_metadata_and_source_fallback(monkeypatch) -> None:

@@ -2,7 +2,8 @@
 
 `pyproject.toml` is the only version source. The package reads installed metadata
 for `treemendous.__version__`, and the release workflow rejects a tag that does
-not equal `v<project.version>`.
+not equal `v<project.version>`. The public API introduced on this branch is the
+`0.3.0` minor release; `v0.2.5` already exists and must not be reused.
 
 1. Run `just validate`, `uv lock --check`, and the platform/package matrix.
 2. Inspect source and wheel contents with `just verify-artifacts`.

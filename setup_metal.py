@@ -3,18 +3,23 @@
 
 from __future__ import annotations
 
+import os
 import platform
 import shutil
 import subprocess
 from pathlib import Path
 
 from pybind11 import get_include
-from setuptools import Extension, setup
+from setuptools import Extension, setup  # type: ignore[import-untyped]
 
 from setup import PortableBuildExt, make_cpu_extensions
 
 if platform.system() != "Darwin":
     raise SystemExit("Metal extensions can only be built on macOS")
+
+# Apple Silicon and the required Metal APIs are supported well before this
+# minimum; pinning it prevents release wheel tags from inheriting the runner SDK.
+os.environ.setdefault("MACOSX_DEPLOYMENT_TARGET", "12.0")
 
 try:
     subprocess.run(
@@ -23,9 +28,16 @@ try:
         capture_output=True,
         text=True,
     )
+    subprocess.run(
+        ["xcrun", "-f", "metal"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 except (FileNotFoundError, subprocess.CalledProcessError) as exc:
     raise SystemExit(
-        "Metal build requires Xcode Command Line Tools and a macOS SDK"
+        "Metal build requires Xcode Command Line Tools, a macOS SDK, and the "
+        "Metal compiler (xcrun -f metal)"
     ) from exc
 
 

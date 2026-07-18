@@ -161,6 +161,16 @@ manager = MetalBoundarySummaryManager()
 manager.release_interval(0, 100)
 manager.batch_reserve([(10, 20), (30, 40)])
 assert manager.get_intervals() == [(0, 10), (20, 30), (40, 100)]
+cpu = manager.compute_summary_cpu()
+gpu = manager.compute_summary_gpu()
+for field in (
+    'total_free_length', 'total_occupied_length', 'interval_count',
+    'largest_interval_length', 'largest_interval_start',
+    'smallest_interval_length', 'total_gaps', 'earliest_start', 'latest_end',
+):
+    assert getattr(gpu, field) == getattr(cpu, field), field
+assert manager.find_best_fit_gpu(10, True) == (0, 10)
+assert manager.find_best_fit_gpu(61, True) is None
 before = manager.get_intervals()
 try:
     manager.batch_release([(50, 60), (70, 70)])

@@ -4,7 +4,35 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from treemendous.domain import Span, validate_coordinate, validate_length
+
+def _validate_coordinate(value: int, name: str = "coordinate") -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{name} must be an integer")
+    return value
+
+
+def _validate_length(length: int) -> int:
+    _validate_coordinate(length, "length")
+    if length <= 0:
+        raise ValueError("length must be greater than zero")
+    return length
+
+
+@dataclass(frozen=True, order=True)
+class _OracleSpan:
+    """Benchmark-local half-open span; intentionally independent of production."""
+
+    start: int
+    end: int
+
+    def __post_init__(self) -> None:
+        _validate_coordinate(self.start, "start")
+        _validate_coordinate(self.end, "end")
+        if self.start >= self.end:
+            raise ValueError("span must satisfy start < end")
+
+    def contains(self, other: _OracleSpan) -> bool:
+        return self.start <= other.start and other.end <= self.end
 
 
 @dataclass(frozen=True)
@@ -19,12 +47,13 @@ class OracleMutation:
 class RangeOracle:
     """Small ordered-list model for half-open free ranges.
 
-    This deliberately does not call Tree-Mendous implementation code. Benchmark
-    traces are validated against it before any timing sample is reported.
+    The model owns its value types and validators and does not import or call
+    Tree-Mendous production code. Benchmark traces are validated against this
+    implementation in a replay separate from measured backend execution.
     """
 
     def __init__(self, domain: tuple[tuple[int, int], ...]) -> None:
-        self._domain = tuple(Span(start, end) for start, end in domain)
+        self._domain = tuple(_OracleSpan(start, end) for start, end in domain)
         self._intervals: list[tuple[int, int]] = []
 
     @property
@@ -35,11 +64,11 @@ class RangeOracle:
     def total(self) -> int:
         return sum(end - start for start, end in self._intervals)
 
-    def _validate_domain(self, span: Span) -> None:
+    def _validate_domain(self, span: _OracleSpan) -> None:
         if not any(part.contains(span) for part in self._domain):
             raise ValueError("span must be contained in the managed domain")
 
-    def _covered(self, span: Span) -> bool:
+    def _covered(self, span: _OracleSpan) -> bool:
         cursor = span.start
         for start, end in self._intervals:
             if end <= cursor:
@@ -52,7 +81,7 @@ class RangeOracle:
         return False
 
     def add(self, start: int, end: int) -> OracleMutation:
-        span = Span(start, end)
+        span = _OracleSpan(start, end)
         self._validate_domain(span)
         before_total = self.total
         fully_covered = self._covered(span)
@@ -91,7 +120,7 @@ class RangeOracle:
         return OracleMutation(changed_length, changed_components, fully_covered)
 
     def discard(self, start: int, end: int) -> OracleMutation:
-        span = Span(start, end)
+        span = _OracleSpan(start, end)
         self._validate_domain(span)
         before_total = self.total
         fully_covered = self._covered(span)
@@ -112,10 +141,10 @@ class RangeOracle:
     def first_fit(
         self, length: int, *, not_before: int, not_after: int | None = None
     ) -> tuple[int, int] | None:
-        validate_coordinate(not_before, "not_before")
-        validate_length(length)
+        _validate_coordinate(not_before, "not_before")
+        _validate_length(length)
         if not_after is not None:
-            validate_coordinate(not_after, "not_after")
+            _validate_coordinate(not_after, "not_after")
             if not_after <= not_before:
                 raise ValueError("not_after must be greater than not_before")
         for interval_start, interval_end in self._intervals:

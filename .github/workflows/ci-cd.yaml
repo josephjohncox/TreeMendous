@@ -19,13 +19,24 @@ jobs:
     name: Ruff / mypy / branch coverage / docs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      # actions/checkout v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      # astral-sh/setup-uv v6
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
         with:
           python-version: "3.12"
           enable-cache: true
-      - run: uv sync --all-extras
+      - run: uv sync --extra build --extra quality --extra test
       - run: uv lock --check
+      - name: Audit deliberate build/test/quality environment
+        run: uv run --frozen --no-sync pip-audit --skip-editable
+      - name: Audit core runtime dependency export
+        shell: bash
+        run: |
+          uv export --frozen --no-dev --no-emit-project \
+            --output-file /tmp/treemendous-core-requirements.txt
+          uv run --frozen --no-sync pip-audit \
+            --requirement /tmp/treemendous-core-requirements.txt
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy treemendous
@@ -50,12 +61,14 @@ jobs:
       matrix:
         python: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      # actions/checkout v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      # astral-sh/setup-uv v6
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
         with:
           python-version: ${{ matrix.python }}
           enable-cache: true
-      - run: uv sync --all-extras
+      - run: uv sync --extra build --extra quality --extra test
       - name: Pure Python contract tests
         run: >-
           uv run pytest tests/unit tests/test_boundary_summary_simple.py
@@ -76,12 +89,14 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python: ["3.11", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      # actions/checkout v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      # astral-sh/setup-uv v6
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
         with:
           python-version: ${{ matrix.python }}
           enable-cache: true
-      - run: uv sync --all-extras
+      - run: uv sync --extra build --extra quality --extra test
       - run: uv run python setup.py build_ext --inplace
       - name: Stable native contract
         run: >-
@@ -98,11 +113,13 @@ jobs:
       TREE_MENDOUS_SANITIZERS: "1"
       TREE_MENDOUS_GLIBCXX_DEBUG: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      # actions/checkout v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      # astral-sh/setup-uv v6
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
         with:
           python-version: "3.12"
-      - run: uv sync --all-extras
+      - run: uv sync --extra build --extra quality --extra test
       - run: uv run python setup.py build_ext --inplace --force
       - name: Run native contracts under sanitizers
         shell: bash
@@ -119,11 +136,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: [quality, fast-python, native-cpu]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      # actions/checkout v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      # astral-sh/setup-uv v6
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
         with:
           python-version: "3.12"
-      - run: uv sync --all-extras
+      - run: uv sync --extra build --extra quality --extra test
       - run: rm -rf build dist wheelhouse
       - run: uv build --sdist
       - run: uv run python scripts/verify_artifact_contents.py dist
@@ -137,7 +156,8 @@ jobs:
           wheel=$(find wheelhouse -name '*.whl' -print -quit)
           TREEMENDOUS_WHEEL="$PWD/$wheel" \
             uv run pytest tests/packaging/test_wheel_install.py -q
-      - uses: actions/upload-artifact@v4
+      # actions/upload-artifact v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: verified-linux-package
           path: |
@@ -148,12 +168,18 @@ jobs:
     name: macOS Metal wheel/resource/device
     runs-on: macos-latest
     needs: native-cpu
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      # actions/checkout v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      # astral-sh/setup-uv v6
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
         with:
           python-version: "3.12"
-      - run: uv sync --all-extras
+      - run: uv sync --extra build --extra quality --extra test
+      - name: Require the Xcode Metal compiler
+        run: xcrun -f metal
       - run: rm -rf build dist
       - run: uv run python setup_metal.py bdist_wheel
       - run: uv run python scripts/verify_artifact_contents.py dist/*.whl
@@ -173,11 +199,13 @@ jobs:
     name: Experimental CUDA hardware gate
     runs-on: [self-hosted, linux, x64]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      # actions/checkout v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      # astral-sh/setup-uv v6
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
         with:
           python-version: "3.12"
-      - run: uv sync --all-extras
+      - run: uv sync --extra build --extra quality --extra test
       - run: WITH_CUDA=1 uv run python setup_gpu.py build_ext --inplace
       - env:
           TREEMENDOUS_CUDA_HARDWARE_TEST: "1"

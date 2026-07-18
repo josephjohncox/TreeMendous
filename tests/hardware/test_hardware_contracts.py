@@ -29,7 +29,7 @@ def test_metal_catalog_is_experimental_32_bit_and_unavailable() -> None:
 def test_mixed_metal_invalid_batch_does_not_partially_mutate_replicas() -> None:
     class Recorder:
         def __init__(self) -> None:
-            self.calls = []
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
 
         def reserve_interval(self, *args) -> None:
             self.calls.append(("reserve", args))
@@ -37,16 +37,19 @@ def test_mixed_metal_invalid_batch_does_not_partially_mutate_replicas() -> None:
         def batch_reserve(self, intervals) -> None:
             self.calls.append(("batch_reserve", tuple(intervals)))
 
+    cpu = Recorder()
+    metal = Recorder()
+    allocated = Recorder()
     mixed = MixedBoundarySummaryManager.__new__(MixedBoundarySummaryManager)
     mixed.sync_cpu = True
-    mixed.cpu_manager = Recorder()
-    mixed.metal_manager = Recorder()
-    mixed.allocated_manager = Recorder()
+    mixed.__dict__["cpu_manager"] = cpu
+    mixed.__dict__["metal_manager"] = metal
+    mixed.__dict__["allocated_manager"] = allocated
     with pytest.raises(ValueError):
         mixed.batch_reserve([(0, 10), (5, 5)])
-    assert not mixed.cpu_manager.calls
-    assert not mixed.metal_manager.calls
-    assert not mixed.allocated_manager.calls
+    assert not cpu.calls
+    assert not metal.calls
+    assert not allocated.calls
 
 
 @pytest.mark.cuda
@@ -89,6 +92,67 @@ def test_cuda_kernel_summary_matches_cpu() -> None:
     for field in floating_fields:
         assert getattr(gpu, field) == pytest.approx(getattr(cpu, field)), field
     assert manager.get_performance_stats().gpu_operations == 1
+
+
+def _assert_metal_summary_parity(cpu, gpu) -> None:
+    integral_fields = (
+        "total_free_length",
+        "total_occupied_length",
+        "interval_count",
+        "largest_interval_length",
+        "largest_interval_start",
+        "smallest_interval_length",
+        "total_gaps",
+        "earliest_start",
+        "latest_end",
+    )
+    floating_fields = (
+        "avg_interval_length",
+        "avg_gap_size",
+        "fragmentation_index",
+        "utilization",
+    )
+    for field in integral_fields:
+        assert getattr(gpu, field) == getattr(cpu, field), field
+    for field in floating_fields:
+        assert getattr(gpu, field) == pytest.approx(getattr(cpu, field)), field
+
+
+def _cpu_best_fit(
+    intervals: list[tuple[int, int]], length: int
+) -> tuple[int, int] | None:
+    candidates = [item for item in intervals if item[1] - item[0] >= length]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: (item[1] - item[0] - length, item[0]))
+
+
+@pytest.mark.metal
+def test_metal_gpu_summary_and_best_fit_match_cpu_boundary_cases() -> None:
+    if os.environ.get("TREEMENDOUS_METAL_HARDWARE_TEST") != "1":
+        pytest.skip("requires explicit macOS Metal hardware lane")
+    module = importlib.import_module("treemendous.cpp.metal.boundary_summary_metal")
+    cases: tuple[tuple[str, list[tuple[int, int]], tuple[int, ...]], ...] = (
+        ("empty", [], (1,)),
+        ("singleton", [(0, 7)], (1, 7, 8)),
+        ("fragmented", [(0, 4), (10, 13), (20, 30), (40, 44)], (3, 4, 5, 11)),
+        ("int32-lower", [(-(2**31), -(2**31) + 8)], (1, 8, 9)),
+        ("int32-upper", [(2**31 - 10, 2**31 - 5), (2**31 - 4, 2**31 - 1)], (3, 4, 5)),
+    )
+
+    for name, intervals, lengths in cases:
+        # Construction loads the metallib resource installed beside the extension.
+        manager = module.MetalBoundarySummaryManager()
+        if intervals:
+            manager.batch_release(intervals)
+        _assert_metal_summary_parity(
+            manager.compute_summary_cpu(), manager.compute_summary_gpu()
+        )
+        assert manager.get_intervals() == intervals, name
+        for length in lengths:
+            assert manager.find_best_fit_gpu(length, True) == _cpu_best_fit(
+                intervals, length
+            ), f"{name}: best-fit length {length}"
 
 
 @pytest.mark.metal

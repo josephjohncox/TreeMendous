@@ -67,10 +67,15 @@ def _print_report(report: dict[str, Any]) -> None:
         timing = result["execution"]
         low, high = timing["confidence_95_ns"]
         validation = result["validation"]
+        validation_overhead = result["validation_overhead"]
         print(
-            f"  {backend}: median={timing['median_ns'] / 1e6:.3f} ms "
+            f"  {backend}: execution median={timing['median_ns'] / 1e6:.3f} ms "
             f"(95% median CI {low / 1e6:.3f}..{high / 1e6:.3f} ms, "
             f"MAD={timing['median_absolute_deviation_ns'] / 1e6:.3f} ms)"
+        )
+        print(
+            "    validation replay median="
+            f"{validation_overhead['median_ns'] / 1e6:.3f} ms (excluded)"
         )
         print(
             "    validated: "
@@ -132,7 +137,12 @@ def main(argv: list[str] | None = None) -> int:
         "reports": reports,
     }
     if args.output:
-        args.output.write_text(json.dumps(output, indent=2) + "\n", encoding="utf-8")
+        try:
+            args.output.write_text(
+                json.dumps(output, indent=2) + "\n", encoding="utf-8"
+            )
+        except OSError as exc:
+            raise SystemExit(f"could not write benchmark report: {exc}") from exc
         print(f"\nwrote {args.output}")
     return 0
 

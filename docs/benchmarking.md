@@ -8,10 +8,15 @@ just benchmark
 ```
 
 The harness generates one immutable operation trace and replays the identical
-order and semantics for each backend. Every query and final checksum is checked
-against a reference model before timing is accepted. Reports distinguish
-requested operations, successful mutations, no-ops, errors, coordinate extent,
-actual interval count, touched intervals, and checksum.
+order and semantics for each backend. `execution` measures only that declared
+public-operation replay. A separate equivalent replay performs per-operation
+instrumentation, accounting, snapshots, normalization, JSON serialization,
+checksums, and divergence rejection; its overhead is reported separately and is
+never included in `execution`. Every query and final checksum is checked against
+a benchmark-local ordered-list oracle with independent value types and
+validators before timing is accepted. Reports distinguish requested operations,
+successful mutations, no-ops, errors, coordinate extent, actual interval count,
+touched intervals, and checksums.
 
 For meaningful results, use multiple independent processes and samples, randomize
 backend order, retain environment/commit/compiler/device metadata, and report

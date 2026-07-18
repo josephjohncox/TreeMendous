@@ -74,11 +74,12 @@ class _ObservedMutation:
 
 @dataclass(frozen=True)
 class Sample:
-    """One validated timing sample."""
+    """One timing sample accepted by a separate fully validated replay."""
 
     implementation: str
     setup_ns: int
     execution_ns: int
+    validation_ns: int
     operation_latency_ns: tuple[tuple[str, tuple[int, ...]], ...]
     summary: ReplaySummary
 
@@ -171,7 +172,7 @@ def _execute_trace(
     for operation in operations:
         started = time.perf_counter_ns() if record_latencies else 0
         try:
-            mutation = None
+            mutation: Any = None
             result: tuple[int, int] | None = None
             if operation.kind == "add":
                 assert operation.start is not None and operation.end is not None
@@ -291,6 +292,46 @@ def _execute_trace(
     return summary, latencies
 
 
+def _replay_public_operations(
+    target: RangeLike, operations: tuple[Operation, ...]
+) -> None:
+    """Replay only declared public calls, without accounting or snapshots."""
+    allocations: dict[int, tuple[int, int]] = {}
+    for operation in operations:
+        try:
+            if operation.kind == "add":
+                assert operation.start is not None and operation.end is not None
+                target.add(Span(operation.start, operation.end))
+            elif operation.kind == "discard":
+                assert operation.start is not None and operation.end is not None
+                target.discard(Span(operation.start, operation.end))
+            elif operation.kind in {"first_fit", "allocate"}:
+                assert operation.length is not None and operation.not_before is not None
+                raw = getattr(target, operation.kind)(
+                    operation.length,
+                    not_before=operation.not_before,
+                    not_after=operation.not_after,
+                )
+                if operation.kind == "allocate" and operation.job_id is not None:
+                    if raw is not None:
+                        allocations[operation.job_id] = (raw.start, raw.end)
+            elif operation.kind == "cancel":
+                assert operation.job_id is not None
+                allocated = allocations.pop(operation.job_id, None)
+                if allocated is not None:
+                    target.add(Span(*allocated))
+            else:
+                raise ValueError(f"unknown operation kind: {operation.kind}")
+        except (ValueError, TypeError, OverflowError) as exc:
+            if operation.expected_error != type(exc).__name__:
+                raise
+        else:
+            if operation.expected_error is not None:
+                raise AssertionError(
+                    f"{operation.kind} did not raise {operation.expected_error}"
+                )
+
+
 def oracle_summary(workload: BenchmarkWorkload) -> tuple[int, ReplaySummary]:
     """Replay setup and timed traces in the independent model."""
     oracle = RangeOracle(workload.domain)
@@ -331,32 +372,45 @@ def validate_target(
 
 
 def run_validated_sample(backend_id: str, workload: BenchmarkWorkload) -> Sample:
-    """Run one sample and reject any semantic difference from the oracle."""
+    """Time a public replay and validate an equivalent independent replay."""
+    validation_started = time.perf_counter_ns()
     initial_count, expected = oracle_summary(workload)
-    setup_started = time.perf_counter_ns()
-    target = _new_backend(backend_id, workload)
-    _execute_trace(target, workload.setup, record_latencies=False)
-    setup_ns = time.perf_counter_ns() - setup_started
-    observed_initial = len(target.intervals())
+    validation_target = _new_backend(backend_id, workload)
+    _execute_trace(validation_target, workload.setup, record_latencies=False)
+    observed_initial = len(validation_target.intervals())
     if observed_initial != initial_count:
         raise AssertionError(
             f"{backend_id} setup interval count {observed_initial} != oracle {initial_count}"
         )
-
-    execution_started = time.perf_counter_ns()
     observed, latencies = _execute_trace(
-        target, workload.operations, record_latencies=True
+        validation_target, workload.operations, record_latencies=True
     )
-    execution_ns = time.perf_counter_ns() - execution_started
     if observed != expected:
         raise AssertionError(
             f"{backend_id} benchmark validation failed\n"
             f"expected={expected!r}\nobserved={observed!r}"
         )
+    validation_ns = time.perf_counter_ns() - validation_started
+
+    setup_started = time.perf_counter_ns()
+    target = _new_backend(backend_id, workload)
+    _replay_public_operations(target, workload.setup)
+    setup_ns = time.perf_counter_ns() - setup_started
+    timed_initial = len(target.intervals())
+    if timed_initial != initial_count:
+        raise AssertionError(
+            f"{backend_id} timed setup interval count {timed_initial} "
+            f"!= oracle {initial_count}"
+        )
+
+    execution_started = time.perf_counter_ns()
+    _replay_public_operations(target, workload.operations)
+    execution_ns = time.perf_counter_ns() - execution_started
     return Sample(
         backend_id,
         setup_ns,
         execution_ns,
+        validation_ns,
         tuple((kind, tuple(values)) for kind, values in sorted(latencies.items())),
         observed,
     )
@@ -380,7 +434,7 @@ def _warm_sampling_worker(
             run_validated_sample(backend_id, workload)
 
 
-def _percentile(values: list[int], fraction: float) -> float:
+def _percentile(values: list[int] | list[float], fraction: float) -> float:
     ordered = sorted(values)
     index = fraction * (len(ordered) - 1)
     lower = math.floor(index)
@@ -481,6 +535,9 @@ def benchmark_backends(
             "setup": asdict(
                 timing_statistics([sample.setup_ns for sample in backend_samples])
             ),
+            "validation_overhead": asdict(
+                timing_statistics([sample.validation_ns for sample in backend_samples])
+            ),
             "operation_latency": {
                 kind: {
                     "per_run_median": asdict(timing_statistics(run_medians)),
@@ -508,9 +565,15 @@ def benchmark_backends(
             "worker_processes": processes,
             "implementation_order": "deterministically randomized per sample round",
             "confidence": "95% run-level percentile bootstrap interval for the median",
+            "execution_timing": (
+                "only the declared public operation trace; accounting, snapshots, "
+                "normalization, JSON checksums, and divergence rejection run in a "
+                "separate equivalent validation replay"
+            ),
+            "validation_overhead": "reported separately and excluded from execution",
             "operation_latency": (
-                "confidence intervals use per-run medians; invocation distributions "
-                "are descriptive only"
+                "collected during the validation replay; confidence intervals use "
+                "per-run medians and invocation distributions are descriptive only"
             ),
         },
         "environment": environment_metadata(),

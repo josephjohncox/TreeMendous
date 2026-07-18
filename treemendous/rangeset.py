@@ -537,7 +537,8 @@ class RangeSet:
         with self._lock:
             return self._adapter.total()
 
-    def get_availability_stats(self) -> AvailabilityStats:
+    def get_availability_stats(self) -> AvailabilityStats | None:
+        """Compatibility alias; canonical callers should use :meth:`stats`."""
         return self.stats()
 
     def get_raw_implementation(self) -> Any:
