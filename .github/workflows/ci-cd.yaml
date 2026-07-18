@@ -1,199 +1,161 @@
-name: CI/CD Pipeline
+name: CI
 
 on:
   pull_request:
-    branches:
-      - '*'
-  release:
-    types:
-      - published
-  
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      cuda:
+        description: Run the self-hosted CUDA hardware lane
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
 
 jobs:
-  test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ['3.11', '3.12', '3.13']
-
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-        with:
-          version: "latest"
-      
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
-      
-      - name: Create and sync virtual environment
-        run: |
-          uv venv --python ${{ matrix.python-version }}
-          uv sync --dev --all-extras
-          
-      - name: Build C++ extensions
-        run: |
-          uv run python setup.py build_ext --inplace
-
-      - name: Run tests
-        run: |
-          uv run pytest tests/ -v
-
-      - name: Run performance benchmarks
-        run: |
-          echo "=== Running performance benchmarks on ${{ matrix.os }} with Python ${{ matrix.python-version }}"
-          uv run python tests/performance/protocol_benchmark.py > benchmark_results_${{ matrix.os }}_py${{ matrix.python-version }}.txt
-          
-      - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-results-${{ matrix.os }}-py${{ matrix.python-version }}
-          path: benchmark_results_${{ matrix.os }}_py${{ matrix.python-version }}.txt
-          retention-days: 30
-
-  performance-report:
-    if: github.event_name == 'pull_request'
-    name: Generate Performance Report
-    needs: test
+  fast-python:
+    name: Fast Python ${{ matrix.python }}
     runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-    
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Download all benchmark results
-        uses: actions/download-artifact@v4
-        with:
-          pattern: benchmark-results-*
-          merge-multiple: true
-          
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-        with:
-          version: "latest"
-          
-      - name: Set up Python
-        run: uv python install 3.12
-        
-      - name: Create performance report
-        run: |
-          uv venv --python 3.12
-          uv sync --dev --all-extras
-          
-          # Create a comprehensive performance report
-          cat > performance_report.md << 'EOF'
-          # 🚀 Performance Benchmark Results
-          
-          This report shows performance characteristics across different platforms and Python versions.
-          
-          ## Platform Comparison
-          
-          EOF
-          
-          # Add results from each platform
-          for file in benchmark_results_*.txt; do
-            if [[ -f "$file" ]]; then
-              platform=$(echo "$file" | sed 's/benchmark_results_\(.*\)_py.*/\1/')
-              python_ver=$(echo "$file" | sed 's/.*_py\([0-9.]*\)\.txt/\1/')
-              
-              echo "### $platform - Python $python_ver" >> performance_report.md
-              echo '```' >> performance_report.md
-              cat "$file" >> performance_report.md
-              echo '```' >> performance_report.md
-              echo "" >> performance_report.md
-            fi
-          done
-          
-          # Add summary section
-          cat >> performance_report.md << 'EOF'
-          
-          ## Key Insights
-          
-          - **Cross-platform consistency**: Compare performance across Ubuntu, macOS, and Windows
-          - **Python version impact**: See how different Python versions affect performance
-          - **Architecture differences**: ARM64 (macOS) vs x86_64 (Ubuntu/Windows) performance
-          - **C++ optimizations**: Validate C++ implementations outperform Python across all platforms
-          
-          ## Usage
-          
-          These benchmarks help ensure consistent performance across deployment environments and guide optimization efforts.
-          
-          EOF
-          
-      - name: Upload performance report
-        uses: actions/upload-artifact@v4
-        with:
-          name: performance-report
-          path: performance_report.md
-          retention-days: 30
-          
-      - name: Comment performance report on PR
-        if: github.event_name == 'pull_request'
-        uses: mshick/add-pr-comment@v2
-        with:
-          message-path: performance_report.md
-          message-id: performance-report
-          allow-repeats: true
-
-  pypi-publish:
-    if: github.event_name == 'release'
-    name: Publish to PyPI
-    needs: test
-    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ['3.12']
-    environment:
-        name: pypi
-        url: https://pypi.org/p/treemendous
-    permissions:
-      id-token: write
-      contents: write
-    
+        python: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Install system dependencies (Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential python3-dev
-          
-      - name: Install system dependencies (macOS)
-        if: matrix.os == 'macos-latest'
-        run: |
-          # macOS runners already have Xcode command line tools
-          echo "macOS system dependencies already available"
-          
-      - name: Install system dependencies (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          # Windows runners already have Visual Studio Build Tools
-          echo "Windows system dependencies already available"
-      
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@v6
         with:
-          version: "latest"
-          
-      - name: Set up Python
-        run: uv python install ${{ matrix.python-version }}
-      
-      - name: Create and sync virtual environment
-        run: |
-          uv venv --python ${{ matrix.python-version }}
-          uv sync --dev --all-extras
-          
-      - name: Build C++ extensions
-        run: |
-          uv run python setup.py build_ext --inplace
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+      - run: uv sync --all-extras
+      - name: Pure Python contract tests
+        run: >-
+          uv run pytest tests/unit tests/test_boundary_summary_simple.py
+          tests/test_summary_simple.py tests/test_treap_simple.py
+          --ignore=tests/unit/test_native_core_contract.py
+          --ignore=tests/unit/hypothesis/test_boundary_cpp.py
+          --ignore=tests/unit/hypothesis/test_boundary_cpp_ic.py
+          --ignore=tests/unit/hypothesis/test_treap_cpp.py
+          -m "not metal and not cuda and not icl and not benchmark
+          and not packaging"
 
-      - name: Build package 
-        run: uv build
-          
-      - name: Publish package distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.13.0
+  native-cpu:
+    name: Native CPU / ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+      - run: uv sync --all-extras
+      - run: uv run python setup.py build_ext --inplace
+      - name: Stable native contract
+        run: >-
+          uv run pytest tests/unit/test_native_core_contract.py
+          tests/unit/test_core_contract.py
+          tests/unit/test_unified_implementations.py
+          -m "not metal and not cuda and not icl and not benchmark
+          and not packaging"
+
+  native-sanitizers:
+    name: Linux stable native ASan/UBSan/_GLIBCXX_DEBUG
+    runs-on: ubuntu-latest
+    env:
+      TREE_MENDOUS_SANITIZERS: "1"
+      TREE_MENDOUS_GLIBCXX_DEBUG: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --all-extras
+      - run: uv run python setup.py build_ext --inplace --force
+      - name: Run native contracts under sanitizers
+        shell: bash
+        run: |
+          asan_runtime=$(gcc -print-file-name=libasan.so)
+          export LD_PRELOAD="$asan_runtime"
+          export ASAN_OPTIONS=detect_leaks=1:halt_on_error=1
+          export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
+          uv run pytest tests/unit/test_native_core_contract.py \
+            tests/unit/test_core_contract.py -q
+
+  package:
+    name: Source and wheel policy / Linux
+    runs-on: ubuntu-latest
+    needs: [fast-python, native-cpu]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --all-extras
+      - run: rm -rf build dist wheelhouse
+      - run: uv build --sdist
+      - run: uv run python scripts/verify_artifact_contents.py dist
+      - run: uv build --wheel --out-dir wheelhouse dist/*.tar.gz
+      - run: uv run python scripts/verify_artifact_contents.py wheelhouse
+      - name: Artifact policy regressions
+        run: uv run pytest tests/packaging/test_artifact_policy.py -q
+      - name: Clean install from unrelated CWD
+        shell: bash
+        run: |
+          wheel=$(find wheelhouse -name '*.whl' -print -quit)
+          TREEMENDOUS_WHEEL="$PWD/$wheel" \
+            uv run pytest tests/packaging/test_wheel_install.py -q
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-linux-package
+          path: |
+            dist/*.tar.gz
+            wheelhouse/*.whl
+
+  metal-package:
+    name: macOS Metal wheel/resource/device
+    runs-on: macos-latest
+    needs: native-cpu
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --all-extras
+      - run: rm -rf build dist
+      - run: uv run python setup_metal.py bdist_wheel
+      - run: uv run python scripts/verify_artifact_contents.py dist/*.whl
+      - name: Metal clean-wheel test
+        shell: bash
+        run: |
+          wheel=$(find dist -name '*.whl' -print -quit)
+          TREEMENDOUS_WHEEL="$PWD/$wheel" TREEMENDOUS_REQUIRE_METAL=1 \
+            uv run pytest tests/packaging/test_wheel_install.py -q
+      - name: Metal hardware contract
+        env:
+          TREEMENDOUS_METAL_HARDWARE_TEST: "1"
+        run: uv run pytest -m metal tests/hardware -q
+
+  cuda-hardware:
+    if: github.event_name == 'workflow_dispatch' && inputs.cuda
+    name: Experimental CUDA hardware gate
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --all-extras
+      - run: WITH_CUDA=1 uv run python setup_gpu.py build_ext --inplace
+      - env:
+          TREEMENDOUS_CUDA_HARDWARE_TEST: "1"
+        run: uv run pytest -m cuda tests/hardware -q
+      - env:
+          TREEMENDOUS_CUDA_HARDWARE_TEST: "1"
+        run: >-
+          compute-sanitizer --tool memcheck --error-exitcode=1
+          uv run pytest -m cuda tests/hardware -q

@@ -21,7 +21,7 @@ PYBIND11_MODULE(summary, m) {
     // ==== SIMPLE IMPLEMENTATIONS ====
     
     // Basic IntervalManager (std::map based)
-    py::class_<IntervalManager>(m, "SummarySimpleIntervalManager", 
+    py::class_<IntervalManager>(m, "SummarySimpleIntervalManager", py::module_local(),
         "Basic interval manager using std::map - optimized for simplicity")
         .def(py::init<>())
         .def("release_interval", &IntervalManager::release_interval,

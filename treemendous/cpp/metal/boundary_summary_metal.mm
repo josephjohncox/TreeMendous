@@ -11,6 +11,28 @@
 #include <algorithm>
 #include <memory>
 #include <stdexcept>
+#include <filesystem>
+#include <dlfcn.h>
+
+namespace {
+void validate_span(int start, int end) {
+    if (start >= end) {
+        throw std::invalid_argument("interval start must be less than end");
+    }
+}
+
+std::filesystem::path installed_metallib_path() {
+    Dl_info info{};
+    if (dladdr(reinterpret_cast<const void*>(&get_metal_device_info), &info) == 0 ||
+        info.dli_fname == nullptr) {
+        throw std::runtime_error(
+            "missing installed Metal resource: unable to locate the installed extension"
+        );
+    }
+    return std::filesystem::path(info.dli_fname).parent_path() /
+           "resources" / "boundary_summary_metal.metallib";
+}
+}  // namespace
 
 // ============================================================================
 // IMPLEMENTATIONS
@@ -91,8 +113,8 @@ public:
     
     // Core interval operations (CPU-based for O(log n) performance)
     void release_interval(int start, int end) {
-        if (start >= end) return;
-        
+        validate_span(start, end);
+
         update_managed_bounds(start, end);
         ++operation_count_;
         gpu_dirty_ = true;
@@ -117,74 +139,23 @@ public:
         cpu_intervals_[start] = end;
     }
     
-    // Batch operations with TRUE GPU parallelism
+    // Batch operations validate the complete request before sharing the scalar
+    // mutation core. This keeps invalid batches atomic and accounting identical.
     void batch_reserve_gpu(const std::vector<std::pair<int, int>>& reserves) {
-        if (reserves.empty()) return;
-        
-        // Use GPU if we have many intervals and many reserves
-        if (cpu_intervals_.size() > 100 && reserves.size() > 100) {
-            sync_to_gpu();
-            
-            // TODO: Implement parallel batch reserve on GPU
-            // For now, fallback to optimized CPU loop
-            for (const auto& [start, end] : reserves) {
-                reserve_interval(start, end);
-            }
-        } else {
-            // CPU path for small batches
-            for (const auto& [start, end] : reserves) {
-                reserve_interval(start, end);
-            }
+        for (const auto& [start, end] : reserves) {
+            validate_span(start, end);
+        }
+        for (const auto& [start, end] : reserves) {
+            reserve_interval(start, end);
         }
     }
-    
+
     void batch_release_gpu(const std::vector<std::pair<int, int>>& releases) {
-        if (releases.empty()) return;
-        
-        // Merge new releases with existing intervals
-        // Use GPU parallelism for large batches
-        if (cpu_intervals_.size() > 100 && releases.size() > 100) {
-            // Sort releases first for efficient merging
-            std::vector<std::pair<int, int>> sorted_releases = releases;
-            std::sort(sorted_releases.begin(), sorted_releases.end());
-            
-            // Merge all intervals (existing + new) in one pass
-            std::vector<std::pair<int, int>> all_intervals;
-            all_intervals.reserve(cpu_intervals_.size() + sorted_releases.size());
-            
-            for (const auto& [s, e] : cpu_intervals_) {
-                all_intervals.emplace_back(s, e);
-            }
-            for (const auto& [s, e] : sorted_releases) {
-                all_intervals.emplace_back(s, e);
-            }
-            
-            std::sort(all_intervals.begin(), all_intervals.end());
-            
-            // Merge overlapping intervals
-            cpu_intervals_.clear();
-            if (!all_intervals.empty()) {
-                int current_start = all_intervals[0].first;
-                int current_end = all_intervals[0].second;
-                
-                for (size_t i = 1; i < all_intervals.size(); i++) {
-                    if (all_intervals[i].first <= current_end) {
-                        current_end = std::max(current_end, all_intervals[i].second);
-                    } else {
-                        cpu_intervals_[current_start] = current_end;
-                        current_start = all_intervals[i].first;
-                        current_end = all_intervals[i].second;
-                    }
-                }
-                cpu_intervals_[current_start] = current_end;
-            }
-            
-            gpu_dirty_ = true;
-        } else {
-            // CPU path for small batches
-            for (const auto& [start, end] : releases) {
-                release_interval(start, end);
-            }
+        for (const auto& [start, end] : releases) {
+            validate_span(start, end);
+        }
+        for (const auto& [start, end] : releases) {
+            release_interval(start, end);
         }
     }
     
@@ -198,8 +169,8 @@ public:
     }
     
     void reserve_interval(int start, int end) {
-        if (start >= end) return;
-        
+        validate_span(start, end);
+
         ++operation_count_;
         gpu_dirty_ = true;
         
@@ -547,26 +518,24 @@ private:
             throw std::runtime_error("Failed to create Metal command queue");
         }
         
-        // Load shader library
+        // Load only the resource installed beside this extension. CWD and the
+        // process main bundle are unrelated to a Python package installation.
         NSError* error = nil;
-        NSString* library_path = [[NSBundle mainBundle] pathForResource:@"boundary_summary_metal" ofType:@"metallib"];
-        
-        if (library_path) {
-            library_ = [device_ newLibraryWithFile:library_path error:&error];
-        } else {
-            // Try to compile from source (development mode)
-            NSString* source_path = @"treemendous/cpp/metal/boundary_summary_metal.metal";
-            NSString* source = [NSString stringWithContentsOfFile:source_path
-                                                          encoding:NSUTF8StringEncoding
-                                                             error:&error];
-            if (source) {
-                library_ = [device_ newLibraryWithSource:source options:nil error:&error];
-            }
+        const std::filesystem::path resource = installed_metallib_path();
+        if (!std::filesystem::is_regular_file(resource)) {
+            throw std::runtime_error(
+                "missing installed Metal resource: " + resource.string()
+            );
         }
-        
+        NSString* library_path = [NSString stringWithUTF8String:resource.c_str()];
+        library_ = [device_ newLibraryWithFile:library_path error:&error];
+
         if (!library_) {
-            NSString* error_msg = [NSString stringWithFormat:@"Failed to load Metal library: %@", error];
-            throw std::runtime_error([error_msg UTF8String]);
+            NSString* detail = error ? [error localizedDescription] : @"unknown error";
+            throw std::runtime_error(
+                "failed to load installed Metal resource " + resource.string() +
+                ": " + std::string([detail UTF8String])
+            );
         }
         
         // Create compute pipelines

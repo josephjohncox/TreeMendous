@@ -1740,15 +1740,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pybind11"
-version = "3.0.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/2f/7b/a6d8dcb83c457e24a9df1e4d8fd5fb8034d4bbc62f3c324681e8a9ba57c2/pybind11-3.0.1.tar.gz", hash = "sha256:9c0f40056a016da59bab516efb523089139fcc6f2ba7e4930854c61efb932051", size = 546914, upload-time = "2025-08-22T20:09:27.265Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/cd/8a/37362fc2b949d5f733a8b0f2ff51ba423914cabefe69f1d1b6aab710f5fe/pybind11-3.0.1-py3-none-any.whl", hash = "sha256:aa8f0aa6e0a94d3b64adfc38f560f33f15e589be2175e103c0a33c6bce55ee89", size = 293611, upload-time = "2025-08-22T20:09:25.235Z" },
-]
-
-[[package]]
 name = "pycparser"
 version = "2.23"
 source = { registry = "https://pypi.org/simple" }
@@ -2269,18 +2260,6 @@ wheels = [
 ]
 
 [[package]]
-name = "sortedcollections"
-version = "2.1.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "sortedcontainers" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/01/00/6d749cc1f88e7f95f5442a8abb195fa607094deba9e0475affbfb7fa8c04/sortedcollections-2.1.0.tar.gz", hash = "sha256:d8e9609d6c580a16a1224a3dc8965789e03ebc4c3e5ffd05ada54a2fed5dcacd", size = 9287, upload-time = "2021-01-18T22:15:16.623Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/6e/39/c993a7d0c9dbf3aeca5008bdd00e4436ad9b7170527cef0a14634b47001f/sortedcollections-2.1.0-py3-none-any.whl", hash = "sha256:b07abbc73472cc459da9dd6e2607d73d1f3b9309a32dd9a57fa2c6fa882f4c6c", size = 9531, upload-time = "2021-01-18T22:15:15.36Z" },
-]
-
-[[package]]
 name = "sortedcontainers"
 version = "2.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2384,9 +2363,6 @@ name = "treemendous"
 version = "0.2.5"
 source = { editable = "." }
 dependencies = [
-    { name = "pybind11" },
-    { name = "setuptools" },
-    { name = "sortedcollections" },
     { name = "sortedcontainers" },
 ]
 
@@ -2429,13 +2405,10 @@ requires-dist = [
     { name = "numpy", marker = "extra == 'visualization'", specifier = ">=1.21.0" },
     { name = "ortools", marker = "extra == 'examples'", specifier = ">=9.14.6206" },
     { name = "py-spy", marker = "extra == 'profiling'", specifier = ">=0.3.14" },
-    { name = "pybind11" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.3.3" },
     { name = "scipy", marker = "extra == 'visualization'", specifier = ">=1.16.0" },
     { name = "seaborn", marker = "extra == 'visualization'", specifier = ">=0.13.2" },
-    { name = "setuptools" },
     { name = "snakeviz", marker = "extra == 'profiling'", specifier = ">=2.2.0" },
-    { name = "sortedcollections", specifier = ">=2.1.0" },
     { name = "sortedcontainers", specifier = ">=2.4.0" },
     { name = "sortedcontainers-stubs", marker = "extra == 'dev'", specifier = ">=2.4.2" },
 ]

@@ -11,11 +11,18 @@ separate allocated-interval store when track_allocations=True. Interval updates
 are applied to both unless sync_cpu=False.
 """
 
-import os
-from typing import Optional, Any, Dict
+from __future__ import annotations
 
-from treemendous.basic.boundary_summary import BoundarySummaryManager, BoundarySummary, IntervalResult
+import os
+from typing import Any
+
 from treemendous.basic.boundary import IntervalManager as AllocationIntervalManager
+from treemendous.basic.boundary_summary import (
+    BoundarySummary,
+    BoundarySummaryManager,
+    IntervalResult,
+)
+from treemendous.domain import Span
 
 try:
     from treemendous.cpp.metal.boundary_summary_metal import MetalBoundarySummaryManager
@@ -29,12 +36,12 @@ class MixedBoundarySummaryManager:
 
     def __init__(
         self,
-        summary_path: Optional[str] = None,
-        best_fit_path: Optional[str] = None,
-        best_fit_min_intervals: Optional[int] = None,
-        summary_min_intervals: Optional[int] = None,
-        sync_cpu: Optional[bool] = None,
-        track_allocations: Optional[bool] = None,
+        summary_path: str | None = None,
+        best_fit_path: str | None = None,
+        best_fit_min_intervals: int | None = None,
+        summary_min_intervals: int | None = None,
+        sync_cpu: bool | None = None,
+        track_allocations: bool | None = None,
     ) -> None:
         if MetalBoundarySummaryManager is None:
             raise ImportError(
@@ -148,15 +155,30 @@ class MixedBoundarySummaryManager:
             utilization=summary.utilization,
         )
 
+    @staticmethod
+    def _validated_span(start: int, end: int) -> tuple[int, int]:
+        span = Span(start, end)
+        # Metal is explicitly a checked 32-bit experimental backend.
+        if span.start < -(2**31) or span.end > 2**31 - 1:
+            raise OverflowError("Metal coordinates must fit signed 32-bit integers")
+        return span.start, span.end
+
+    @classmethod
+    def _validated_batch(cls, intervals) -> tuple[tuple[int, int], ...]:
+        # Materialize and validate every element before any replica is mutated.
+        return tuple(cls._validated_span(start, end) for start, end in intervals)
+
     # Core interval operations
-    def release_interval(self, start: int, end: int, data: Optional[Any] = None) -> None:
+    def release_interval(self, start: int, end: int, data: Any | None = None) -> None:
+        start, end = self._validated_span(start, end)
         if self.sync_cpu:
             self.cpu_manager.release_interval(start, end, data)
         self.metal_manager.release_interval(start, end)
         if self.allocated_manager is not None:
             self.allocated_manager.reserve_interval(start, end)
 
-    def reserve_interval(self, start: int, end: int, data: Optional[Any] = None) -> None:
+    def reserve_interval(self, start: int, end: int, data: Any | None = None) -> None:
+        start, end = self._validated_span(start, end)
         if self.sync_cpu:
             self.cpu_manager.reserve_interval(start, end)
         self.metal_manager.reserve_interval(start, end)
@@ -164,25 +186,27 @@ class MixedBoundarySummaryManager:
             self.allocated_manager.release_interval(start, end, data)
 
     def batch_reserve(self, intervals) -> None:
+        validated = self._validated_batch(intervals)
         if self.sync_cpu:
-            for start, end in intervals:
+            for start, end in validated:
                 self.cpu_manager.reserve_interval(start, end)
-        self.metal_manager.batch_reserve(intervals)
+        self.metal_manager.batch_reserve(validated)
         if self.allocated_manager is not None:
-            for start, end in intervals:
+            for start, end in validated:
                 self.allocated_manager.release_interval(start, end)
 
     def batch_release(self, intervals) -> None:
+        validated = self._validated_batch(intervals)
         if self.sync_cpu:
-            for start, end in intervals:
+            for start, end in validated:
                 self.cpu_manager.release_interval(start, end)
-        self.metal_manager.batch_release(intervals)
+        self.metal_manager.batch_release(validated)
         if self.allocated_manager is not None:
-            for start, end in intervals:
+            for start, end in validated:
                 self.allocated_manager.reserve_interval(start, end)
 
     # Queries
-    def find_interval(self, start: int, length: int) -> Optional[IntervalResult]:
+    def find_interval(self, start: int, length: int) -> IntervalResult | None:
         if self.sync_cpu:
             return self.cpu_manager.find_interval(start, length)
         result = self.metal_manager.find_interval(start, length)
@@ -245,7 +269,7 @@ class MixedBoundarySummaryManager:
             return self._summary_from_metal(self.metal_manager.compute_summary_gpu())
         return self.cpu_manager.get_summary()
 
-    def get_availability_stats(self) -> Dict[str, Any]:
+    def get_availability_stats(self) -> dict[str, Any]:
         if not self._should_use_gpu_summary():
             return self.cpu_manager.get_availability_stats()
 

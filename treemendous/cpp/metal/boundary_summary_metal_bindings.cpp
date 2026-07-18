@@ -5,6 +5,19 @@
 #include <chrono>
 #include <algorithm>
 #include <iterator>
+#include <climits>
+#include <stdexcept>
+
+namespace {
+void validate_query(int start, int length) {
+    if (length <= 0) {
+        throw std::invalid_argument("length must be positive");
+    }
+    if (start > INT_MAX - length) {
+        throw std::overflow_error("query endpoint exceeds signed 32-bit range");
+    }
+}
+}  // namespace
 
 // Include the C++ header (implementation is in the .mm file)
 #include "boundary_summary_metal.h"
@@ -143,70 +156,22 @@ PYBIND11_MODULE(boundary_summary_metal, m) {
         }, "Get all available intervals")
         
         .def("find_interval", [](MetalBoundarySummaryManager& self, int start, int length) -> py::object {
-            if (length <= 0) {
-                return py::none();
-            }
-            
-            auto intervals = self.get_intervals();
-            if (intervals.empty()) {
-                return py::none();
-            }
-            
-            auto it = std::lower_bound(
-                intervals.begin(),
-                intervals.end(),
-                start,
-                [](const std::pair<int, int>& interval, int value) {
-                    return interval.first < value;
-                }
-            );
-            
-            bool found = false;
-            int result_start = 0;
-            int result_end = 0;
-            
-            if (it != intervals.end()) {
-                int s = it->first;
-                int e = it->second;
-                if (s <= start && start < e && e - start >= length) {
-                    result_start = start;
-                    result_end = start + length;
-                    found = true;
-                } else if (s > start && e - s >= length) {
-                    result_start = s;
-                    result_end = s + length;
-                    found = true;
+            validate_query(start, length);
+            for (const auto& [interval_start, interval_end] : self.get_intervals()) {
+                const int candidate = std::max(start, interval_start);
+                if (candidate <= INT_MAX - length && candidate + length <= interval_end) {
+                    return py::make_tuple(candidate, candidate + length);
                 }
             }
-            
-            if (!found && it != intervals.begin()) {
-                auto prev = std::prev(it);
-                int s = prev->first;
-                int e = prev->second;
-                if (s <= start && start < e && e - start >= length) {
-                    result_start = start;
-                    result_end = start + length;
-                    found = true;
-                } else if (start < s && e - s >= length) {
-                    result_start = s;
-                    result_end = s + length;
-                    found = true;
-                }
-            }
-            
-            if (found) {
-                return py::make_tuple(result_start, result_end);
-            }
-            
             return py::none();
         }, py::arg("start"), py::arg("length"),
            "Find interval of given length (compatibility method)")
         
         .def("find_best_fit", [](MetalBoundarySummaryManager& self, int length, bool prefer_early = true) -> py::object {
             if (length <= 0) {
-                return py::none();
+                throw std::invalid_argument("length must be positive");
             }
-            
+
             if (prefer_early) {
                 // Earliest-fit path to match CPU boundary summary semantics
                 auto intervals = self.get_intervals();

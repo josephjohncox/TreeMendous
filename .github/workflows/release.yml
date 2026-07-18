@@ -1,0 +1,163 @@
+name: Build and publish release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: Release tag matches project version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Require v<project.version> release tag
+        shell: bash
+        run: |
+          version=$(python -c \
+            "import tomllib; "\
+            "project=tomllib.load(open('pyproject.toml', 'rb')); "\
+            "print(project['project']['version'])")
+          expected="v${version}"
+          if [[ "$GITHUB_REF_NAME" != "$expected" ]]; then
+            echo "Release tag mismatch: expected $expected;" \
+              "got $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
+  sdist:
+    name: Build the only sdist
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --all-extras
+      - run: uv build --sdist --out-dir artifacts
+      - run: uv run python scripts/verify_artifact_contents.py artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-sdist
+          path: artifacts/*.tar.gz
+          if-no-files-found: error
+
+  wheels:
+    name: Wheel / ${{ matrix.os }} / Python ${{ matrix.python }}
+    needs: version
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.11"
+            cibw-build: cp311-manylinux_x86_64
+          - os: ubuntu-latest
+            python: "3.12"
+            cibw-build: cp312-manylinux_x86_64
+          - os: ubuntu-latest
+            python: "3.13"
+            cibw-build: cp313-manylinux_x86_64
+          - os: macos-latest
+            python: "3.11"
+          - os: macos-latest
+            python: "3.12"
+          - os: macos-latest
+            python: "3.13"
+          - os: windows-latest
+            python: "3.11"
+          - os: windows-latest
+            python: "3.12"
+          - os: windows-latest
+            python: "3.13"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --all-extras
+      - name: Build repaired manylinux CPU wheel
+        if: runner.os == 'Linux'
+        uses: pypa/cibuildwheel@v2.23.3
+        env:
+          CIBW_BUILD: ${{ matrix.cibw-build }}
+          CIBW_ARCHS_LINUX: x86_64
+        with:
+          package-dir: .
+          output-dir: artifacts
+      - name: Build Windows portable CPU wheel
+        if: runner.os == 'Windows'
+        run: uv build --wheel --out-dir artifacts
+      - name: Build macOS CPU plus experimental Metal wheel
+        if: runner.os == 'macOS'
+        run: uv run python setup_metal.py bdist_wheel --dist-dir artifacts
+      - name: Verify repaired manylinux wheel only
+        if: runner.os == 'Linux'
+        run: >-
+          uv run python scripts/verify_artifact_contents.py
+          --require-manylinux artifacts
+      - name: Verify platform wheel
+        if: runner.os != 'Linux'
+        run: uv run python scripts/verify_artifact_contents.py artifacts
+      - name: Clean install and arbitrary-CWD smoke
+        shell: bash
+        run: |
+          wheel=$(find artifacts -name '*.whl' -print -quit)
+          TREEMENDOUS_WHEEL="$PWD/$wheel" \
+            uv run pytest tests/packaging/test_wheel_install.py -q
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.os }}-py${{ matrix.python }}
+          path: artifacts/*.whl
+          if-no-files-found: error
+
+  verify-release:
+    name: Aggregate and verify release artifacts
+    needs: [sdist, wheels]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --all-extras
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+      - name: Require exactly one source distribution
+        shell: bash
+        run: |
+          count=$(find release-artifacts -name '*.tar.gz' | wc -l | tr -d ' ')
+          test "$count" = 1
+      - run: uv run python scripts/verify_artifact_contents.py release-artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-release
+          path: release-artifacts/
+          if-no-files-found: error
+
+  publish:
+    name: Trusted publisher (single upload authority)
+    needs: verify-release
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/treemendous
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-release
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@v1.13.0
+        with:
+          packages-dir: dist

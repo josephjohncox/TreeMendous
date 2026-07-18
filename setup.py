@@ -1,140 +1,132 @@
 #!/usr/bin/env python
-"""
-Tree-Mendous Setup with pybind11 Extensions
+"""Portable build configuration for Tree-Mendous CPU extensions."""
 
-Following canonical pybind11 setuptools integration pattern:
-https://pybind11.readthedocs.io/en/stable/compiling.html#modules-with-setuptools
-"""
+from __future__ import annotations
 
 import os
-from glob import glob
-from setuptools import setup
+from pathlib import Path
+from typing import Any
+
 from pybind11.setup_helpers import Pybind11Extension, build_ext
+from setuptools import setup
 
-# Check for ICL support and optimizations
-with_icl = os.environ.get('TREE_MENDOUS_WITH_ICL', '0') == '1'
-with_optimizations = os.environ.get('TREE_MENDOUS_DISABLE_OPTIMIZATIONS', '0') != '1'
 
-# Detect boost installation paths
-boost_paths = [
-    "/opt/homebrew/Cellar/boost/1.86.0_2",  # Current
-    "/opt/homebrew/opt/boost",  # Symlink
-    "/usr/local/opt/boost",  # Intel Mac
-]
-boost_include = None
-boost_lib = None
+def _boost_paths() -> tuple[list[str], list[str]]:
+    """Return explicitly configured or common Homebrew Boost paths."""
+    configured = os.environ.get("BOOST_ROOT")
+    candidates = [
+        configured,
+        "/opt/homebrew/opt/boost",
+        "/usr/local/opt/boost",
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate, "include").is_dir():
+            library_dirs = (
+                [str(Path(candidate, "lib"))] if Path(candidate, "lib").is_dir() else []
+            )
+            return [str(Path(candidate, "include"))], library_dirs
+    return [], []
 
-for path in boost_paths:
-    if os.path.exists(path):
-        boost_include = f"{path}/include"
-        boost_lib = f"{path}/lib"
-        break
 
-# Compilation settings
-compile_args = ["-O3", "-march=native", "-flto"]  # Enable native CPU optimizations
-include_dirs = []
-libraries = []
-extra_link_args = ["-fuse-linker-plugin"]
+class PortableBuildExt(build_ext):
+    """Apply compiler-specific portable defaults at compiler discovery time."""
 
-# Add boost paths (needed for flat_map)
-if boost_include and boost_lib:
-    include_dirs.append(boost_include)
-    extra_link_args.append(f"-L{boost_lib}")
+    def build_extensions(self) -> None:
+        compiler_type = self.compiler.compiler_type
+        disabled = os.environ.get("TREE_MENDOUS_DISABLE_OPTIMIZATIONS") == "1"
+        local_native = os.environ.get("TREE_MENDOUS_LOCAL_NATIVE") == "1"
+        sanitizers = os.environ.get("TREE_MENDOUS_SANITIZERS") == "1"
 
-if with_icl:
-    compile_args.append("-DWITH_IC_MANAGER")
-    libraries.append("boost_system")
+        if compiler_type == "msvc":
+            compile_flags = ["/Od"] if disabled else ["/O2"]
+            if local_native:
+                compile_flags.append("/arch:AVX2")
+            link_flags: list[str] = []
+        else:
+            compile_flags = ["-O0"] if disabled else ["-O3"]
+            # Native instruction selection is intentionally an explicit local-only opt in.
+            if local_native:
+                compile_flags.append("-march=native")
+            link_flags = []
+            if sanitizers:
+                compile_flags.extend(
+                    ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
+                )
+                link_flags.append("-fsanitize=address,undefined")
 
-# Optimization flags (can be disabled via TREE_MENDOUS_DISABLE_OPTIMIZATIONS=1)
-if with_optimizations:
-    # Detect architecture and add appropriate SIMD flags
-    import platform
-    machine = platform.machine().lower()
-    
-    if 'arm' in machine or 'aarch64' in machine:
-        # ARM/Apple Silicon: use NEON (enabled by default with -O3)
-        # No need to explicitly enable NEON on ARM64
-        pass
-    elif 'x86' in machine or 'amd64' in machine:
-        # x86/x64: use AVX2 if available
-        compile_args.extend(["-mavx2", "-mfma"])
-    
-    # Additional optimization hints (arch-independent)
-    compile_args.extend(["-ffast-math", "-funroll-loops"])
+        for extension in self.extensions:
+            extension.extra_compile_args = [
+                *getattr(extension, "extra_compile_args", []),
+                *compile_flags,
+            ]
+            extension.extra_link_args = [
+                *getattr(extension, "extra_link_args", []),
+                *link_flags,
+            ]
+        super().build_extensions()
 
-# Define C++ extensions using pybind11 helpers
-ext_modules = [
-    # Core boundary manager
-    Pybind11Extension(
-        "treemendous.cpp.boundary",
-        ["treemendous/cpp/boundary_bindings.cpp"],
-        cxx_std=20,
-        extra_compile_args=compile_args,
-        include_dirs=include_dirs,
-        libraries=libraries,
-        extra_link_args=extra_link_args,
-    ),
-    
-    # Treap implementation
-    Pybind11Extension(
-        "treemendous.cpp.treap",
-        ["treemendous/cpp/treap_bindings.cpp"],
-        cxx_std=20,
-        extra_compile_args=compile_args,
-        include_dirs=include_dirs,
-        libraries=libraries,
-        extra_link_args=extra_link_args,
-    ),
-    
-    # Boundary summary
-    Pybind11Extension(
-        "treemendous.cpp.boundary_summary",
-        ["treemendous/cpp/boundary_summary_bindings.cpp"],
-        cxx_std=20,
-        extra_compile_args=compile_args,
-        include_dirs=include_dirs,
-        libraries=libraries,
-        extra_link_args=extra_link_args,
-    ),
-    
-    # Summary enhanced implementations
-    Pybind11Extension(
-        "treemendous.cpp.summary",
-        ["treemendous/cpp/summary_bindings.cpp"],
-        cxx_std=20,
-        extra_compile_args=compile_args + ["-DWITH_SUMMARY_STATS"],
-        include_dirs=include_dirs,
-        libraries=libraries,
-        extra_link_args=extra_link_args,
-    ),
-    
-    # OPTIMIZED IMPLEMENTATIONS
-    # Optimized boundary manager (flat_map, SIMD, small vector)
-    Pybind11Extension(
-        "treemendous.cpp.boundary_optimized",
-        ["treemendous/cpp/boundary_optimized_bindings.cpp"],
-        cxx_std=20,
-        extra_compile_args=compile_args,
-        include_dirs=include_dirs,
-        libraries=libraries,
-        extra_link_args=extra_link_args,
-    ),
-    
-    # Optimized boundary summary (flat_map, SIMD, small vector)
-    Pybind11Extension(
-        "treemendous.cpp.boundary_summary_optimized",
-        ["treemendous/cpp/boundary_summary_optimized_v2_bindings.cpp"],
-        cxx_std=20,
-        extra_compile_args=compile_args,
-        include_dirs=include_dirs,
-        libraries=libraries,
-        extra_link_args=extra_link_args,
+
+def make_cpu_extensions() -> list[Pybind11Extension]:
+    """Create the stable and compatibility CPU extension definitions."""
+    with_icl = os.environ.get("TREE_MENDOUS_WITH_ICL") == "1"
+    include_dirs, library_dirs = _boost_paths()
+    define_macros: list[tuple[str, str | None]] = []
+    libraries: list[str] = []
+    if with_icl:
+        define_macros.append(("WITH_IC_MANAGER", None))
+        libraries.append("boost_system")
+    if os.environ.get("TREE_MENDOUS_GLIBCXX_DEBUG") == "1":
+        define_macros.append(("_GLIBCXX_DEBUG", None))
+
+    common: dict[str, Any] = {
+        "cxx_std": 20,
+        "include_dirs": include_dirs,
+        "library_dirs": library_dirs,
+        "libraries": libraries,
+        "define_macros": define_macros,
+    }
+    return [
+        Pybind11Extension(
+            "treemendous.cpp.boundary",
+            ["treemendous/cpp/boundary_bindings.cpp"],
+            **common,
+        ),
+        Pybind11Extension(
+            "treemendous.cpp.treap",
+            ["treemendous/cpp/treap_bindings.cpp"],
+            **common,
+        ),
+        Pybind11Extension(
+            "treemendous.cpp.boundary_summary",
+            ["treemendous/cpp/boundary_summary_bindings.cpp"],
+            **common,
+        ),
+        Pybind11Extension(
+            "treemendous.cpp.summary",
+            ["treemendous/cpp/summary_bindings.cpp"],
+            define_macros=[*define_macros, ("WITH_SUMMARY_STATS", None)],
+            **{key: value for key, value in common.items() if key != "define_macros"},
+        ),
+        Pybind11Extension(
+            "treemendous.cpp.boundary_optimized",
+            ["treemendous/cpp/boundary_optimized_bindings.cpp"],
+            **common,
+        ),
+        Pybind11Extension(
+            "treemendous.cpp.boundary_summary_optimized",
+            ["treemendous/cpp/boundary_summary_optimized_v2_bindings.cpp"],
+            **common,
+        ),
+    ]
+
+
+def run_setup() -> None:
+    setup(
+        ext_modules=make_cpu_extensions(),
+        cmdclass={"build_ext": PortableBuildExt},
+        zip_safe=False,
     )
-]
 
-# Setup with pybind11 build_ext for automatic C++ standard detection
-setup(
-    ext_modules=ext_modules,
-    cmdclass={"build_ext": build_ext},
-    zip_safe=False,  # Required for C++ extensions
-)
+
+if __name__ == "__main__":
+    run_setup()

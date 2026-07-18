@@ -1,37 +1,26 @@
-# Tree-Mendous MANIFEST.in
-# Ensures all necessary files are included in source distributions
-
-# Include all Python source files
-recursive-include treemendous *.py
-
-# Include all compiled C++ extensions (platform-specific)
-recursive-include treemendous/cpp *.so
-recursive-include treemendous/cpp *.pyd
-recursive-include treemendous/cpp *.dll
-recursive-include treemendous/cpp *.dylib
-
-# Include C++ source files for potential recompilation
-recursive-include treemendous/cpp *.cpp
-recursive-include treemendous/cpp *.h
-
-# Include documentation
+# Source distributions are rebuild inputs, never snapshots of the host build.
 include README.md
 include LICENSE
-recursive-include docs *.md
-
-# Include test files in source distribution (but not wheel)
-recursive-include tests *.py
-
-# Include examples
-recursive-include examples *.py
-
-# Include build system files
 include pyproject.toml
-include build.py
+include setup.py
+include setup_gpu.py
+include setup_metal.py
 include Justfile
 
-# Exclude unnecessary files
-global-exclude *.pyc
-global-exclude __pycache__
+recursive-include treemendous *.py
+recursive-include treemendous/cpp *.cpp *.h *.cu *.mm *.metal
+recursive-include tests *.py
+recursive-include scripts *.py
+
+# Generated/host-specific files are forbidden in sdists.
+global-exclude *.py[cod]
+global-exclude *.so *.pyd *.dll *.dylib
+global-exclude *.o *.obj *.a *.lib
+global-exclude *.air *.metallib
 global-exclude .DS_Store
-global-exclude *.egg-info
+global-exclude *~
+prune build
+prune dist
+prune wheelhouse
+prune .venv
+prune treemendous.egg-info

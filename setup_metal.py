@@ -1,199 +1,140 @@
 #!/usr/bin/env python
-"""
-Tree-Mendous Metal Build Configuration
+"""Build the portable CPU extensions plus the experimental macOS Metal backend."""
 
-This setup file adds Metal/MPS support for GPU acceleration on macOS.
-Works with Apple Silicon (M1/M2/M3/M4) and Intel Macs with AMD GPUs.
+from __future__ import annotations
 
-Requirements:
-  - macOS 10.15+ (Catalina or later)
-  - Xcode Command Line Tools
-  - Python 3.11+
-"""
-
-import os
-import sys
-import subprocess
 import platform
+import shutil
+import subprocess
 from pathlib import Path
-from setuptools import setup, Extension
-from setuptools.command.build_ext import build_ext
 
-# Check if running on macOS
-if platform.system() != 'Darwin':
-    print("❌ Metal is only available on macOS")
-    print("   For Linux/Windows, use: WITH_CUDA=1 python setup_gpu.py build_ext --inplace")
-    sys.exit(1)
+from pybind11 import get_include
+from setuptools import Extension, setup
 
-print("✅ Building Metal-accelerated extensions for macOS")
+from setup import PortableBuildExt, make_cpu_extensions
 
-# Check for pybind11
+if platform.system() != "Darwin":
+    raise SystemExit("Metal extensions can only be built on macOS")
+
 try:
-    import pybind11
-    pybind11_include = pybind11.get_include()
-    print(f"✅ Found pybind11: {pybind11_include}")
-except ImportError:
-    print("❌ pybind11 not found. Install with: pip install pybind11")
-    sys.exit(1)
-
-# Check for Metal availability
-try:
-    result = subprocess.run(
-        ['xcrun', '--sdk', 'macosx', '--show-sdk-path'],
+    subprocess.run(
+        ["xcrun", "--sdk", "macosx", "--show-sdk-path"],
+        check=True,
         capture_output=True,
         text=True,
-        check=True
     )
-    sdk_path = result.stdout.strip()
-    print(f"✅ Found macOS SDK: {sdk_path}")
-except (subprocess.CalledProcessError, FileNotFoundError):
-    print("❌ Xcode Command Line Tools not found")
-    print("   Install with: xcode-select --install")
-    sys.exit(1)
+except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+    raise SystemExit(
+        "Metal build requires Xcode Command Line Tools and a macOS SDK"
+    ) from exc
 
-
-class BuildMetalExtension(build_ext):
-    """Custom build extension that handles Metal shader compilation"""
-    
-    def build_extensions(self):
-        # Register .mm as a valid C++ source file extension
-        self.compiler.src_extensions.append('.mm')
-        
-        # Make sure .mm files are compiled with appropriate flags
-        if hasattr(self.compiler, 'language_map'):
-            self.compiler.language_map['.mm'] = 'c++'
-        
-        # Compile Metal shaders first
-        for ext in self.extensions:
-            if hasattr(ext, 'metal_sources'):
-                self.build_metal_shaders(ext)
-        
-        # Then build normally
-        build_ext.build_extensions(self)
-    
-    def build_metal_shaders(self, ext):
-        """Compile Metal shaders to metallib"""
-        print(f"\n🔧 Compiling Metal shaders for {ext.name}")
-        
-        metal_files = getattr(ext, 'metal_sources', [])
-        if not metal_files:
-            return
-        
-        # Create build directory
-        build_temp = Path(self.build_temp)
-        build_temp.mkdir(parents=True, exist_ok=True)
-        
-        metallib_files = []
-        
-        for metal_file in metal_files:
-            metal_path = Path(metal_file)
-            air_file = build_temp / (metal_path.stem + '.air')
-            metallib_file = build_temp / (metal_path.stem + '.metallib')
-            
-            # Compile .metal to .air
-            print(f"   Compiling: {metal_file} -> {air_file}")
-            metal_cmd = [
-                'xcrun', '-sdk', 'macosx', 'metal',
-                '-c',
-                str(metal_file),
-                '-o', str(air_file),
-                '-std=metal3.2',  # Metal 3.2 for macOS
-                '-O3',  # Optimize
-            ]
-            
-            # Add architecture flags
-            arch = platform.machine()
-            if arch == 'arm64':
-                metal_cmd.extend(['-arch', 'air64'])
-            else:
-                metal_cmd.extend(['-arch', 'air64'])
-            
-            result = subprocess.run(metal_cmd, capture_output=True, text=True)
-            if result.returncode != 0:
-                print(f"❌ Metal compilation failed:")
-                print(result.stderr)
-                sys.exit(1)
-            
-            # Create metallib
-            print(f"   Creating metallib: {metallib_file}")
-            metallib_cmd = [
-                'xcrun', '-sdk', 'macosx', 'metallib',
-                str(air_file),
-                '-o', str(metallib_file)
-            ]
-            
-            result = subprocess.run(metallib_cmd, capture_output=True, text=True)
-            if result.returncode != 0:
-                print(f"❌ Metallib creation failed:")
-                print(result.stderr)
-                sys.exit(1)
-            
-            metallib_files.append(str(metallib_file))
-            print(f"   ✅ Created: {metallib_file}")
-        
-        # Store metallib paths for installation
-        ext.metallib_files = metallib_files
-
-
-# Define Metal extension
-metal_sources = [
-    'treemendous/cpp/metal/boundary_summary_metal.mm',       # Objective-C++ implementation
-    'treemendous/cpp/metal/boundary_summary_metal_bindings.cpp',  # Python bindings
-]
-
-# Metal shaders will be compiled separately
 
 class MetalExtension(Extension):
-    """Extension with Metal shader sources"""
-    def __init__(self, *args, **kwargs):
-        self.metal_sources = kwargs.pop('metal_sources', [])
+    """Extension carrying shader sources compiled by ``BuildMetalExtension``."""
+
+    def __init__(self, *args, metal_sources: list[str], **kwargs):
+        self.metal_sources = metal_sources
+        self.metallib_files: list[Path] = []
         super().__init__(*args, **kwargs)
 
 
+class BuildMetalExtension(PortableBuildExt):
+    """Compile shaders and install metallibs beside the installed extension."""
+
+    def build_extensions(self) -> None:
+        if ".mm" not in self.compiler.src_extensions:
+            self.compiler.src_extensions.append(".mm")
+        if hasattr(self.compiler, "language_map"):
+            self.compiler.language_map[".mm"] = "c++"
+
+        for extension in self.extensions:
+            if isinstance(extension, MetalExtension):
+                extension.metallib_files = self._compile_metallibs(extension)
+
+        super().build_extensions()
+
+        for extension in self.extensions:
+            if isinstance(extension, MetalExtension):
+                self._install_metallibs(extension)
+
+    def _compile_metallibs(self, extension: MetalExtension) -> list[Path]:
+        output_dir = Path(self.build_temp) / "metal-resources"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        outputs: list[Path] = []
+        for source_name in extension.metal_sources:
+            source = Path(source_name)
+            air = output_dir / f"{source.stem}.air"
+            metallib = output_dir / f"{source.stem}.metallib"
+            self.spawn(
+                [
+                    "xcrun",
+                    "-sdk",
+                    "macosx",
+                    "metal",
+                    "-c",
+                    str(source),
+                    "-o",
+                    str(air),
+                    "-O3",
+                ]
+            )
+            self.spawn(
+                [
+                    "xcrun",
+                    "-sdk",
+                    "macosx",
+                    "metallib",
+                    str(air),
+                    "-o",
+                    str(metallib),
+                ]
+            )
+            outputs.append(metallib)
+        return outputs
+
+    def _install_metallibs(self, extension: MetalExtension) -> None:
+        # ``build_lib`` is the wheel staging tree. ``get_ext_fullpath`` points at
+        # the source package for --inplace builds and at build_lib otherwise.
+        destinations = {
+            Path(self.build_lib) / "treemendous/cpp/metal/resources",
+            Path(self.get_ext_fullpath(extension.name)).parent / "resources",
+        }
+        for destination in destinations:
+            destination.mkdir(parents=True, exist_ok=True)
+            for metallib in extension.metallib_files:
+                shutil.copy2(metallib, destination / metallib.name)
+
+
 metal_extension = MetalExtension(
-    name='treemendous.cpp.metal.boundary_summary_metal',
-    sources=metal_sources,
-    metal_sources=[
-        'treemendous/cpp/metal/boundary_summary_metal.metal',
+    name="treemendous.cpp.metal.boundary_summary_metal",
+    sources=[
+        "treemendous/cpp/metal/boundary_summary_metal.mm",
+        "treemendous/cpp/metal/boundary_summary_metal_bindings.cpp",
     ],
-    include_dirs=[
-        pybind11_include,
-    ],
+    metal_sources=["treemendous/cpp/metal/boundary_summary_metal.metal"],
+    include_dirs=[get_include()],
     extra_compile_args=[
-        '-std=c++17',
-        '-O3',
-        '-DMETAL_AVAILABLE',
-        '-fobjc-arc',  # Enable ARC for Objective-C++ files
-        '-Wno-unused-command-line-argument',
+        "-std=c++17",
+        "-DMETAL_AVAILABLE",
+        "-fobjc-arc",
+        "-Wno-unused-command-line-argument",
     ],
     extra_link_args=[
-        '-framework', 'Metal',
-        '-framework', 'MetalPerformanceShaders',
-        '-framework', 'Foundation',
+        "-framework",
+        "Metal",
+        "-framework",
+        "MetalPerformanceShaders",
+        "-framework",
+        "Foundation",
     ],
-    language='c++',
+    language="c++",
 )
 
-print("\n📦 Metal Extension Configuration:")
-print(f"   Name: {metal_extension.name}")
-print(f"   Sources: {metal_extension.sources}")
-print(f"   Metal Shaders: {metal_extension.metal_sources}")
-print(f"   Frameworks: Metal, MetalPerformanceShaders, Foundation")
-print("")
 
-# Setup
-setup(
-    name='treemendous-metal',
-    ext_modules=[metal_extension],
-    cmdclass={'build_ext': BuildMetalExtension},
-    zip_safe=False,
-)
-
-print("\n✅ Metal build configuration complete!")
-print("\nTo build:")
-print("  python setup_metal.py build_ext --inplace")
-print("\nTo test:")
-print("  python -c 'from treemendous.cpp.metal import boundary_summary_metal; print(boundary_summary_metal.get_metal_device_info())'")
-print("\nTo benchmark:")
-print("  just test-metal")
-
+if __name__ == "__main__":
+    setup(
+        ext_modules=[*make_cpu_extensions(), metal_extension],
+        cmdclass={"build_ext": BuildMetalExtension},
+        package_data={"treemendous.cpp.metal": ["resources/*.metallib"]},
+        zip_safe=False,
+    )

@@ -25,9 +25,13 @@ clean-cpp:
 
 # Build all C++ extensions (always clean first for reliability)
 build-cpp: install-dev clean-cpp
-    @echo "🔧 Building all C++ extensions..."
+    @echo "🔧 Building all C++ extensions with portable CPU flags..."
     uv run python setup.py build_ext --inplace
     @echo "✅ All C++ extensions built"
+
+# Explicit developer-only host instruction tuning; never used for wheels.
+build-cpp-native: install-dev clean-cpp
+    TREE_MENDOUS_LOCAL_NATIVE=1 uv run python setup.py build_ext --inplace
 
 # Build C++ extensions with Boost ICL support  
 build-cpp-icl: install-dev clean-cpp
@@ -60,7 +64,11 @@ clean-metal:
     @echo "🧹 Cleaning Metal build artifacts..."
     rm -rf treemendous/cpp/metal/*.o treemendous/cpp/metal/*.so treemendous/cpp/metal/__pycache__
     rm -rf treemendous/cpp/metal/*.air treemendous/cpp/metal/*.metallib
+    rm -rf treemendous/cpp/metal/resources
     @echo "✅ Metal artifacts cleaned"
+
+verify-artifacts: install-dev
+    uv run python scripts/verify_artifact_contents.py dist wheelhouse
 
 # Testing System
 test: install-dev

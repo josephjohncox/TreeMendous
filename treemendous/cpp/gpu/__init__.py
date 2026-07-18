@@ -1,89 +1,52 @@
-"""
-GPU-Accelerated Implementations
+"""Experimental CUDA implementation helpers.
 
-This module provides CUDA-accelerated interval tree implementations.
-Requires CUDA toolkit and compatible GPU hardware.
+A successful extension build/import is not treated as runtime contract support.
 """
 
-from typing import Optional
-
-# Try to import GPU module
+EXPERIMENTAL_REASON = (
+    "CUDA is experimental and capability-empty until hardware parity and "
+    "compute-sanitizer gates pass"
+)
 GPU_AVAILABLE = False
 try:
     from . import boundary_summary_gpu
+
     GPU_AVAILABLE = boundary_summary_gpu.GPU_AVAILABLE
-except ImportError as e:
-    _import_error = str(e)
+except ImportError as exc:
+    _import_error = str(exc)
     boundary_summary_gpu = None
 
 
 def is_gpu_available() -> bool:
-    """Check if GPU acceleration is available"""
+    """Return whether CUDA has passed runtime validation (currently false)."""
     return GPU_AVAILABLE
 
 
 def get_gpu_info() -> dict:
-    """Get GPU device information"""
+    """Return CUDA diagnostics without claiming stable runtime support."""
     if not GPU_AVAILABLE:
-        return {
-            "available": False,
-            "error": "GPU module not available. Build with WITH_CUDA=1 to enable.",
-        }
-    
+        return {"available": False, "error": EXPERIMENTAL_REASON}
     try:
         info = boundary_summary_gpu.get_cuda_device_info()
         info["available"] = True
         return info
-    except Exception as e:
-        return {
-            "available": False,
-            "error": str(e),
-        }
+    except Exception as exc:
+        return {"available": False, "error": str(exc)}
 
 
 def create_gpu_manager():
-    """Create a GPU-accelerated boundary summary manager"""
+    """Create the raw experimental manager only after runtime validation."""
     if not GPU_AVAILABLE:
-        raise ImportError(
-            "GPU acceleration not available. "
-            "Build with: WITH_CUDA=1 python setup_gpu.py build_ext --inplace"
-        )
-    
+        raise ImportError(EXPERIMENTAL_REASON)
     return boundary_summary_gpu.GPUBoundarySummaryManager()
 
 
-def benchmark_gpu_speedup(num_intervals: int = 10000, num_operations: int = 5000) -> dict:
-    """
-    Benchmark GPU vs CPU speedup
-    
-    Args:
-        num_intervals: Number of intervals to test with
-        num_operations: Number of operations to perform
-        
-    Returns:
-        Dictionary with benchmark results including speedup factor
-    """
-    if not GPU_AVAILABLE:
-        return {
-            "error": "GPU not available",
-            "available": False,
-        }
-    
-    return boundary_summary_gpu.benchmark_gpu_speedup(num_intervals, num_operations)
-
-
-# Export symbols
 __all__ = [
-    'GPU_AVAILABLE',
-    'is_gpu_available',
-    'get_gpu_info',
-    'create_gpu_manager',
-    'benchmark_gpu_speedup',
+    "EXPERIMENTAL_REASON",
+    "GPU_AVAILABLE",
+    "create_gpu_manager",
+    "get_gpu_info",
+    "is_gpu_available",
 ]
-
-# Conditional exports
 if GPU_AVAILABLE:
-    __all__.extend([
-        'boundary_summary_gpu',
-    ])
-
+    __all__.append("boundary_summary_gpu")

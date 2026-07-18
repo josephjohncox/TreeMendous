@@ -2,62 +2,59 @@
 name = "treemendous"
 version = "0.2.5"
 description = "Exploring a diverse collection of interval tree implementations across multiple programming languages to identify the most efficient configurations for varied use cases, such as optimizing for query speed, memory usage, or dynamic updates."
-authors = [{name = "Joseph Cox", email = "joseph@codensity.io"}]
+authors = [{ name = "Joseph Cox", email = "joseph@codensity.io" }]
 license = "BSD-3-Clause"
 readme = "README.md"
 requires-python = ">=3.11"
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10", 
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Topic :: Scientific/Engineering",
-    "Topic :: Software Development :: Libraries :: Python Modules",
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
-dependencies = [
-    "pybind11",
-    "setuptools",
-    "sortedcollections>=2.1.0",
-    "sortedcontainers>=2.4.0",
-]
+dependencies = ["sortedcontainers>=2.4.0"]
 
 [project.optional-dependencies]
-dev = [
-    "sortedcontainers-stubs>=2.4.2",
-    "flameprof>=0.4",
-]
-test = [
-    "hypothesis>=6.119.4",
-    "pytest>=8.3.3",
-]
+dev = ["sortedcontainers-stubs>=2.4.2", "flameprof>=0.4"]
+test = ["hypothesis>=6.119.4", "pytest>=8.3.3"]
 profiling = [
-    "flameprof>=0.4",
-    "snakeviz>=2.2.0",
-    "py-spy>=0.3.14",
-    "memory-profiler>=0.61",
+  "flameprof>=0.4",
+  "snakeviz>=2.2.0",
+  "py-spy>=0.3.14",
+  "memory-profiler>=0.61",
 ]
 visualization = [
-    "matplotlib>=3.5.0",
-    "numpy>=1.21.0",
-    "jupyter>=1.0.0",
-    "networkx>=3.5.0",
-    "scipy>=1.16.0",
-    "seaborn>=0.13.2",
+  "matplotlib>=3.5.0",
+  "numpy>=1.21.0",
+  "jupyter>=1.0.0",
+  "networkx>=3.5.0",
+  "scipy>=1.16.0",
+  "seaborn>=0.13.2",
 ]
-examples = [
-    "ortools>=9.14.6206",
-]
+examples = ["ortools>=9.14.6206"]
 
 [tool.pytest.ini_options]
-addopts = "--hypothesis-explain -vv"
+addopts = "--hypothesis-explain -vv --strict-markers"
+markers = [
+  "unit: fast implementation-independent tests",
+  "property: property-based semantic tests",
+  "native: stable native CPU extension tests",
+  "icl: Boost ICL tests",
+  "metal: Metal device and resource tests",
+  "cuda: CUDA device tests",
+  "slow: long-running correctness tests",
+  "benchmark: non-PR performance tests",
+  "packaging: built artifact and clean-install tests",
+]
 
 
 [build-system]
-requires = ["setuptools>=75.6.0", "pybind11>=2.13.6", "wheel"]
+requires = ["setuptools>=77.0.3", "pybind11>=2.13.6", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
@@ -65,8 +62,12 @@ where = ["."]
 include = ["treemendous*"]
 
 [tool.setuptools.package-data]
-"treemendous.cpp" = ["*.so", "*.pyd", "*.dll", "*.dylib"]
+"treemendous.cpp.metal" = ["resources/*.metallib"]
 
-# Ensure compiled extensions are included
+[tool.setuptools.exclude-package-data]
+"treemendous.cpp" = ["*.cpp", "*.h"]
+"treemendous.cpp.gpu" = ["*.cpp", "*.h", "*.cu"]
+"treemendous.cpp.metal" = ["*.cpp", "*.h", "*.mm", "*.metal"]
+
 [tool.setuptools]
 include-package-data = true
