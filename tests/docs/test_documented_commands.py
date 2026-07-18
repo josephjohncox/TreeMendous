@@ -27,7 +27,7 @@ def _just_recipes() -> set[str]:
         return set(
             re.findall(
                 r"^([a-zA-Z0-9_-]+)(?:\s+[^:\n]+)?:",
-                (ROOT / "justfile").read_text(),
+                (ROOT / "Justfile").read_text(),
                 re.MULTILINE,
             )
         )

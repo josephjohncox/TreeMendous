@@ -105,12 +105,13 @@ class BuildMetalExtension(PortableBuildExt):
         return outputs
 
     def _install_metallibs(self, extension: MetalExtension) -> None:
-        # ``build_lib`` is the wheel staging tree. ``get_ext_fullpath`` points at
-        # the source package for --inplace builds and at build_lib otherwise.
         destinations = {
             Path(self.build_lib) / "treemendous/cpp/metal/resources",
-            Path(self.get_ext_fullpath(extension.name)).parent / "resources",
         }
+        if self.inplace:
+            build_py = self.get_finalized_command("build_py")
+            package_dir = Path(build_py.get_package_dir("treemendous.cpp.metal"))
+            destinations.add(package_dir / "resources")
         for destination in destinations:
             destination.mkdir(parents=True, exist_ok=True)
             for metallib in extension.metallib_files:
