@@ -1,0 +1,541 @@
+"""Correctness-checked benchmark harness for canonical range sets."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+import os
+import platform
+import random
+import statistics
+import subprocess
+import time
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import asdict, dataclass
+from typing import Any, Protocol
+
+from treemendous import Span, create_range_set
+
+from tests.performance.oracle import RangeOracle
+
+
+@dataclass(frozen=True)
+class Operation:
+    """One immutable operation in an ordered benchmark trace."""
+
+    kind: str
+    start: int | None = None
+    end: int | None = None
+    length: int | None = None
+    not_before: int | None = None
+    not_after: int | None = None
+    job_id: int | None = None
+    job_class: str | None = None
+    expected_error: str | None = None
+
+
+@dataclass(frozen=True)
+class BenchmarkWorkload:
+    """Setup and timed phases plus their explicit managed domain."""
+
+    name: str
+    domain: tuple[tuple[int, int], ...]
+    setup: tuple[Operation, ...]
+    operations: tuple[Operation, ...]
+    coordinate_extent: int
+    dimensions: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class ReplaySummary:
+    """Complete normalized result required before a sample is accepted."""
+
+    requested_operations: int
+    successful_operations: int
+    no_op_operations: int
+    error_operations: int
+    actual_interval_count: int
+    total_available: int
+    touched_intervals: int
+    touched_length: int
+    normalized_state: tuple[tuple[int, int], ...]
+    query_results: tuple[tuple[str, int | str | None, int | str | None], ...]
+    state_checksum: str
+    query_checksum: str
+    scheduling_success: tuple[tuple[str, int, int], ...]
+    scheduling_fairness: float | None
+
+
+@dataclass(frozen=True)
+class _ObservedMutation:
+    changed_length: int
+    touched_intervals: int
+
+
+@dataclass(frozen=True)
+class Sample:
+    """One validated timing sample."""
+
+    implementation: str
+    setup_ns: int
+    execution_ns: int
+    operation_latency_ns: tuple[tuple[str, tuple[int, ...]], ...]
+    summary: ReplaySummary
+
+
+@dataclass(frozen=True)
+class TimingStatistics:
+    """Robust directional statistics across independent benchmark runs."""
+
+    independent_runs: int
+    median_ns: float
+    median_absolute_deviation_ns: float
+    confidence_95_ns: tuple[float, float]
+    p10_ns: float
+    p90_ns: float
+
+
+@dataclass(frozen=True)
+class DescriptiveTimingStatistics:
+    """Descriptive statistics for dependent operation invocations."""
+
+    operation_invocations: int
+    median_ns: float
+    median_absolute_deviation_ns: float
+    p10_ns: float
+    p90_ns: float
+
+
+class RangeLike(Protocol):
+    def add(self, span: Span): ...
+
+    def discard(self, span: Span): ...
+
+    def first_fit(
+        self, length: int, *, not_before: int, not_after: int | None = None
+    ): ...
+
+    def allocate(
+        self, length: int, *, not_before: int, not_after: int | None = None
+    ): ...
+
+    def intervals(self): ...
+
+    def snapshot(self): ...
+
+
+_ERROR_TYPES = {
+    "ValueError": ValueError,
+    "TypeError": TypeError,
+    "OverflowError": OverflowError,
+}
+
+
+def _checksum(value: Any) -> str:
+    encoded = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _jain_fairness(success: dict[str, list[int]]) -> float | None:
+    rates = [wins / attempts for attempts, wins in success.values() if attempts]
+    if not rates:
+        return None
+    denominator = len(rates) * sum(rate * rate for rate in rates)
+    return (sum(rates) ** 2 / denominator) if denominator else 1.0
+
+
+def _normalized_state(target: RangeLike | RangeOracle) -> tuple[tuple[int, int], ...]:
+    if isinstance(target, RangeOracle):
+        return target.intervals
+    return tuple((item.start, item.end) for item in target.intervals())
+
+
+def _total(target: RangeLike | RangeOracle) -> int:
+    if isinstance(target, RangeOracle):
+        return target.total
+    return target.snapshot().total_free
+
+
+def _execute_trace(
+    target: RangeLike | RangeOracle,
+    operations: tuple[Operation, ...],
+    *,
+    record_latencies: bool,
+) -> tuple[ReplaySummary, dict[str, list[int]]]:
+    successes = no_ops = errors = touched_intervals = touched_length = 0
+    queries: list[tuple[str, int | str | None, int | str | None]] = []
+    allocations: dict[int, tuple[int, int]] = {}
+    scheduling: dict[str, list[int]] = {}
+    latencies: dict[str, list[int]] = {}
+
+    for operation in operations:
+        started = time.perf_counter_ns() if record_latencies else 0
+        try:
+            mutation = None
+            result: tuple[int, int] | None = None
+            if operation.kind == "add":
+                assert operation.start is not None and operation.end is not None
+                if isinstance(target, RangeOracle):
+                    mutation = target.add(operation.start, operation.end)
+                else:
+                    mutation = target.add(Span(operation.start, operation.end))
+            elif operation.kind == "discard":
+                assert operation.start is not None and operation.end is not None
+                if isinstance(target, RangeOracle):
+                    mutation = target.discard(operation.start, operation.end)
+                else:
+                    mutation = target.discard(Span(operation.start, operation.end))
+            elif operation.kind in {"first_fit", "allocate"}:
+                assert operation.length is not None and operation.not_before is not None
+                method = getattr(target, operation.kind)
+                raw = method(
+                    operation.length,
+                    not_before=operation.not_before,
+                    not_after=operation.not_after,
+                )
+                if operation.kind == "allocate" and isinstance(target, RangeOracle):
+                    raw, mutation = raw
+                result = (
+                    None
+                    if raw is None
+                    else ((raw.start, raw.end) if hasattr(raw, "start") else raw)
+                )
+                if (
+                    operation.kind == "allocate"
+                    and result is not None
+                    and not isinstance(target, RangeOracle)
+                ):
+                    # Atomic allocation returns its allocated range rather than
+                    # MutationResult. Its geometric change is exactly that one
+                    # contiguous result.
+                    mutation = _ObservedMutation(operation.length, 1)
+                queries.append(
+                    (operation.kind, None, None)
+                    if result is None
+                    else (operation.kind, result[0], result[1])
+                )
+                if operation.job_id is not None and result is not None:
+                    allocations[operation.job_id] = result
+                if operation.job_class is not None:
+                    attempts, wins = scheduling.setdefault(operation.job_class, [0, 0])
+                    scheduling[operation.job_class] = [
+                        attempts + 1,
+                        wins + int(result is not None),
+                    ]
+            elif operation.kind == "cancel":
+                assert operation.job_id is not None
+                allocated = allocations.pop(operation.job_id, None)
+                if allocated is not None:
+                    mutation = (
+                        target.add(*allocated)
+                        if isinstance(target, RangeOracle)
+                        else target.add(Span(*allocated))
+                    )
+            else:
+                raise ValueError(f"unknown operation kind: {operation.kind}")
+        except (ValueError, TypeError, OverflowError) as exc:
+            if operation.expected_error != type(exc).__name__:
+                raise
+            errors += 1
+            if operation.kind in {"first_fit", "allocate"}:
+                queries.append((operation.kind, "error", type(exc).__name__))
+        else:
+            if operation.expected_error is not None:
+                raise AssertionError(
+                    f"{operation.kind} did not raise {operation.expected_error}"
+                )
+            changed_length = 0 if mutation is None else mutation.changed_length
+            touched = (
+                0
+                if mutation is None
+                else (
+                    mutation.touched_intervals
+                    if hasattr(mutation, "touched_intervals")
+                    else len(mutation.changed)
+                )
+            )
+            touched_length += changed_length
+            touched_intervals += touched
+            changed_or_found = changed_length > 0 or result is not None
+            if changed_or_found:
+                successes += 1
+            else:
+                no_ops += 1
+        finally:
+            if record_latencies:
+                latencies.setdefault(operation.kind, []).append(
+                    time.perf_counter_ns() - started
+                )
+
+    state = _normalized_state(target)
+    query_results = tuple(queries)
+    schedule_tuple = tuple(
+        (name, values[0], values[1]) for name, values in sorted(scheduling.items())
+    )
+    summary = ReplaySummary(
+        requested_operations=len(operations),
+        successful_operations=successes,
+        no_op_operations=no_ops,
+        error_operations=errors,
+        actual_interval_count=len(state),
+        total_available=_total(target),
+        touched_intervals=touched_intervals,
+        touched_length=touched_length,
+        normalized_state=state,
+        query_results=query_results,
+        state_checksum=_checksum(state),
+        query_checksum=_checksum(query_results),
+        scheduling_success=schedule_tuple,
+        scheduling_fairness=_jain_fairness(scheduling),
+    )
+    return summary, latencies
+
+
+def oracle_summary(workload: BenchmarkWorkload) -> tuple[int, ReplaySummary]:
+    """Replay setup and timed traces in the independent model."""
+    oracle = RangeOracle(workload.domain)
+    _execute_trace(oracle, workload.setup, record_latencies=False)
+    initial_count = len(oracle.intervals)
+    summary, _ = _execute_trace(oracle, workload.operations, record_latencies=False)
+    return initial_count, summary
+
+
+def _new_backend(backend_id: str, workload: BenchmarkWorkload) -> RangeLike:
+    return create_range_set(
+        domain=workload.domain,
+        backend=backend_id,
+        initially_available=False,
+    )
+
+
+def validate_target(
+    target: RangeLike, workload: BenchmarkWorkload, *, name: str = "target"
+) -> tuple[ReplaySummary, dict[str, list[int]]]:
+    """Apply both phases and reject a target that differs from the oracle."""
+    initial_count, expected = oracle_summary(workload)
+    _execute_trace(target, workload.setup, record_latencies=False)
+    observed_initial = len(target.intervals())
+    if observed_initial != initial_count:
+        raise AssertionError(
+            f"{name} setup interval count {observed_initial} != oracle {initial_count}"
+        )
+    observed, latencies = _execute_trace(
+        target, workload.operations, record_latencies=True
+    )
+    if observed != expected:
+        raise AssertionError(
+            f"{name} benchmark validation failed\n"
+            f"expected={expected!r}\nobserved={observed!r}"
+        )
+    return observed, latencies
+
+
+def run_validated_sample(backend_id: str, workload: BenchmarkWorkload) -> Sample:
+    """Run one sample and reject any semantic difference from the oracle."""
+    initial_count, expected = oracle_summary(workload)
+    setup_started = time.perf_counter_ns()
+    target = _new_backend(backend_id, workload)
+    _execute_trace(target, workload.setup, record_latencies=False)
+    setup_ns = time.perf_counter_ns() - setup_started
+    observed_initial = len(target.intervals())
+    if observed_initial != initial_count:
+        raise AssertionError(
+            f"{backend_id} setup interval count {observed_initial} != oracle {initial_count}"
+        )
+
+    execution_started = time.perf_counter_ns()
+    observed, latencies = _execute_trace(
+        target, workload.operations, record_latencies=True
+    )
+    execution_ns = time.perf_counter_ns() - execution_started
+    if observed != expected:
+        raise AssertionError(
+            f"{backend_id} benchmark validation failed\n"
+            f"expected={expected!r}\nobserved={observed!r}"
+        )
+    return Sample(
+        backend_id,
+        setup_ns,
+        execution_ns,
+        tuple((kind, tuple(values)) for kind, values in sorted(latencies.items())),
+        observed,
+    )
+
+
+def _run_round(
+    args: tuple[int, tuple[str, ...], BenchmarkWorkload],
+) -> tuple[Sample, ...]:
+    round_number, backend_ids, workload = args
+    order = list(backend_ids)
+    random.Random(0x5EED + round_number).shuffle(order)
+    return tuple(run_validated_sample(backend_id, workload) for backend_id in order)
+
+
+def _warm_sampling_worker(
+    backend_ids: tuple[str, ...], workload: BenchmarkWorkload, warmups: int
+) -> None:
+    """Warm every implementation inside the process that will take samples."""
+    for backend_id in backend_ids:
+        for _ in range(warmups):
+            run_validated_sample(backend_id, workload)
+
+
+def _percentile(values: list[int], fraction: float) -> float:
+    ordered = sorted(values)
+    index = fraction * (len(ordered) - 1)
+    lower = math.floor(index)
+    upper = math.ceil(index)
+    if lower == upper:
+        return ordered[lower] * 1.0
+    weight = index - lower
+    return ordered[lower] * (1 - weight) + ordered[upper] * weight
+
+
+def timing_statistics(values: list[int], *, seed: int = 42) -> TimingStatistics:
+    """Bootstrap a median only across independent benchmark runs."""
+    if not values:
+        raise ValueError("at least one independent timing run is required")
+    median = statistics.median(values)
+    deviations = [abs(value - median) for value in values]
+    rng = random.Random(seed)
+    bootstrap = sorted(
+        statistics.median(rng.choices(values, k=len(values))) for _ in range(2_000)
+    )
+    return TimingStatistics(
+        independent_runs=len(values),
+        median_ns=median,
+        median_absolute_deviation_ns=statistics.median(deviations),
+        confidence_95_ns=(
+            _percentile(bootstrap, 0.025),
+            _percentile(bootstrap, 0.975),
+        ),
+        p10_ns=_percentile(values, 0.10),
+        p90_ns=_percentile(values, 0.90),
+    )
+
+
+def descriptive_timing_statistics(values: list[int]) -> DescriptiveTimingStatistics:
+    """Summarize dependent invocations without an IID confidence interval."""
+    if not values:
+        raise ValueError("at least one operation timing is required")
+    median = statistics.median(values)
+    return DescriptiveTimingStatistics(
+        operation_invocations=len(values),
+        median_ns=median,
+        median_absolute_deviation_ns=statistics.median(
+            abs(value - median) for value in values
+        ),
+        p10_ns=_percentile(values, 0.10),
+        p90_ns=_percentile(values, 0.90),
+    )
+
+
+def benchmark_backends(
+    backend_ids: tuple[str, ...],
+    workload: BenchmarkWorkload,
+    *,
+    samples: int = 20,
+    warmups: int = 2,
+    processes: int = 2,
+) -> dict[str, Any]:
+    """Benchmark in randomized order using independent validated samples."""
+    if samples < 20:
+        raise ValueError("publishable benchmark runs require at least 20 samples")
+    if warmups < 1:
+        raise ValueError("at least one warmup is required")
+    if processes < 1:
+        raise ValueError("processes must be positive")
+
+    initial_count, expected = oracle_summary(workload)
+    rounds = [(index, backend_ids, workload) for index in range(samples)]
+    if processes == 1:
+        _warm_sampling_worker(backend_ids, workload, warmups)
+        round_samples = [_run_round(item) for item in rounds]
+    else:
+        with ProcessPoolExecutor(
+            max_workers=processes,
+            initializer=_warm_sampling_worker,
+            initargs=(backend_ids, workload, warmups),
+        ) as executor:
+            round_samples = list(executor.map(_run_round, rounds))
+
+    by_backend: dict[str, list[Sample]] = {backend_id: [] for backend_id in backend_ids}
+    for round_result in round_samples:
+        for sample in round_result:
+            by_backend[sample.implementation].append(sample)
+
+    results: dict[str, Any] = {}
+    for backend_id, backend_samples in by_backend.items():
+        operation_invocations: dict[str, list[int]] = {}
+        operation_run_medians: dict[str, list[int]] = {}
+        for sample in backend_samples:
+            for kind, values in sample.operation_latency_ns:
+                operation_invocations.setdefault(kind, []).extend(values)
+                operation_run_medians.setdefault(kind, []).append(
+                    round(statistics.median(values))
+                )
+        results[backend_id] = {
+            "execution": asdict(
+                timing_statistics([sample.execution_ns for sample in backend_samples])
+            ),
+            "setup": asdict(
+                timing_statistics([sample.setup_ns for sample in backend_samples])
+            ),
+            "operation_latency": {
+                kind: {
+                    "per_run_median": asdict(timing_statistics(run_medians)),
+                    "invocation_distribution_descriptive": asdict(
+                        descriptive_timing_statistics(operation_invocations[kind])
+                    ),
+                }
+                for kind, run_medians in sorted(operation_run_medians.items())
+            },
+            "validation": asdict(expected),
+        }
+
+    return {
+        "label": "local directional measurements; not a universal performance claim",
+        "workload": workload.name,
+        "dimensions": dict(workload.dimensions),
+        "dataset": {
+            "actual_interval_count": initial_count,
+            "coordinate_extent": workload.coordinate_extent,
+            "timed_operations": len(workload.operations),
+        },
+        "methodology": {
+            "warmups": warmups,
+            "independent_runs": samples,
+            "worker_processes": processes,
+            "implementation_order": "deterministically randomized per sample round",
+            "confidence": "95% run-level percentile bootstrap interval for the median",
+            "operation_latency": (
+                "confidence intervals use per-run medians; invocation distributions "
+                "are descriptive only"
+            ),
+        },
+        "environment": environment_metadata(),
+        "results": results,
+    }
+
+
+def environment_metadata() -> dict[str, str]:
+    """Collect reproducibility metadata without failing outside a Git checkout."""
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip()
+    except (FileNotFoundError, subprocess.SubprocessError):
+        commit = "unknown"
+    return {
+        "commit": commit,
+        "python": platform.python_version(),
+        "implementation": platform.python_implementation(),
+        "platform": platform.platform(),
+        "processor": platform.processor() or "unknown",
+        "cpu_count": str(os.cpu_count() or "unknown"),
+    }

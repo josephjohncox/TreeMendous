@@ -88,10 +88,10 @@ test-protocols: install-dev
 
 # Performance Testing
 test-perf: install-dev
-    uv run python tests/performance/protocol_benchmark.py
+    uv run python tests/performance/protocol_benchmark.py --quick --validate
 
 test-perf-full: install-dev
-    timeout 600 uv run python tests/performance/comprehensive_benchmark.py
+    timeout 600 uv run python tests/performance/protocol_benchmark.py --validate --operations 5000 --output benchmark.json
 
 # GPU performance testing (CUDA - Linux/Windows)
 test-gpu: install-dev
@@ -99,8 +99,8 @@ test-gpu: install-dev
     uv run python tests/performance/gpu_benchmark.py
 
 test-gpu-quick: install-dev
-    @echo "🎮 Running quick GPU benchmark..."
-    uv run python -c 'from treemendous.cpp.gpu import benchmark_gpu_speedup, get_gpu_info; print(get_gpu_info()); print(benchmark_gpu_speedup(10000, 5000))'
+    @echo "🎮 Running correctness-checked experimental CUDA benchmark..."
+    uv run python tests/performance/gpu_benchmark.py --operations 100 --intervals 16
 
 # Metal performance testing (macOS)
 test-metal: install-dev
@@ -108,35 +108,27 @@ test-metal: install-dev
     uv run python tests/performance/metal_benchmark.py
 
 test-metal-quick: install-dev
-    @echo "🍎 Running quick Metal benchmark..."
-    uv run python -c 'from treemendous.cpp.metal import benchmark_metal_speedup, get_metal_info; print(get_metal_info()); print(benchmark_metal_speedup(10000, 5000))'
+    @echo "🍎 Running correctness-checked experimental Metal benchmark..."
+    uv run python tests/performance/metal_benchmark.py --operations 100 --intervals 16
 
-# Large-scale GPU-optimized benchmarks (all implementations)
+# Experimental accelerator benchmarks. All use identical oracle-validated traces.
 benchmark-gpu-large: install-dev
-    @echo "🚀 Running large-scale GPU-optimized benchmark..."
-    @echo "   Testing: 10K-5M intervals with GPU-friendly workloads"
-    uv run python tests/performance/large_scale_gpu_benchmark.py
+    uv run python tests/performance/gpu_benchmark.py --intervals 10000 --operations 5000
 
 benchmark-gpu-quick: install-dev
-    @echo "🚀 Running quick GPU benchmark (up to 500K intervals)..."
-    uv run python tests/performance/large_scale_gpu_benchmark.py --quick
+    uv run python tests/performance/gpu_benchmark.py --intervals 16 --operations 100
 
 benchmark-gpu-focused: install-dev
-    @echo "🚀 Running GPU-focused benchmark (500K-5M intervals)..."
-    @echo "   Optimized for GPU sweet spot: massive datasets + bulk summaries"
-    uv run python tests/performance/large_scale_gpu_benchmark.py --gpu-only
+    uv run python tests/performance/gpu_benchmark.py --intervals 1000 --operations 5000
 
-# GPU stress testing (sustained load, memory pressure, burst testing)
 stress-gpu: install-dev
-    @echo "🔥 Running GPU stress test suite..."
-    @echo "   ⚠️  WARNING: GPU will run at high load!"
-    uv run python tests/performance/gpu_stress_test.py
+    @echo "stress-gpu was retired; use the validated experimental CUDA benchmark"
+    uv run python tests/performance/gpu_benchmark.py --intervals 1000 --operations 5000
 
 # Batch operations benchmark (realistic GPU use cases)
-benchmark-batch: install-dev
-    @echo "📦 Running batch operations benchmark..."
-    @echo "   Real-world scenarios: memory allocator, job scheduler, network"
-    uv run python tests/performance/batch_operations_benchmark.py
+benchmark-batch backend="metal_boundary_summary": install-dev
+    @echo "📦 Running semantics-preserving contiguous batch benchmark..."
+    uv run python tests/performance/batch_operations_benchmark.py --backend {{backend}}
 
 # Performance profiling with flame graphs (Python + C++)
 profile: install-dev
@@ -162,12 +154,12 @@ flamegraph: install-dev
 
 # Performance Benchmarks
 benchmark: install-dev
-    @echo "📊 Running comprehensive protocol benchmark (all implementations)..."
-    uv run python tests/performance/protocol_benchmark.py
+    @echo "📊 Running correctness-checked local directional benchmark..."
+    uv run python tests/performance/protocol_benchmark.py --validate
 
 benchmark-optimizations: install-dev
-    @echo "📊 Comparing original vs optimized C++ implementations..."
-    uv run python tests/performance/simple_optimization_benchmark.py
+    @echo "benchmark-optimizations was retired; running the common validated harness"
+    uv run python tests/performance/protocol_benchmark.py --validate
 
 benchmark-flamegraph: install-dev
     @echo "📊 Running benchmarks with flamegraph comparison..."

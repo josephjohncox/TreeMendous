@@ -1,67 +1,42 @@
-#!/usr/bin/env python3
-"""
-Unified Workload Generator for Tree-Mendous Benchmarks
+"""Deterministic workload generators for correctness-checked benchmarks."""
 
-Provides consistent, reproducible operation sequences for all benchmarks
-and profiling tools. Ensures fair comparisons across all implementations.
-"""
+from __future__ import annotations
 
 import random
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import List, Tuple, Dict, Optional, Callable, Any, Iterable
+
+from tests.performance.harness import BenchmarkWorkload, Operation
 
 
 @dataclass(frozen=True)
 class WorkloadProfile:
-    """Realistic workload profile for benchmark sizing"""
+    """Legacy tuple-workload sizing profile."""
+
     name: str
-    operation_mix: Dict[str, float]
-    space_range: Tuple[int, int]
-    size_buckets: List[Tuple[int, int, float]]
-    start_distribution: str = "uniform"  # "uniform" | "diurnal"
-    align: int = 1  # Align starts/lengths to this granularity
-    data_factory: Optional[Callable[[int, str, int, int], Any]] = None
+    operation_mix: tuple[tuple[str, float], ...]
+    space_range: tuple[int, int]
+    size_range: tuple[int, int]
 
 
-REALISTIC_PROFILES: Dict[str, WorkloadProfile] = {
-    # Scheduling workloads (minutes in a day)
+REALISTIC_PROFILES = {
     "scheduler": WorkloadProfile(
-        name="scheduler",
-        operation_mix={"reserve": 0.45, "release": 0.35, "find": 0.20},
-        space_range=(0, 24 * 60),  # 24 hours in minutes
-        size_buckets=[
-            (1, 15, 0.60),    # short tasks
-            (15, 120, 0.30),  # medium tasks
-            (120, 480, 0.10), # long tasks
-        ],
-        start_distribution="diurnal",
-        align=1,
+        "scheduler",
+        (("reserve", 0.45), ("release", 0.35), ("find", 0.20)),
+        (0, 24 * 60),
+        (1, 120),
     ),
-    # Memory allocator workloads (bytes)
     "allocator": WorkloadProfile(
-        name="allocator",
-        operation_mix={"reserve": 0.55, "release": 0.35, "find": 0.10},
-        space_range=(0, 1_000_000_000),  # 1 GB address space
-        size_buckets=[
-            (4_096, 65_536, 0.70),    # 4KB - 64KB
-            (65_536, 1_048_576, 0.20), # 64KB - 1MB
-            (1_048_576, 64_000_000, 0.10), # 1MB - 64MB
-        ],
-        start_distribution="uniform",
-        align=4_096,
+        "allocator",
+        (("reserve", 0.55), ("release", 0.35), ("find", 0.10)),
+        (0, 1_000_000),
+        (4, 4_096),
     ),
-    # Network reservation workloads (Mbps over a day)
     "network": WorkloadProfile(
-        name="network",
-        operation_mix={"reserve": 0.50, "release": 0.35, "find": 0.15},
-        space_range=(0, 100_000),  # 100 Gbps in Mbps
-        size_buckets=[
-            (10, 100, 0.55),     # small flows
-            (100, 1_000, 0.30),  # medium flows
-            (1_000, 10_000, 0.15), # large flows
-        ],
-        start_distribution="uniform",
-        align=10,
+        "network",
+        (("reserve", 0.50), ("release", 0.35), ("find", 0.15)),
+        (0, 100_000),
+        (10, 1_000),
     ),
 }
 
@@ -69,241 +44,263 @@ REALISTIC_PROFILES: Dict[str, WorkloadProfile] = {
 def generate_workload(
     num_operations: int,
     seed: int = 42,
-    operation_mix: Dict[str, float] = None,
-    space_range: Tuple[int, int] = (0, 1_000_000),
-    interval_size_range: Tuple[int, int] = (10, 100)
-) -> List[Tuple[str, int, int]]:
-    """
-    Generate reproducible workload for benchmarking.
-    
-    Args:
-        num_operations: Number of operations to generate
-        seed: Random seed for reproducibility
-        operation_mix: Distribution of operations {'reserve': 0.4, 'release': 0.4, 'find': 0.2}
-        space_range: (min, max) for interval start positions
-        interval_size_range: (min, max) for interval lengths
-    
-    Returns:
-        List of (operation_type, start, end) tuples
-    """
-    random.seed(seed)
-    
-    if operation_mix is None:
-        operation_mix = {'reserve': 0.4, 'release': 0.4, 'find': 0.2}
-    
-    # Validate operation mix
-    if abs(sum(operation_mix.values()) - 1.0) > 0.01:
-        raise ValueError(f"Operation mix must sum to 1.0, got {sum(operation_mix.values())}")
-    
-    op_types = list(operation_mix.keys())
-    op_weights = list(operation_mix.values())
-    
-    operations = []
-    space_min, space_max = space_range
-    size_min, size_max = interval_size_range
-    
+    operation_mix: dict[str, float] | None = None,
+    space_range: tuple[int, int] = (0, 1_000_000),
+    interval_size_range: tuple[int, int] = (10, 100),
+) -> list[tuple[str, int, int]]:
+    """Generate a reproducible legacy tuple trace without global RNG state."""
+    if num_operations < 0:
+        raise ValueError("num_operations cannot be negative")
+    mix = operation_mix or {"reserve": 0.4, "release": 0.4, "find": 0.2}
+    if abs(sum(mix.values()) - 1.0) > 1e-9:
+        raise ValueError("operation mix must sum to 1.0")
+    minimum, maximum = space_range
+    size_minimum, size_maximum = interval_size_range
+    if minimum >= maximum or size_minimum <= 0 or size_minimum > size_maximum:
+        raise ValueError("invalid coordinate or interval-size range")
+    if maximum - minimum < size_maximum:
+        raise ValueError("space is smaller than the maximum interval")
+
+    rng = random.Random(seed)
+    kinds = list(mix)
+    weights = list(mix.values())
+    result = []
     for _ in range(num_operations):
-        op_type = random.choices(op_types, weights=op_weights)[0]
-        start = random.randint(space_min, space_max - size_max)
-        length = random.randint(size_min, size_max)
-        end = start + length
-        operations.append((op_type, start, end))
-    
-    return operations
-
-
-def iter_workload(operations: List[Tuple]) -> Iterable[Tuple[str, int, int, Any]]:
-    """Yield (op, start, end, data) for both 3- and 4-tuples."""
-    for item in operations:
-        if len(item) == 3:
-            op, start, end = item
-            yield op, start, end, None
-        else:
-            op, start, end, data = item
-            yield op, start, end, data
-
-
-def _sample_size(size_buckets: List[Tuple[int, int, float]], max_length: int, align: int) -> int:
-    weights = [bucket[2] for bucket in size_buckets]
-    bucket_min, bucket_max, _ = random.choices(size_buckets, weights=weights, k=1)[0]
-    length = random.randint(bucket_min, bucket_max)
-    if length > max_length:
-        length = max_length
-    if align > 1:
-        if max_length < align:
-            length = max_length
-        else:
-            length = max(align, (length // align) * align)
-            length = min(length, max_length)
-    return length
-
-
-def _sample_start(space_min: int, space_max: int, length: int, distribution: str) -> int:
-    max_start = max(space_min, space_max - length)
-    if distribution == "diurnal":
-        horizon = max_start - space_min
-        if horizon <= 0:
-            return space_min
-        centers = [
-            space_min + int(horizon * 0.25),
-            space_min + int(horizon * 0.50),
-            space_min + int(horizon * 0.75),
-        ]
-        weights = [0.4, 0.35, 0.25]
-        for _ in range(10):
-            center = random.choices(centers, weights=weights, k=1)[0]
-            start = int(random.gauss(center, horizon * 0.08))
-            if space_min <= start <= max_start:
-                return start
-    return random.randint(space_min, max_start)
+        kind = rng.choices(kinds, weights=weights, k=1)[0]
+        length = rng.randint(size_minimum, size_maximum)
+        start = rng.randint(minimum, maximum - length)
+        result.append((kind, start, start + length))
+    return result
 
 
 def generate_realistic_workload(
     num_operations: int,
     profile: str = "scheduler",
     seed: int = 42,
-    space_range: Optional[Tuple[int, int]] = None,
-    operation_mix: Optional[Dict[str, float]] = None,
+    space_range: tuple[int, int] | None = None,
+    operation_mix: dict[str, float] | None = None,
     include_data: bool = False,
-    data_factory: Optional[Callable[[int, str, int, int], Any]] = None,
-) -> List[Tuple]:
-    """Generate workload using realistic sizing profiles."""
-    if profile not in REALISTIC_PROFILES:
-        raise ValueError(f"Unknown workload profile '{profile}' (available: {list(REALISTIC_PROFILES.keys())})")
-    
-    random.seed(seed)
-    base_profile = REALISTIC_PROFILES[profile]
-    space_min, space_max = space_range or base_profile.space_range
-    
-    op_mix = operation_mix or base_profile.operation_mix
-    # Validate operation mix
-    if abs(sum(op_mix.values()) - 1.0) > 0.01:
-        raise ValueError(f"Operation mix must sum to 1.0, got {sum(op_mix.values())}")
-    
-    op_types = list(op_mix.keys())
-    op_weights = list(op_mix.values())
-    data_factory = data_factory or base_profile.data_factory
-    
-    max_length = max(1, space_max - space_min)
-    operations = []
-    
-    for idx in range(num_operations):
-        op_type = random.choices(op_types, weights=op_weights)[0]
-        length = _sample_size(base_profile.size_buckets, max_length, base_profile.align)
-        start = _sample_start(space_min, space_max, length, base_profile.start_distribution)
-        end = start + length
-        
-        if include_data:
-            payload = data_factory(idx, op_type, start, end) if data_factory else {
-                "id": idx,
-                "op": op_type,
-                "size": length,
-            }
-            operations.append((op_type, start, end, payload))
+    data_factory=None,
+) -> list[tuple]:
+    """Compatibility generator used by non-publishable profiling scripts."""
+    selected = REALISTIC_PROFILES[profile]
+    tuples = generate_workload(
+        num_operations,
+        seed,
+        operation_mix or dict(selected.operation_mix),
+        space_range or selected.space_range,
+        selected.size_range,
+    )
+    if not include_data:
+        return tuples
+    factory = data_factory or (
+        lambda index, kind, start, end: {
+            "id": index,
+            "op": kind,
+            "size": end - start,
+        }
+    )
+    return [
+        (kind, start, end, factory(index, kind, start, end))
+        for index, (kind, start, end) in enumerate(tuples)
+    ]
+
+
+def generate_standard_workload(
+    num_operations: int = 10_000,
+) -> list[tuple[str, int, int]]:
+    """Generate the stable legacy tuple workload."""
+    return generate_workload(num_operations, interval_size_range=(1, 120))
+
+
+def iter_workload(
+    operations: Iterable[tuple],
+) -> Iterable[tuple[str, int, int, object | None]]:
+    """Normalize legacy three- and four-field tuples."""
+    for item in operations:
+        if len(item) == 3:
+            kind, start, end = item
+            yield kind, start, end, None
+        elif len(item) == 4:
+            kind, start, end, data = item
+            yield kind, start, end, data
         else:
-            operations.append((op_type, start, end))
-    
-    return operations
+            raise ValueError("workload tuples must contain three or four fields")
 
 
-def generate_standard_workload(num_operations: int = 10_000) -> List[Tuple[str, int, int]]:
-    """
-    Generate standard workload for typical benchmarks.
-    
-    Default configuration:
-    - 40% reserve, 40% release, 20% find
-    - Space: 0 to 1,000,000
-    - Realistic scheduling-sized intervals (short/medium/long mix)
-    """
-    return generate_realistic_workload(
-        num_operations=num_operations,
-        profile="scheduler",
-        space_range=(0, 999_900),
-        operation_mix={'reserve': 0.4, 'release': 0.4, 'find': 0.2},
-        seed=42,
-        include_data=False
+def execute_workload(
+    implementation,
+    operations: Iterable[tuple],
+    initial_space: tuple[int, int] = (0, 1_000_000),
+) -> tuple[tuple[int, int] | None, ...]:
+    """Execute an ordered legacy trace without swallowing backend failures."""
+    implementation.release_interval(*initial_space)
+    queries = []
+    for kind, start, end, data in iter_workload(operations):
+        if kind == "reserve":
+            implementation.reserve_interval(start, end)
+        elif kind == "release":
+            if data is None:
+                implementation.release_interval(start, end)
+            else:
+                implementation.release_interval(start, end, data)
+        elif kind == "find":
+            found = implementation.find_interval(start, end - start)
+            queries.append(
+                None
+                if found is None
+                else (
+                    (found.start, found.end)
+                    if hasattr(found, "start")
+                    else (found[0], found[1])
+                )
+            )
+        else:
+            raise ValueError(f"unknown operation kind: {kind}")
+    return tuple(queries)
+
+
+def fragmented_workload(
+    *,
+    interval_count: int = 64,
+    operation_count: int = 500,
+    seed: int = 42,
+) -> BenchmarkWorkload:
+    """Create a mutation-heavy trace with an exact initial interval count."""
+    if interval_count <= 0 or operation_count <= 0:
+        raise ValueError("interval and operation counts must be positive")
+    extent = interval_count * 4
+    setup = tuple(
+        Operation("add", start=index * 4, end=index * 4 + 2)
+        for index in range(interval_count)
+    )
+    rng = random.Random(seed)
+    operations: list[Operation] = []
+    for index in range(operation_count):
+        length = rng.randint(1, min(12, extent))
+        start = rng.randint(0, extent - length)
+        selector = rng.random()
+        if index == operation_count - 1 or (index and index % 97 == 0):
+            operations.append(
+                Operation("add", start=start, end=start, expected_error="ValueError")
+            )
+        elif selector < 0.35:
+            operations.append(Operation("discard", start=start, end=start + length))
+        elif selector < 0.70:
+            operations.append(Operation("add", start=start, end=start + length))
+        elif selector < 0.85:
+            operations.append(Operation("first_fit", length=length, not_before=start))
+        else:
+            operations.append(Operation("allocate", length=length, not_before=start))
+    return BenchmarkWorkload(
+        "mutation-heavy",
+        ((0, extent),),
+        setup,
+        tuple(operations),
+        extent,
+        (
+            ("update_query_ratio", "70:30"),
+            ("fragmentation", "alternating equal free/reserved spans"),
+            ("fit_positions", "uniform not_before with impossible fits included"),
+        ),
     )
 
 
-def generate_dense_workload(num_operations: int = 10_000, total_space: int = 1_000_000) -> List[Tuple[str, int, int]]:
-    """
-    Generate workload with many small intervals (high fragmentation).
-    """
-    return generate_workload(
-        num_operations=num_operations,
-        seed=42,
-        operation_mix={'reserve': 0.5, 'release': 0.3, 'find': 0.2},
-        space_range=(0, total_space - 1000),
-        interval_size_range=(10, 100)
+def immutable_query_workload(
+    *,
+    interval_count: int = 64,
+    queries_per_snapshot: int = 500,
+    seed: int = 42,
+) -> BenchmarkWorkload:
+    """Create a fragmented immutable snapshot followed only by fit queries."""
+    base = fragmented_workload(
+        interval_count=interval_count, operation_count=1, seed=seed
+    )
+    rng = random.Random(seed)
+    operations = tuple(
+        Operation(
+            "first_fit",
+            length=rng.randint(1, 5),
+            not_before=rng.randint(0, base.coordinate_extent - 1),
+        )
+        for _ in range(queries_per_snapshot)
+    )
+    return BenchmarkWorkload(
+        "immutable-snapshot-batched-query",
+        base.domain,
+        base.setup,
+        operations,
+        base.coordinate_extent,
+        (
+            ("updates", "none during timed phase"),
+            ("queries_per_snapshot", str(queries_per_snapshot)),
+            ("upload_policy", "one immutable snapshot per query batch"),
+        ),
     )
 
 
-def generate_sparse_workload(num_operations: int = 10_000, total_space: int = 10_000_000) -> List[Tuple[str, int, int]]:
+def scheduling_workload(
+    *,
+    cores: int,
+    occupancy: float,
+    jobs: int = 500,
+    seed: int = 42,
+) -> BenchmarkWorkload:
+    """Generate domain-neutral constrained allocation/cancellation work.
+
+    Each core is represented by a disjoint managed span. Requests have release
+    coordinates, exclusive deadlines, and short/medium/long durations. The
+    canonical ``allocate`` call is the measured find-plus-atomic-reserve path.
     """
-    Generate workload with few large intervals (low fragmentation).
-    """
-    return generate_workload(
-        num_operations=num_operations,
-        seed=42,
-        operation_mix={'reserve': 0.4, 'release': 0.4, 'find': 0.2},
-        space_range=(0, total_space - 100_000),
-        interval_size_range=(1_000, 10_000)
+    if cores not in {1, 8, 64}:
+        raise ValueError("cores must be one of 1, 8, or 64")
+    if not 0.0 <= occupancy < 1.0:
+        raise ValueError("occupancy must satisfy 0 <= occupancy < 1")
+    horizon = 512
+    stride = horizon + 16
+    domain = tuple((core * stride, core * stride + horizon) for core in range(cores))
+    occupied = int(horizon * occupancy)
+    setup = tuple(
+        Operation("add", start=base + occupied, end=base + horizon)
+        for base, _ in domain
     )
-
-
-def generate_query_heavy_workload(num_operations: int = 10_000) -> List[Tuple[str, int, int]]:
-    """
-    Generate workload with emphasis on find operations.
-    """
-    return generate_workload(
-        num_operations=num_operations,
-        seed=42,
-        operation_mix={'reserve': 0.2, 'release': 0.2, 'find': 0.6},
-        space_range=(0, 999_900),
-        interval_size_range=(10, 100)
+    durations = {"short": 4, "medium": 16, "long": 64}
+    rng = random.Random(seed)
+    operations: list[Operation] = []
+    attempted_jobs: list[int] = []
+    for job_id in range(jobs):
+        if attempted_jobs and rng.random() < 0.12:
+            operations.append(Operation("cancel", job_id=rng.choice(attempted_jobs)))
+            continue
+        job_class = rng.choices(tuple(durations), weights=(0.55, 0.30, 0.15), k=1)[0]
+        duration = durations[job_class]
+        core = rng.randrange(cores)
+        base = core * stride
+        release = rng.randint(0, horizon - duration)
+        slack = rng.choice((0, duration, duration * 3))
+        deadline = min(horizon, release + duration + slack)
+        operations.append(
+            Operation(
+                "allocate",
+                length=duration,
+                not_before=base + release,
+                not_after=base + deadline,
+                job_id=job_id,
+                job_class=job_class,
+            )
+        )
+        attempted_jobs.append(job_id)
+    return BenchmarkWorkload(
+        f"cpu-scheduling-{cores}-cores-{occupancy:.0%}-occupancy",
+        domain,
+        setup,
+        tuple(operations),
+        cores * horizon,
+        (
+            ("cores", str(cores)),
+            ("occupancy", f"{occupancy:.2f}"),
+            ("constraints", "release coordinate and exclusive deadline"),
+            ("job_classes", "short=4,medium=16,long=64"),
+            ("metrics", "allocate/cancel latency, success by class, Jain fairness"),
+        ),
     )
-
-
-def _call_interval_op(impl, method_name: str, start: int, end: int, data: Any = None) -> None:
-    method = getattr(impl, method_name)
-    if data is None:
-        try:
-            method(start, end)
-        except TypeError:
-            method(start, end)
-    else:
-        try:
-            method(start, end, data)
-        except TypeError:
-            method(start, end)
-
-
-def execute_workload(impl, operations: List[Tuple], initial_space: Tuple[int, int] = (0, 1_000_000)) -> None:
-    """
-    Execute a workload on any implementation (Python or C++).
-    
-    Works with any object that implements the standard protocol:
-    - release_interval(start, end)
-    - reserve_interval(start, end)
-    - find_interval(start, length)
-    
-    Args:
-        impl: Implementation instance (Python or C++)
-        operations: List of (op_type, start, end) tuples
-        initial_space: (start, end) for initial available space
-    """
-    # Initialize with available space
-    impl.release_interval(*initial_space)
-    
-    # Execute operations
-    for op, start, end, data in iter_workload(operations):
-        try:
-            if op == 'reserve':
-                _call_interval_op(impl, "reserve_interval", start, end, data)
-            elif op == 'release':
-                _call_interval_op(impl, "release_interval", start, end, data)
-            elif op == 'find':
-                impl.find_interval(start, end - start)
-        except (ValueError, Exception):
-            # Some operations may fail (no suitable interval, etc.)
-            pass

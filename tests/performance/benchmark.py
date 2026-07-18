@@ -1,13 +1,10 @@
-from typing import List, Tuple
+#!/usr/bin/env python3
+"""Retired legacy measurement entry point."""
 
-from tests.performance.workload import generate_realistic_workload
+from __future__ import annotations
 
-def generate_operations(num_operations: int) -> List[Tuple[str, int, int]]:
-    return generate_realistic_workload(
-        num_operations=num_operations,
-        profile="scheduler",
-        space_range=(0, 999_900),
-        operation_mix={'reserve': 0.4, 'release': 0.4, 'find': 0.2},
-        seed=42,
-        include_data=False
-    )
+from tests.performance.legacy import fail_legacy
+
+
+if __name__ == "__main__":
+    raise SystemExit(fail_legacy("benchmark.py"))

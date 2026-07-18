@@ -5,6 +5,7 @@ Interval tree implementations in Python and C++ for resource scheduling and spac
 ## Implementations
 
 ### Python (`treemendous.basic`)
+
 - **AVL Tree**: Self-balancing binary search tree with interval merging
 - **Boundary Manager**: SortedDict-based interval tracking  
 - **Segment Tree**: Traditional segment tree with lazy propagation
@@ -12,13 +13,15 @@ Interval tree implementations in Python and C++ for resource scheduling and spac
 - **Summary Tree**: Enhanced tree with aggregate statistics (utilization, fragmentation, largest available)
 
 ### C++ (`treemendous.cpp`)
+
 - **Boundary Manager**: std::map-based implementation (compiled ✅)
 - **Treap**: High-performance randomized tree-heap (source available)
 - **IC Manager**: Boost Interval Container Library implementation (source available)
 - **Summary Boundary**: Enhanced versions with comprehensive statistics (source available)
 
 **C++ Module Status:**
-- ✅ **Boundary Manager**: Compiled and available (2-30x performance boost)
+
+- ✅ **Boundary Manager**: Compiled and available when the native extension is built
 - 🔧 **Treap, Summary, IC**: Source available, requires compilation (`just build-cpp`)
 - 📋 **Check Status**: `just list-backends` shows all available implementations
 
@@ -68,12 +71,8 @@ uv sync --all-extras
 # Complete profiling - Python + C++ implementations
 just profile
 
-# Quick Python vs C++ performance comparison  
+# Correctness-checked local directional measurements
 just benchmark
-# Output includes:
-#   Python Boundary:         21.90 ms (baseline)
-#   C++ Boundary:             3.74 ms (5.9x faster)
-#   C++ Treap:                5.65 ms (81.7x faster than Python Treap)
 
 # Full performance test suite
 just test-perf
@@ -86,6 +85,7 @@ uv run python tests/performance/visual_profiler.py compare
 ```
 
 **C++ Flame Graphs (Native Frame Capture):**
+
 ```bash
 # Install py-spy (shows both Python and C++ frames)
 uv sync --extra profiling
@@ -113,6 +113,7 @@ just test-hypothesis    # Property-based testing
 ```
 
 The unified testing system discovers **8 implementations** automatically:
+
 - **Python** (5): AVL, Boundary, Summary, Treap, Boundary Summary
 - **C++** (3): Boundary, Treap, Boundary Summary
 - **Specialized**: ICL variants (when compiled with `just build-cpp-full`)
@@ -138,8 +139,6 @@ just list-backends         # Show available backends
 just demo-backends-treap   # Demo with Python treap
 just demo-backends-cpp     # Demo with C++ boundary
 ```
-
-
 
 ## Development Commands
 

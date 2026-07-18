@@ -6,8 +6,8 @@ while providing correct interval management functionality.
 """
 
 import pytest
-from hypothesis import assume, given, strategies as st
-from typing import List, Tuple, Optional, Dict, Any
+from hypothesis import given, strategies as st
+from typing import List, Tuple
 import random
 import math
 
@@ -330,13 +330,8 @@ def test_treap_performance_characteristics():
     )
     print(f"  Balance factor: {stats['balance_factor']:.2f}")
 
-    # Performance should be reasonable
-    avg_insertion_time = insertion_time / len(intervals)
-    assert avg_insertion_time < 0.001, (
-        f"Insertion too slow: {avg_insertion_time:.6f}s per operation"
-    )
-
-    # Tree should be reasonably balanced
+    # Tree balance is a correctness property. Timing thresholds belong in the
+    # correctness-checked benchmark harness, not in this property test.
     assert stats["balance_factor"] < 3.0, (
         f"Tree unbalanced: factor {stats['balance_factor']}"
     )
@@ -555,39 +550,14 @@ def test_treap_probabilistic_properties():
     )
 
 
-def test_treap_memory_efficiency():
-    """Test treap memory efficiency compared to other structures"""
-    import sys
-
-    treap = IntervalTreap(random_seed=42)
-
-    # Measure approximate memory usage
-    def get_treap_memory_estimate():
-        # Simplified memory estimation
-        stats = treap.get_statistics()
-        # Each node: 2 ints (start, end) + 1 float (priority) + 3 ints (height, size, total_length) + 2 pointers
-        # Approximate: 6 * 8 bytes + 8 bytes + 2 * 8 bytes = 64 bytes per node
-        return stats["size"] * 64
-
-    # Test with various sizes
-    sizes = [10, 50, 100, 500]
-    memory_per_interval = []
-
-    for n in sizes:
+def test_treap_node_count_tracks_actual_intervals():
+    """Stored node count matches the actual canonical interval count."""
+    for count in (10, 50, 100, 500):
         treap = IntervalTreap(random_seed=42)
+        for index in range(count):
+            treap.release_interval(index * 10, index * 10 + 5)
 
-        for i in range(n):
-            treap.release_interval(i * 10, i * 10 + 5)
-
-        estimated_memory = get_treap_memory_estimate()
-        memory_per_interval.append(estimated_memory / n)
-
-    print(f"\n💾 Memory Efficiency Test:")
-    for i, n in enumerate(sizes):
-        print(f"  {n:3d} intervals: ~{memory_per_interval[i]:.0f} bytes per interval")
-
-    # Memory per interval should be reasonable and roughly constant
-    assert all(mem < 100 for mem in memory_per_interval), "Memory usage too high"
+        assert treap.get_statistics()["size"] == len(treap.get_intervals()) == count
 
 
 if __name__ == "__main__":
@@ -606,7 +576,7 @@ if __name__ == "__main__":
 
     test_treap_probabilistic_properties()
     test_treap_performance_characteristics()
-    test_treap_memory_efficiency()
+    test_treap_node_count_tracks_actual_intervals()
 
-    print(f"\n✅ All basic treap tests passed!")
-    print(f"Run with pytest for comprehensive property-based testing.")
+    print("\n✅ All basic treap tests passed!")
+    print("Run with pytest for comprehensive property-based testing.")
