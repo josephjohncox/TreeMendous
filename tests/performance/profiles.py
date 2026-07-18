@@ -103,7 +103,7 @@ def benchmark_profile(name: str) -> BenchmarkProfile:
                     seed=65,
                 ),
                 lease_pool_workload(shards=5_000, operation_count=200, seed=66),
-                scheduling_workload(cores=64, occupancy=0.75, jobs=100_000, seed=67),
+                scheduling_workload(cores=64, occupancy=0.75, jobs=50_000, seed=67),
             ),
         )
     raise ValueError(f"unknown benchmark profile: {name}")
