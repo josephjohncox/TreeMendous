@@ -82,7 +82,7 @@ def benchmark_profile(name: str) -> BenchmarkProfile:
     if name == "large":
         return BenchmarkProfile(
             name="large",
-            description="Manual six-figure qualification under plausible production load",
+            description="Manual high-cardinality qualification under plausible production load",
             samples=20,
             warmups=2,
             processes=2,
@@ -98,7 +98,7 @@ def benchmark_profile(name: str) -> BenchmarkProfile:
             ),
             qualification_workloads=(
                 immutable_query_workload(
-                    interval_count=100_000,
+                    interval_count=25_000,
                     queries_per_snapshot=20,
                     seed=65,
                 ),

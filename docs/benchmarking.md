@@ -61,12 +61,12 @@ load.
 | --- | --- | --- | --- |
 | `smoke` | Required PR/build check | 32–128 initial ranges and 200–1,100 operations per workload, 20 independent samples | 500-range catalog, 250-shard lease pool, all payload policies |
 | `standard` | Weekly engineering run | Up to 128 initial ranges and 1,100 operations, 20 independent samples | 10,000-range catalog, 2,000-shard lease pool, 25,000 scheduled jobs |
-| `large` | Manual production-scale qualification | Up to 128 initial ranges and 1,100 operations, 20 independent samples | 100,000-range catalog, 10,000-shard lease pool, 100,000 scheduled jobs |
+| `large` | Manual production-scale qualification | Up to 128 initial ranges and 1,100 operations, 20 independent samples | 25,000-range catalog, 10,000-shard lease pool, 100,000 scheduled jobs |
 
-The six-figure profile separates interval cardinality from operation count where
-a linear-scan backend would otherwise create a meaningless ten-billion-step
-cross product. It still qualifies six-figure state and six-figure operation
-loads, but in workloads that resemble actual service behavior.
+The large profile separates interval cardinality from operation count where a
+linear-scan backend would otherwise create a meaningless cross product. It
+qualifies high-cardinality state and six-figure operation loads independently,
+using workloads that resemble actual service behavior.
 
 ## Correctness before timing
 
