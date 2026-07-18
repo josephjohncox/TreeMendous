@@ -103,7 +103,7 @@ jobs:
         run: >-
           uv run pytest tests/unit/test_native_core_contract.py
           tests/unit/test_core_contract.py
-          tests/unit/test_unified_implementations.py
+          tests/unit/test_stable_backends.py
           -m "not metal and not cuda and not icl and not benchmark
           and not packaging"
 

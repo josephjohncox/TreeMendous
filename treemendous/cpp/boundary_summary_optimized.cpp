@@ -4,7 +4,7 @@
 
 #include <map>
 #include <vector>
-#if __cplusplus >= 201703L
+#if __cplusplus >= 201703L || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L)
 #include <optional>
 template <typename T> using Optional = std::optional<T>;
 constexpr auto kNoValue = std::nullopt;
