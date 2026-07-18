@@ -1,8 +1,8 @@
-"""Experimental eager segment tree; not part of the stable RangeSet interface."""
+"""Experimental lazy segment tree; not part of the stable RangeSet interface."""
 
 __experimental__ = True
 from treemendous.basic.base import IntervalNodeBase, IntervalTreeBase
-from treemendous.domain import IntervalResult
+from treemendous.domain import IntervalResult, ManagedDomain
 
 
 class SegmentTreeNode(IntervalNodeBase["SegmentTreeNode", None]):
@@ -28,19 +28,8 @@ class SegmentTree(IntervalTreeBase[SegmentTreeNode, None]):
             f"{indent}{prefix}{node.start}-{node.end} (len={node.length}, total_len={node.total_length}, is_full={node.is_full})"
         )
 
-    def _build(self, node: SegmentTreeNode | None) -> None:
-        if node is None:
-            return
-        if node.end - node.start <= 1:
-            return
-        mid: int = (node.start + node.end) // 2
-        node.left = SegmentTreeNode(node.start, mid)
-        node.right = SegmentTreeNode(mid, node.end)
-        self._build(node.left)
-        self._build(node.right)
-
     def build(self) -> None:
-        self._build(self.root)
+        """Compatibility no-op; updates expand only the paths they touch."""
 
     def _update(
         self, node: SegmentTreeNode | None, start: int, end: int, is_full: bool
@@ -71,10 +60,12 @@ class SegmentTree(IntervalTreeBase[SegmentTreeNode, None]):
             node.update_node()
 
     def schedule_interval(self, start: int, end: int) -> None:
-        self._update(self.root, start, end, False)
+        span = self.validate_span(start, end)
+        self._update(self.root, span.start, span.end, False)
 
     def unschedule_interval(self, start: int, end: int) -> None:
-        self._update(self.root, start, end, True)
+        span = self.validate_span(start, end)
+        self._update(self.root, span.start, span.end, True)
 
     def get_intervals(self) -> list[IntervalResult]:
         """Return available leaf geometry for direct experimental users."""
@@ -90,4 +81,7 @@ class SegmentTree(IntervalTreeBase[SegmentTreeNode, None]):
             collect(node.right)
 
         collect(self.root)
-        return result
+        if not result:
+            return []
+        domain = ManagedDomain(item.span for item in result)
+        return [IntervalResult(span.start, span.end) for span in domain.spans]

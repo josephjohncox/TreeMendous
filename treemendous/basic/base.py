@@ -12,6 +12,7 @@ from treemendous.domain import (
     validate_coordinate,
     validate_length,
 )
+from treemendous.policies import LegacyPayloadPolicy
 
 D = TypeVar("D")
 
@@ -95,6 +96,12 @@ class IntervalTreeBase(Generic[T, D], ABC):
         # Kept only as a constructor compatibility field. Restriction callbacks
         # are always invoked; idempotence is not a valid reason to skip them.
         self.split_idempotent = split_idempotent
+        self._payload_policy = LegacyPayloadPolicy(
+            merge_fn=merge_fn,
+            split_fn=split_fn,
+            can_merge_fn=can_merge,
+            merge_idempotent=merge_idempotent,
+        )
 
     @staticmethod
     def validate_span(start: int, end: int) -> Span:
@@ -129,13 +136,7 @@ class IntervalTreeBase(Generic[T, D], ABC):
             return data2
         if data2 is None:
             return data1
-        if self.merge_idempotent and (data1 is data2 or data1 == data2):
-            return data1
-        if self.merge_fn is not None:
-            return self.merge_fn(data1, data2)
-        if isinstance(data1, set) and isinstance(data2, set):
-            return data1 | data2  # type: ignore[return-value]
-        return data1
+        return self._payload_policy.combine(data1, data2)
 
     def split_data(
         self,
@@ -147,10 +148,12 @@ class IntervalTreeBase(Generic[T, D], ABC):
     ) -> D | None:
         if data is None or self.split_fn is None:
             return data
-        return self.split_fn(data, old_start, old_end, new_start, new_end)
+        return self._payload_policy.restrict(
+            data, Span(old_start, old_end), Span(new_start, new_end)
+        )
 
     def can_merge_data(self, data1: D | None, data2: D | None) -> bool:
-        return self.can_merge_fn(data1, data2) if self.can_merge_fn else True
+        return self._payload_policy.can_merge(cast(D, data1), cast(D, data2))
 
     @abstractmethod
     def _print_node(self, node: T, indent: str, prefix: str) -> None: ...

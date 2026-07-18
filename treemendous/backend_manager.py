@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,6 +20,7 @@ from treemendous.backends import (
     select_backend,
 )
 from treemendous.backends.adapters import CppBackendAdapter, PythonBackendAdapter
+from treemendous.backends.types import ProbeState
 from treemendous.basic.protocols import (
     AvailabilityStats,
     BackendConfiguration,
@@ -142,6 +144,10 @@ class RuntimeBackendInfo:
     probe_reason: str | None = None
 
 
+def _supports_feature(info: RuntimeBackendInfo, feature: str) -> bool:
+    return feature in info.config.features or feature in info.detected_features
+
+
 class UnifiedIntervalManager(RangeSet):
     """Legacy method surface backed by one explicit adapter."""
 
@@ -151,6 +157,10 @@ class UnifiedIntervalManager(RangeSet):
         super().__init__(adapter, capabilities=capabilities, initially_available=False)
         self._info = info
         self._operation_count = 0
+
+    def _optional_raw(self, method: str, *args: Any) -> Any | None:
+        operation = getattr(self._adapter.implementation, method, None)
+        return operation(*args) if operation is not None else None
 
     def release_interval(self, start: int, end: int, data: Any = None) -> None:
         span = Span(start, end)
@@ -168,33 +178,28 @@ class UnifiedIntervalManager(RangeSet):
     def get_availability_stats(self) -> AvailabilityStats | None:
         """Return legacy raw-backend analytics without requiring a domain."""
         with self._lock:
-            raw = self._adapter.implementation
-            if not hasattr(raw, "get_availability_stats"):
-                return None
-            return standardize_availability_stats(raw.get_availability_stats())
+            result = self._optional_raw("get_availability_stats")
+            return None if result is None else standardize_availability_stats(result)
 
     def find_best_fit(
         self, length: int, prefer_early: bool = True
     ) -> IntervalResult | None:
         with self._lock:
-            raw = self._adapter.implementation
-            if not hasattr(raw, "find_best_fit"):
-                return None
-            return standardize_interval_result(raw.find_best_fit(length, prefer_early))
+            return standardize_interval_result(
+                self._optional_raw("find_best_fit", length, prefer_early)
+            )
 
     def find_largest_available(self) -> IntervalResult | None:
         with self._lock:
-            raw = self._adapter.implementation
-            if not hasattr(raw, "find_largest_available"):
-                return None
-            return standardize_interval_result(raw.find_largest_available())
+            return standardize_interval_result(
+                self._optional_raw("find_largest_available")
+            )
 
     def sample_random_interval(self) -> IntervalResult | None:
         with self._lock:
-            raw = self._adapter.implementation
-            if not hasattr(raw, "sample_random_interval"):
-                return None
-            return standardize_interval_result(raw.sample_random_interval())
+            return standardize_interval_result(
+                self._optional_raw("sample_random_interval")
+            )
 
     def verify_properties(self) -> bool:
         with self._lock:
@@ -231,17 +236,18 @@ class UnifiedIntervalManager(RangeSet):
         return self._info.config.performance_tier
 
     def supports_feature(self, feature: str) -> bool:
-        return (
-            feature in self._info.config.features
-            or feature in self._info.detected_features
-        )
+        return _supports_feature(self._info, feature)
 
 
 class TreeMendousBackendManager:
     """Loads, semantically probes, and selects immutable backend specs."""
 
-    def __init__(self) -> None:
-        self._probes = {spec.id: probe_backend(spec) for spec in CATALOG}
+    def __init__(
+        self,
+        *,
+        probe: Callable[[BackendSpec], ProbeState] = probe_backend,
+    ) -> None:
+        self._probes = {spec.id: probe(spec) for spec in CATALOG}
         self._infos = {spec.id: self._info(spec) for spec in CATALOG}
 
     def _info(self, spec: BackendSpec) -> RuntimeBackendInfo:
@@ -300,7 +306,7 @@ class TreeMendousBackendManager:
         except KeyError as exc:
             raise BackendUnavailableError(f"unknown backend: {backend_id}") from exc
 
-    def _require_available(self, spec: BackendSpec) -> None:
+    def _require_available(self, spec: BackendSpec) -> Available:
         probe = self._probes[spec.id]
         if isinstance(probe, Invalid):
             raise BackendInvalidError(
@@ -310,6 +316,22 @@ class TreeMendousBackendManager:
             raise BackendUnavailableError(
                 f"backend {spec.id} unavailable: {probe.reason}"
             )
+        return probe
+
+    def _resolve_spec(
+        self, backend_id: str | None, require: frozenset[Capability]
+    ) -> BackendSpec:
+        if backend_id is None or backend_id == "auto":
+            return select_backend(
+                CATALOG, self._probes, BackendRequest(require=require)
+            ).selected
+        spec = self._spec(backend_id)
+        probe = self._require_available(spec)
+        if not require <= probe.validated_capabilities:
+            raise BackendUnavailableError(
+                f"backend {backend_id} lacks required capabilities"
+            )
+        return spec
 
     @staticmethod
     def _adapter(spec: BackendSpec, implementation: Any):
@@ -317,17 +339,25 @@ class TreeMendousBackendManager:
             return PythonBackendAdapter(implementation)
         return CppBackendAdapter(implementation)
 
+    @staticmethod
+    def _construct(spec: BackendSpec, constructor_options: Mapping[str, Any]) -> Any:
+        args = {**spec.constructor_args, **constructor_options}
+        return spec.loader()(**args)
+
+    def _available_matching(
+        self, predicate: Callable[[RuntimeBackendInfo], bool]
+    ) -> dict[str, RuntimeBackendInfo]:
+        return {
+            backend_id: info
+            for backend_id, info in self._infos.items()
+            if info.config.available and predicate(info)
+        }
+
     def create_manager(
         self, backend_id: str | None = None, **constructor_options: Any
     ) -> UnifiedIntervalManager:
-        if backend_id is None or backend_id == "auto":
-            spec = select_backend(CATALOG, self._probes, BackendRequest()).selected
-        else:
-            spec = self._spec(backend_id)
-            self._require_available(spec)
-        args = dict(spec.constructor_args)
-        args.update(constructor_options)
-        implementation = spec.loader()(**args)
+        spec = self._resolve_spec(backend_id, frozenset({Capability.CORE}))
+        implementation = self._construct(spec, constructor_options)
         return UnifiedIntervalManager(
             self._adapter(spec, implementation), self._infos[spec.id], spec.capabilities
         )
@@ -341,20 +371,8 @@ class TreeMendousBackendManager:
         initially_available: bool = True,
         **constructor_options: Any,
     ) -> RangeSet:
-        if backend_id is None or backend_id == "auto":
-            spec = select_backend(
-                CATALOG, self._probes, BackendRequest(require=require)
-            ).selected
-        else:
-            spec = self._spec(backend_id)
-            self._require_available(spec)
-            if not require <= spec.capabilities:
-                raise BackendUnavailableError(
-                    f"backend {backend_id} lacks required capabilities"
-                )
-        args = dict(spec.constructor_args)
-        args.update(constructor_options)
-        implementation = spec.loader()(**args)
+        spec = self._resolve_spec(backend_id, require)
+        implementation = self._construct(spec, constructor_options)
         return RangeSet(
             self._adapter(spec, implementation),
             domain=domain,
@@ -367,34 +385,23 @@ class TreeMendousBackendManager:
         return select_backend(CATALOG, self._probes, BackendRequest()).selected.id
 
     def get_available_backends(self) -> dict[str, RuntimeBackendInfo]:
-        return {
-            backend_id: info
-            for backend_id, info in self._infos.items()
-            if info.config.available
-        }
+        return self._available_matching(lambda info: True)
 
     def get_backends_by_type(
         self, impl_type: ImplementationType
     ) -> dict[str, RuntimeBackendInfo]:
-        return {
-            key: info
-            for key, info in self.get_available_backends().items()
-            if info.config.implementation_type is impl_type
-        }
+        return self._available_matching(
+            lambda info: info.config.implementation_type is impl_type
+        )
 
     def get_backends_by_language(self, language: str) -> dict[str, RuntimeBackendInfo]:
-        return {
-            key: info
-            for key, info in self.get_available_backends().items()
-            if info.config.language.lower() == language.lower()
-        }
+        normalized = language.casefold()
+        return self._available_matching(
+            lambda info: info.config.language.casefold() == normalized
+        )
 
     def get_backends_with_feature(self, feature: str) -> dict[str, RuntimeBackendInfo]:
-        return {
-            key: info
-            for key, info in self.get_available_backends().items()
-            if feature in info.config.features or feature in info.detected_features
-        }
+        return self._available_matching(lambda info: _supports_feature(info, feature))
 
     def print_backend_status(self) -> None:
         for spec in CATALOG:

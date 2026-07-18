@@ -138,9 +138,9 @@ branch = true
 source = ["treemendous"]
 
 [tool.coverage.report]
-# Audited at 80.83% on Python 3.12 with every Python wrapper included; retain a
-# small platform margin while preventing regression below the measured 80% floor.
-fail_under = 80
+# Audited above 91% on Python 3.12 with every Python wrapper included; retain a
+# platform margin while preventing regression below the measured 90% floor.
+fail_under = 90
 show_missing = true
 skip_covered = true
 exclude_also = ["if TYPE_CHECKING:", "if __name__ == .__main__.:"]

@@ -166,7 +166,8 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-# Runtime orchestration artifacts must never be staged.
+# Runtime analysis/orchestration artifacts must never be staged.
+.codebase-index/
 .pi-subagents/
 
 # External docs/examples repositories remain local-only. The small maintained

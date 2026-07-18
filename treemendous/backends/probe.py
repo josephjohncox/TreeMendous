@@ -216,6 +216,13 @@ _CAPABILITY_PROBES = {
 }
 
 
+def _probe_capability(spec: BackendSpec, capability: Capability) -> None:
+    probe = _CAPABILITY_PROBES.get(capability)
+    if probe is None:
+        raise AssertionError(f"no semantic probe for {capability.name}")
+    probe(spec)
+
+
 def probe_backend(spec: BackendSpec) -> ProbeState:
     if spec.maturity is Maturity.EXPERIMENTAL:
         return Unavailable("experimental backend is excluded from stable selection")
@@ -223,19 +230,12 @@ def probe_backend(spec: BackendSpec) -> ProbeState:
         implementation = spec.loader()(**dict(spec.constructor_args))
     except Exception as exc:
         return Unavailable(f"load failed: {exc}")
-    validated: set[Capability] = set()
     try:
         if Capability.CORE in spec.capabilities:
             _probe_core(spec, implementation)
-            validated.add(Capability.CORE)
-        for capability in spec.capabilities - {Capability.CORE}:
-            probe = _CAPABILITY_PROBES.get(capability)
-            if probe is None:
-                raise AssertionError(f"no semantic probe for {capability.name}")
-            probe(spec)
-            validated.add(capability)
+        extra_capabilities = spec.capabilities - {Capability.CORE}
+        for capability in sorted(extra_capabilities, key=lambda item: item.value):
+            _probe_capability(spec, capability)
     except Exception as exc:
         return Invalid(f"semantic check failed: {exc}")
-    if validated != set(spec.capabilities):
-        return Invalid("semantic check did not validate every declared capability")
-    return Available(frozenset(validated))
+    return Available(spec.capabilities)

@@ -190,48 +190,6 @@ class IntervalTreap(IntervalTreeBase[TreapNode, Any]):
             node.update_stats()
         return node
 
-    def _delete(
-        self, node: TreapNode | None, start: int, end: int
-    ) -> tuple[TreapNode | None, bool]:
-        """Delete interval maintaining treap properties"""
-        if not node:
-            return None, False
-
-        if start < node.start or (start == node.start and end < node.end):
-            node.left, deleted = self._delete(node.left, start, end)
-            if node:
-                node.update_stats()
-            return node, deleted
-        elif start > node.start or end > node.end:
-            node.right, deleted = self._delete(node.right, start, end)
-            if node:
-                node.update_stats()
-            return node, deleted
-        else:
-            # Found exact match - delete this node
-            return self._delete_node(node), True
-
-    def _delete_node(self, node: TreapNode) -> TreapNode | None:
-        """Delete specific node using priority-based rotations"""
-        if not node.left:
-            return node.right
-        elif not node.right:
-            return node.left
-        else:
-            # Rotate with child having higher priority, then delete recursively
-            if node.left.priority > node.right.priority:
-                node = self._rotate_right(node)
-                assert node.right is not None
-                node.right = self._delete_node(node.right)
-            else:
-                node = self._rotate_left(node)
-                assert node.left is not None
-                node.left = self._delete_node(node.left)
-
-            if node:
-                node.update_stats()
-            return node
-
     def _delete_range(
         self, node: TreapNode | None, start: int, end: int
     ) -> TreapNode | None:
@@ -411,10 +369,6 @@ class IntervalTreap(IntervalTreeBase[TreapNode, Any]):
         result.append((node.start, node.end, node.data))
         self._inorder_traversal(node.right, result)
 
-    def _verify_bst_property(self, node: TreapNode | None) -> bool:
-        """Compatibility wrapper for the recursive propagated-bounds verifier."""
-        return self._verify_node(node, None, None)[0]
-
     def _verify_node(
         self, node: TreapNode | None, lower: int | None, upper: int | None
     ) -> tuple[bool, int, int, int, int | None, int | None]:
@@ -469,20 +423,6 @@ class IntervalTreap(IntervalTreeBase[TreapNode, Any]):
             expected_total,
             minimum_start,
             maximum_end,
-        )
-
-    def _verify_heap_property(self, node: TreapNode | None) -> bool:
-        """Verify heap property (parent priority ≥ child priorities)"""
-        if not node:
-            return True
-
-        if node.left and node.left.priority > node.priority:
-            return False
-        if node.right and node.right.priority > node.priority:
-            return False
-
-        return self._verify_heap_property(node.left) and self._verify_heap_property(
-            node.right
         )
 
     # Additional treap-specific operations

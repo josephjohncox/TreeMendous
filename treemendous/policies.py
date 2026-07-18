@@ -12,6 +12,11 @@ from treemendous.domain import Span
 D = TypeVar("D")
 
 
+def _require_subspan(source: Span, target: Span) -> None:
+    if not source.contains(target):
+        raise ValueError("restriction target must be contained in source")
+
+
 class PayloadPolicy(Protocol[D]):
     """Policy governing payload merge compatibility and split restriction."""
 
@@ -35,8 +40,7 @@ class UniformPayloadPolicy(Generic[D]):
         return left
 
     def restrict(self, data: D, source: Span, target: Span) -> D:
-        if not source.contains(target):
-            raise ValueError("restriction target must be contained in source")
+        _require_subspan(source, target)
         return copy(data) if self.copy_on_split else data
 
 
@@ -59,8 +63,7 @@ class JoinPayloadPolicy(Generic[D]):
         return self.join(left, right)
 
     def restrict(self, data: D, source: Span, target: Span) -> D:
-        if not source.contains(target):
-            raise ValueError("restriction target must be contained in source")
+        _require_subspan(source, target)
         return self.restrict_fn(data, source, target) if self.restrict_fn else data
 
 
@@ -95,8 +98,7 @@ class OrderedPayloadPolicy(Generic[D]):
         return self.combine_fn(left, right)
 
     def restrict(self, data: D, source: Span, target: Span) -> D:
-        if not source.contains(target):
-            raise ValueError("restriction target must be contained in source")
+        _require_subspan(source, target)
         return self.restrict_fn(data, source, target) if self.restrict_fn else data
 
 
@@ -122,8 +124,7 @@ class LegacyPayloadPolicy(Generic[D]):
         return left
 
     def restrict(self, data: D, source: Span, target: Span) -> D:
-        if not source.contains(target):
-            raise ValueError("restriction target must be contained in source")
+        _require_subspan(source, target)
         if self.split_fn:
             return self.split_fn(
                 data, source.start, source.end, target.start, target.end
