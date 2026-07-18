@@ -15,6 +15,34 @@ permissions:
   contents: read
 
 jobs:
+  quality:
+    name: Ruff / mypy / branch coverage / docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --all-extras
+      - run: uv lock --check
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy treemendous
+      - name: Branch coverage and strict test configuration
+        run: >-
+          uv run pytest
+          -m "not benchmark and not cuda and not metal and not icl"
+          --cov=treemendous --cov-branch --cov-config=pyproject.toml
+          --cov-report=term-missing
+      - name: Documentation and artifact policy contracts
+        run: >-
+          uv run pytest tests/docs tests/packaging/test_artifact_policy.py -q
+      - name: Bytecode sanity
+        run: >-
+          uv run python -m compileall -q treemendous tests scripts
+          setup.py setup_gpu.py setup_metal.py
+
   fast-python:
     name: Fast Python ${{ matrix.python }}
     runs-on: ubuntu-latest
@@ -89,7 +117,7 @@ jobs:
   package:
     name: Source and wheel policy / Linux
     runs-on: ubuntu-latest
-    needs: [fast-python, native-cpu]
+    needs: [quality, fast-python, native-cpu]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

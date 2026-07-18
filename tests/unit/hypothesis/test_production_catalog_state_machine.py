@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from hypothesis import assume, settings, strategies as st
+from hypothesis import assume, settings
+from hypothesis import strategies as st
 from hypothesis.stateful import (
     RuleBasedStateMachine,
     invariant,
@@ -14,8 +15,8 @@ from hypothesis.stateful import (
 )
 
 from treemendous.backends import (
-    Available,
     CATALOG,
+    Available,
     Capability,
     Invalid,
     Maturity,

@@ -6,28 +6,15 @@ with comprehensive summary statistics for O(1) analytics. This hybrid approach
 provides the best of both worlds: simple implementation with advanced analytics.
 """
 
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any
 
 from sortedcontainers import SortedDict
 
+from treemendous.basic.protocols import IntervalResult, PerformanceStats
 from treemendous.domain import ManagedDomain, Span, validate_coordinate, validate_length
-
-try:
-    from treemendous.basic.protocols import (
-        EnhancedIntervalManagerProtocol,
-        IntervalResult,
-        PerformanceStats,
-        PerformanceTrackingProtocol,
-    )
-except ImportError:
-    from protocols import (
-        EnhancedIntervalManagerProtocol,
-        IntervalResult,
-        PerformanceStats,
-        PerformanceTrackingProtocol,
-    )
 
 
 @dataclass
@@ -144,9 +131,7 @@ class BoundarySummary:
         )
 
 
-class BoundarySummaryManager(
-    EnhancedIntervalManagerProtocol[Any], PerformanceTrackingProtocol
-):
+class BoundarySummaryManager:
     """Boundary manager enhanced with comprehensive summary statistics"""
 
     def __init__(
@@ -485,120 +470,36 @@ def create_boundary_summary_manager() -> BoundarySummaryManager:
     return BoundarySummaryManager()
 
 
-def demo_boundary_summary_performance():
-    """Demonstrate boundary summary manager performance"""
-    print("🔄 Boundary Summary Manager Performance Demo")
-    print("=" * 50)
+def demo_boundary_summary_performance() -> None:
+    """Run the deprecated, deterministic boundary-summary console demo.
 
+    The historical function remains callable for compatibility, but importing
+    this module never runs it. Use the validated performance harness for timing.
+    """
+    warnings.warn(
+        "demo_boundary_summary_performance is deprecated; use the validated "
+        "performance harness instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     manager = BoundarySummaryManager()
-
-    # Initialize with large space
-    manager.release_interval(0, 10000)
-
-    print("Initial state:")
-    manager.print_intervals()
-
-    # Perform operations to create fragmentation
-    operations = [
-        ("reserve", 1000, 1500),
-        ("reserve", 3000, 3200),
-        ("reserve", 5000, 5800),
-        ("release", 2000, 2500),
-        ("reserve", 7000, 7300),
-        ("release", 6000, 6500),
-    ]
-
-    print(f"\nApplying {len(operations)} operations...")
-
-    for op, start, end in operations:
-        if op == "reserve":
+    manager.release_interval(0, 10_000)
+    for operation, start, end in (
+        ("reserve", 1_000, 1_500),
+        ("reserve", 3_000, 3_200),
+        ("reserve", 5_000, 5_800),
+        ("release", 2_000, 2_500),
+        ("reserve", 7_000, 7_300),
+        ("release", 6_000, 6_500),
+    ):
+        if operation == "reserve":
             manager.reserve_interval(start, end)
         else:
             manager.release_interval(start, end)
 
-        print(f"  {op.title()} [{start}, {end})")
-
-    print("\nFinal state:")
-    manager.print_intervals()
-
-    # Test advanced queries
-    print("\nAdvanced Queries:")
-
-    # Best fit test
-    best_fit = manager.find_best_fit(300)
-    if best_fit:
-        print(f"  Best fit (300 units): [{best_fit[0]}, {best_fit[1]})")
-
-    # Largest available
-    largest = manager.find_largest_available()
-    if largest:
-        print(
-            f"  Largest available: [{largest[0]}, {largest[1]}), size={largest[1] - largest[0]}"
-        )
-
-    # Performance stats
-    perf = manager.get_performance_stats()
-    print(
-        f"  Performance: {perf['operation_count']} ops, {perf['cache_hit_rate']:.1%} cache hit rate"
-    )
-
-
-if __name__ == "__main__":
-    import time
-
-    print("🏗️ Boundary-Based Summary Interval Tree")
-    print("Combining boundary management efficiency with summary analytics")
-    print("=" * 60)
-
-    demo_boundary_summary_performance()
-
-    # Performance comparison with regular boundary manager
-    print("\n⚡ Performance Comparison")
-    print("-" * 30)
-
-    # Test boundary summary manager
-    manager = BoundarySummaryManager()
-    manager.release_interval(0, 100000)
-
-    # Time operations
-    operations = []
-    for _ in range(5000):
-        op = ["reserve", "release"][_ % 2]
-        start = (_ * 17) % 90000
-        end = start + ((_ * 13) % 1000) + 1
-        operations.append((op, start, end))
-
-    start_time = time.perf_counter()
-    for op, start, end in operations:
-        if op == "reserve":
-            manager.reserve_interval(start, end)
-        else:
-            manager.release_interval(start, end)
-
-    # Time summary access
-    summary_start = time.perf_counter()
-    for _ in range(1000):
-        stats = manager.get_availability_stats()
-    summary_time = time.perf_counter() - summary_start
-
-    total_time = time.perf_counter() - start_time
-
-    print("Boundary Summary Manager:")
-    print(
-        f"  Operations: {len(operations):,} in {total_time:.3f}s ({len(operations) / total_time:,.0f} ops/sec)"
-    )
-    print(
-        f"  Summary queries: 1000 in {summary_time * 1000:.1f}ms ({summary_time * 1000:.3f}ms avg)"
-    )
-    print(f"  Final intervals: {len(manager.intervals)}")
-
-    perf = manager.get_performance_stats()
-    print(f"  Cache performance: {perf['cache_hit_rate']:.1%} hit rate")
-
-    print("\n✅ Boundary summary demonstration complete!")
-    print("Key advantages:")
-    print("  • Simple boundary-based implementation")
-    print("  • O(1) summary statistics with caching")
-    print("  • Advanced queries (best-fit, largest available)")
-    print("  • Performance monitoring and optimization")
-    print("  • Graceful fallback when SortedContainers unavailable")
+    summary = manager.get_summary()
+    performance = manager.get_performance_stats()
+    print("Boundary Summary Manager Performance Demo")
+    print(f"Total free: {summary.total_free_length}")
+    print(f"Intervals: {summary.interval_count}")
+    print(f"Operations: {performance.operation_count}")

@@ -11,6 +11,7 @@ from typing import Any, Protocol, TypeVar
 from treemendous.domain import AvailabilityStats, IntervalResult
 
 D = TypeVar("D")
+D_contra = TypeVar("D_contra", contravariant=True)
 
 
 class PerformanceTier(Enum):
@@ -77,15 +78,21 @@ class IntervalNodeProtocol(Protocol[D]):
     def update_length(self) -> None: ...
 
 
-class CoreIntervalManagerProtocol(Protocol[D]):
-    def release_interval(self, start: int, end: int, data: D | None = None) -> None: ...
-    def reserve_interval(self, start: int, end: int, data: D | None = None) -> None: ...
+class CoreIntervalManagerProtocol(Protocol[D_contra]):
+    def release_interval(
+        self, start: int, end: int, data: D_contra | None = None
+    ) -> None: ...
+    def reserve_interval(
+        self, start: int, end: int, data: D_contra | None = None
+    ) -> None: ...
     def find_interval(self, start: int, length: int) -> IntervalResult | None: ...
     def get_intervals(self) -> list[IntervalResult]: ...
     def get_total_available_length(self) -> int: ...
 
 
-class EnhancedIntervalManagerProtocol(CoreIntervalManagerProtocol[D], Protocol[D]):
+class EnhancedIntervalManagerProtocol(
+    CoreIntervalManagerProtocol[D_contra], Protocol[D_contra]
+):
     def get_availability_stats(self) -> AvailabilityStats: ...
     def find_best_fit(
         self, length: int, prefer_early: bool = True

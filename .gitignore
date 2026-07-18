@@ -166,11 +166,20 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-# Repository Structure - Separate Repos
-# These directories are maintained in separate repositories for better organization
-# Use ./scripts/setup-dev-links.sh to create symlinks for unified development
-examples/
-docs/
+# Runtime orchestration artifacts must never be staged.
+.pi-subagents/
 
-# Development symlinks (created by setup-dev-links.sh)  
-# These allow unified development experience while maintaining repo separation
+# External docs/examples repositories remain local-only. The small maintained
+# user contract below is intentionally tracked in this repository.
+docs/*
+!docs/getting-started.md
+!docs/api.md
+!docs/backends.md
+!docs/building.md
+!docs/benchmarking.md
+!docs/contributing.md
+!docs/releasing.md
+examples/*
+!examples/basic_rangeset.py
+
+# Development symlinks (created by setup-dev-links.sh)

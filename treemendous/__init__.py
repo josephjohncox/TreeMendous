@@ -1,5 +1,8 @@
 """Tree-Mendous public range-set interface."""
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _metadata_version
+
 from treemendous.backend_manager import (
     TreeMendousBackendManager,
     UnifiedIntervalManager,
@@ -47,7 +50,16 @@ from treemendous.policies import (
 )
 from treemendous.rangeset import RangeSet
 
-__version__ = "0.2.5"
+
+def _resolve_version() -> str:
+    """Return installed metadata version or a clear source-checkout fallback."""
+    try:
+        return _metadata_version("treemendous")
+    except PackageNotFoundError:
+        return "0.0.0+dev"
+
+
+__version__ = _resolve_version()
 __author__ = "Joseph Cox"
 __description__ = (
     "High-performance interval tree implementations with unified backend management"

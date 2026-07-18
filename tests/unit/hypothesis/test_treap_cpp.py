@@ -5,7 +5,8 @@ Tests verify C++ treap maintains correctness and performance while
 providing identical functionality to Python implementation.
 """
 
-from hypothesis import given, strategies as st
+from hypothesis import given
+from hypothesis import strategies as st
 
 # Try to import C++ treap
 try:

@@ -1,6 +1,9 @@
-from hypothesis import given, assume, strategies as st
+from typing import List, Optional, Set, Tuple
+
+from hypothesis import assume, given
+from hypothesis import strategies as st
+
 from treemendous.basic.avl_earliest import EarliestIntervalNode, EarliestIntervalTree
-from typing import List, Tuple, Optional, Set
 
 
 @given(

@@ -1,7 +1,10 @@
+from typing import List, Tuple
+
 import pytest
-from hypothesis import assume, given, strategies as st
+from hypothesis import assume, given
+from hypothesis import strategies as st
+
 from treemendous.basic.boundary import IntervalManager
-from typing import List, Tuple, Optional
 
 
 @given(

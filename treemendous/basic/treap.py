@@ -12,21 +12,8 @@ import random
 from collections.abc import Callable
 from typing import Any, Optional
 
-try:
-    from treemendous.basic.base import IntervalNodeBase, IntervalTreeBase
-    from treemendous.basic.protocols import (
-        CoreIntervalManagerProtocol,
-        IntervalResult,
-        RandomizedProtocol,
-    )
-except ImportError:
-    from base import IntervalNodeBase, IntervalTreeBase
-    from protocols import (
-        CoreIntervalManagerProtocol,
-        IntervalResult,
-        RandomizedProtocol,
-    )
-
+from treemendous.basic.base import IntervalNodeBase, IntervalTreeBase
+from treemendous.basic.protocols import IntervalResult
 from treemendous.domain import Span, validate_coordinate, validate_length
 
 
@@ -63,10 +50,6 @@ class TreapNode(IntervalNodeBase["TreapNode", Any]):
 
         self.height = 1 + max(self.get_height(self.left), self.get_height(self.right))
 
-    def length(self) -> int:
-        """Get interval length"""
-        return self.end - self.start
-
     @staticmethod
     def get_height(node: Optional["TreapNode"]) -> int:
         return node.height if node else 0
@@ -76,11 +59,7 @@ class TreapNode(IntervalNodeBase["TreapNode", Any]):
         return node.subtree_size if node else 0
 
 
-class IntervalTreap(
-    IntervalTreeBase[TreapNode, Any],
-    CoreIntervalManagerProtocol[Any],
-    RandomizedProtocol,
-):
+class IntervalTreap(IntervalTreeBase[TreapNode, Any]):
     """Randomized interval tree using treap structure"""
 
     def __init__(
@@ -160,7 +139,7 @@ class IntervalTreap(
 
     def get_intervals(self) -> list[IntervalResult]:
         """Get all available intervals in sorted order"""
-        intervals = []
+        intervals: list[tuple[int, int, Any | None]] = []
         self._inorder_traversal(self.root, intervals)
         return [
             IntervalResult(start=start, end=end, data=data)
@@ -242,9 +221,11 @@ class IntervalTreap(
             # Rotate with child having higher priority, then delete recursively
             if node.left.priority > node.right.priority:
                 node = self._rotate_right(node)
+                assert node.right is not None
                 node.right = self._delete_node(node.right)
             else:
                 node = self._rotate_left(node)
+                assert node.left is not None
                 node.left = self._delete_node(node.left)
 
             if node:
@@ -609,7 +590,7 @@ class IntervalTreap(
     def find_overlapping_intervals(self, start: int, end: int) -> list[tuple[int, int]]:
         """Find all intervals overlapping with query range"""
         Span(start, end)
-        result = []
+        result: list[tuple[int, int]] = []
         self._find_overlapping(self.root, start, end, result)
         return result
 
@@ -661,47 +642,3 @@ class IntervalTreap(
 
 
 # Example usage and testing
-if __name__ == "__main__":
-    import math
-
-    print("🌳 Treap Interval Tree Demonstration")
-    print("=" * 40)
-
-    treap = IntervalTreap(random_seed=42)
-
-    # Test basic operations
-    print("Inserting intervals...")
-    intervals = [(10, 20), (30, 40), (15, 25), (50, 60), (5, 15)]
-
-    for start, end in intervals:
-        treap.release_interval(start, end)
-
-    print(f"Tree size: {treap.get_tree_size()}")
-    print(f"Total length: {treap.get_total_available_length()}")
-
-    stats = treap.get_statistics()
-    print(f"Height: {stats['height']} (expected: {stats['expected_height']:.1f})")
-    print(f"Balance factor: {stats['balance_factor']:.2f}")
-
-    print("\nTree structure:")
-    treap.print_tree()
-
-    # Test properties
-    print(f"\nTreap properties verified: {treap.verify_treap_properties()}")
-
-    # Test operations
-    print(f"\nOverlapping with [12, 35]: {treap.find_overlapping_intervals(12, 35)}")
-
-    # Test random sampling
-    print("\nRandom samples:")
-    for _ in range(3):
-        sample = treap.sample_random_interval()
-        print(f"  {sample}")
-
-    # Test split operation
-    print("\nSplitting at key 25:")
-    left_treap, right_treap = treap.split(25)
-    print(f"  Left treap: {left_treap.get_tree_size()} intervals")
-    print(f"  Right treap: {right_treap.get_tree_size()} intervals")
-
-    print("\n✅ Treap demonstration complete!")

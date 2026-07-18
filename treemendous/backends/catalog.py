@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from types import MappingProxyType
 from typing import Any
 
@@ -13,7 +14,7 @@ def _load(path: str, name: str) -> type[Any]:
     return getattr(module, name)
 
 
-def _loader(path: str, name: str):
+def _loader(path: str, name: str) -> Callable[[], type[Any]]:
     return lambda: _load(path, name)
 
 

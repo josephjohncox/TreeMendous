@@ -176,18 +176,19 @@ profile-cpp: install-dev
 
 # Development utilities
 check: install-dev
-    uv run python -m py_compile treemendous/basic/*.py
-    uv run python -m py_compile tests/test_*_simple.py
+    uv run ruff check .
+    uv run ruff format --check .
+    uv run mypy treemendous
+    uv run pytest -m "not benchmark and not cuda and not metal and not icl" --cov=treemendous --cov-branch --cov-config=pyproject.toml --cov-report=term-missing
+    uv run pytest tests/packaging/test_artifact_policy.py tests/docs -q
+    uv run python -m compileall -q treemendous tests scripts setup.py setup_gpu.py setup_metal.py
 
 validate: test check
     @echo "✅ Tree-Mendous validation complete"
 
-# Examples (simplified)
+# Maintained public example
 run-examples: install-dev
-    @echo "🚀 Running key examples..."
-    python examples/randomized_algorithms/treap_implementation.py
-    python examples/deadline_scheduling/realtime_scheduler.py
-    python examples/backend_comparison_demo.py
+    uv run python examples/basic_rangeset.py
 
 # Version management
 version:
@@ -250,16 +251,6 @@ bump-version type:
     # Update pyproject.toml
     sed -i.bak "s/^version = \".*\"/version = \"$new_version\"/" pyproject.toml
     rm pyproject.toml.bak
-    
-    # Update __init__.py if it exists
-    if [[ -f "treemendous/__init__.py" ]]; then
-        if grep -q "__version__" treemendous/__init__.py; then
-            sed -i.bak "s/__version__ = \".*\"/__version__ = \"$new_version\"/" treemendous/__init__.py
-            rm treemendous/__init__.py.bak
-        else
-            echo "__version__ = \"$new_version\"" >> treemendous/__init__.py
-        fi
-    fi
     
     echo "✅ Version bumped to $new_version"
 

@@ -6,7 +6,6 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from treemendous import IntervalResult, Span, create_range_set
 from tests.performance.accelerator_benchmark import (
     HardwareUnavailableError,
     _load_accelerator_class,
@@ -32,6 +31,7 @@ from tests.performance.workload import (
     fragmented_workload,
     scheduling_workload,
 )
+from treemendous import IntervalResult, Span, create_range_set
 
 pytestmark = pytest.mark.unit
 

@@ -1,85 +1,72 @@
-"""
-Metal-Accelerated Implementations
+"""Diagnostics and raw factories for the experimental macOS Metal backend."""
 
-This module provides Metal/MPS-accelerated interval tree implementations for macOS.
-Works with Apple Silicon (M1/M2/M3/M4) and Intel Macs with AMD GPUs.
-"""
+from __future__ import annotations
 
-from typing import Optional
 import platform
+import warnings
+from importlib import import_module
+from types import ModuleType
+from typing import Any
 
-# Check if we're on macOS
-IS_MACOS = platform.system() == 'Darwin'
-
-# Try to import Metal module
+IS_MACOS = platform.system() == "Darwin"
+boundary_summary_metal: ModuleType | None = None
+MixedBoundarySummaryManager: type[Any] | None = None
 METAL_AVAILABLE = False
+
 if IS_MACOS:
     try:
-        from . import boundary_summary_metal
-        METAL_AVAILABLE = boundary_summary_metal.METAL_AVAILABLE
-        from .mixed import MixedBoundarySummaryManager
-    except ImportError as e:
-        _import_error = str(e)
+        boundary_summary_metal = import_module(f"{__name__}.boundary_summary_metal")
+        METAL_AVAILABLE = bool(boundary_summary_metal.METAL_AVAILABLE)
+        mixed_module = import_module(f"{__name__}.mixed")
+        MixedBoundarySummaryManager = mixed_module.MixedBoundarySummaryManager
+    except ImportError:
         boundary_summary_metal = None
         MixedBoundarySummaryManager = None
-else:
-    boundary_summary_metal = None
-    MixedBoundarySummaryManager = None
 
 
 def is_metal_available() -> bool:
-    """Check if Metal acceleration is available"""
+    """Return whether the raw Metal extension reports an available device."""
     return METAL_AVAILABLE
 
 
-def get_metal_info() -> dict:
-    """Get Metal device information"""
+def get_metal_info() -> dict[str, Any]:
+    """Return Metal device diagnostics."""
     if not IS_MACOS:
+        return {"available": False, "error": "Metal is only available on macOS"}
+    if not METAL_AVAILABLE or boundary_summary_metal is None:
         return {
             "available": False,
-            "error": "Metal is only available on macOS",
+            "error": "Metal module unavailable; build with `just build-metal`",
         }
-    
-    if not METAL_AVAILABLE:
-        return {
-            "available": False,
-            "error": "Metal module not available. Build with: python setup_metal.py build_ext --inplace",
-        }
-    
     try:
-        info = boundary_summary_metal.get_metal_device_info()
-        return info
-    except Exception as e:
-        return {
-            "available": False,
-            "error": str(e),
-        }
+        result: Any = boundary_summary_metal.get_metal_device_info()
+        return dict(result)
+    except Exception as exc:
+        return {"available": False, "error": str(exc)}
 
 
-def create_metal_manager():
-    """Create a Metal-accelerated boundary summary manager"""
-    if not METAL_AVAILABLE:
+def create_metal_manager() -> Any:
+    """Create the raw experimental Metal manager when its device is available."""
+    if not METAL_AVAILABLE or boundary_summary_metal is None:
         raise ImportError(
-            "Metal acceleration not available. "
-            "Build with: python setup_metal.py build_ext --inplace"
+            "Metal acceleration unavailable; build with `just build-metal`"
         )
-    
-    return boundary_summary_metal.MetalBoundarySummaryManager()
+    manager_type: Any = boundary_summary_metal.MetalBoundarySummaryManager
+    return manager_type()
 
 
 def create_mixed_metal_manager(
-    summary_path: Optional[str] = None,
-    best_fit_path: Optional[str] = None,
-    best_fit_min_intervals: Optional[int] = None,
-    summary_min_intervals: Optional[int] = None,
-    sync_cpu: Optional[bool] = None,
-    track_allocations: Optional[bool] = None,
-):
-    """Create a mixed CPU/Metal boundary summary manager."""
-    if not METAL_AVAILABLE:
+    summary_path: str | None = None,
+    best_fit_path: str | None = None,
+    best_fit_min_intervals: int | None = None,
+    summary_min_intervals: int | None = None,
+    sync_cpu: bool | None = None,
+    track_allocations: bool | None = None,
+) -> Any:
+    """Create the raw mixed CPU/Metal manager when available."""
+    if not METAL_AVAILABLE or MixedBoundarySummaryManager is None:
         raise ImportError(
-            "Metal acceleration not available. "
-            "Build with: python setup_metal.py build_ext --inplace"
+            "Metal acceleration unavailable; build with `just build-metal`"
         )
     return MixedBoundarySummaryManager(
         summary_path=summary_path,
@@ -91,40 +78,38 @@ def create_mixed_metal_manager(
     )
 
 
-def benchmark_metal_speedup(num_intervals: int = 10000, num_operations: int = 5000) -> dict:
+def benchmark_metal_speedup(
+    num_intervals: int = 10_000, num_operations: int = 5_000
+) -> dict[str, Any]:
+    """Run the legacy experimental native benchmark when Metal is available.
+
+    This compatibility API is deprecated because project benchmarks use the
+    oracle-validated harness under ``tests/performance``.
     """
-    Benchmark Metal vs CPU speedup
-    
-    Args:
-        num_intervals: Number of intervals to test with
-        num_operations: Number of operations to perform
-        
-    Returns:
-        Dictionary with benchmark results including speedup factor
-    """
-    if not METAL_AVAILABLE:
+    warnings.warn(
+        "benchmark_metal_speedup is deprecated and experimental; use the "
+        "validated performance harness instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    if not METAL_AVAILABLE or boundary_summary_metal is None:
+        return {"error": "Metal not available", "available": False}
+    benchmark = getattr(boundary_summary_metal, "benchmark_metal_speedup", None)
+    if benchmark is None:
         return {
-            "error": "Metal not available",
-            "available": False,
+            "error": "Metal extension does not provide the legacy benchmark",
+            "available": True,
         }
-    
-    return boundary_summary_metal.benchmark_metal_speedup(num_intervals, num_operations)
+    result: Any = benchmark(num_intervals, num_operations)
+    return dict(result)
 
 
-# Export symbols
 __all__ = [
-    'METAL_AVAILABLE',
-    'IS_MACOS',
-    'is_metal_available',
-    'get_metal_info',
-    'create_metal_manager',
-    'create_mixed_metal_manager',
-    'benchmark_metal_speedup',
+    "IS_MACOS",
+    "METAL_AVAILABLE",
+    "benchmark_metal_speedup",
+    "create_metal_manager",
+    "create_mixed_metal_manager",
+    "get_metal_info",
+    "is_metal_available",
 ]
-
-# Conditional exports
-if METAL_AVAILABLE:
-    __all__.extend([
-        'boundary_summary_metal',
-        'MixedBoundarySummaryManager',
-    ])

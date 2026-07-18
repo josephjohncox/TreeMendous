@@ -10,14 +10,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from treemendous.basic.base import IntervalNodeBase, IntervalTreeBase
 from treemendous.domain import ManagedDomain, Span, validate_coordinate, validate_length
-
-try:
-    from treemendous.basic.base import IntervalNodeBase, IntervalTreeBase
-    from treemendous.basic.protocols import EnhancedIntervalManagerProtocol
-except ImportError:
-    from base import IntervalNodeBase, IntervalTreeBase
-    from protocols import EnhancedIntervalManagerProtocol
 
 
 @dataclass(frozen=True)
@@ -155,9 +149,7 @@ class SummaryIntervalNode(IntervalNodeBase["SummaryIntervalNode", Any]):
         return node.height if node else 0
 
 
-class SummaryIntervalTree(
-    IntervalTreeBase[SummaryIntervalNode, Any], EnhancedIntervalManagerProtocol[Any]
-):
+class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode, Any]):
     """AVL interval tree with summary statistics for efficient scheduling"""
 
     def __init__(
@@ -571,12 +563,16 @@ class SummaryIntervalTree(
             # Left heavy
             if self._get_balance(node.left) < 0:
                 node.left = self._rotate_left(node.left)
-            node = self._rotate_right(node)
+            rotated = self._rotate_right(node)
+            assert rotated is not None
+            node = rotated
         elif balance < -1:
             # Right heavy
             if self._get_balance(node.right) > 0:
                 node.right = self._rotate_right(node.right)
-            node = self._rotate_left(node)
+            rotated = self._rotate_left(node)
+            assert rotated is not None
+            node = rotated
 
         return node
 
@@ -624,54 +620,3 @@ class SummaryIntervalTree(
 
 
 # Example usage and demonstration
-if __name__ == "__main__":
-    tree = SummaryIntervalTree()
-
-    print("=== Enhanced Interval Tree with Summary Statistics ===")
-
-    # Initialize with full day available
-    tree.release_interval(0, 86400)  # 24 hours in seconds
-    print("\nInitial state:")
-    tree.print_tree()
-
-    stats = tree.get_availability_stats()
-    print("\nAvailability Stats:")
-    for key, value in stats.items():
-        print(f"  {key}: {value}")
-
-    # Schedule some meetings
-    print("\n=== Scheduling Operations ===")
-
-    # 9 AM - 10 AM meeting
-    tree.reserve_interval(32400, 36000)
-    print("\nAfter reserving 9-10 AM:")
-
-    # 2 PM - 4 PM meeting
-    tree.reserve_interval(50400, 57600)
-    print("After reserving 2-4 PM:")
-
-    stats = tree.get_availability_stats()
-    print("\nUpdated Stats:")
-    for key, value in stats.items():
-        print(f"  {key}: {value}")
-
-    # Find best available slots
-    print("\n=== Intelligent Scheduling Queries ===")
-
-    # Find 2-hour slot
-    best_slot = tree.find_best_fit(7200)  # 2 hours
-    if best_slot:
-        start_hour = best_slot[0] // 3600
-        print(f"Best 2-hour slot: {start_hour}:00-{start_hour + 2}:00")
-
-    # Find largest available block
-    largest = tree.find_largest_available()
-    if largest:
-        duration_hours = (largest[1] - largest[0]) // 3600
-        start_hour = largest[0] // 3600
-        print(
-            f"Largest available block: {duration_hours} hours starting at {start_hour}:00"
-        )
-
-    print("\nTree structure with summaries:")
-    tree.print_tree()

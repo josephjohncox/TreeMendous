@@ -8,10 +8,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from treemendous import list_available_backends
-
 from tests.performance.harness import benchmark_backends
 from tests.performance.workload import fragmented_workload, scheduling_workload
+from treemendous import list_available_backends
 
 
 def _parser() -> argparse.ArgumentParser:

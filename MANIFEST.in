@@ -24,3 +24,11 @@ prune dist
 prune wheelhouse
 prune .venv
 prune treemendous.egg-info
+include docs/getting-started.md
+include docs/api.md
+include docs/backends.md
+include docs/building.md
+include docs/benchmarking.md
+include docs/contributing.md
+include docs/releasing.md
+include examples/basic_rangeset.py

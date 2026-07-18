@@ -1,13 +1,12 @@
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from treemendous.basic.avl import IntervalNode, IntervalTree
-from treemendous.basic.base import IntervalNodeProtocol
-from treemendous.basic.protocols import CoreIntervalManagerProtocol, IntervalResult
+from treemendous.basic.protocols import IntervalResult
 from treemendous.domain import validate_coordinate, validate_length
 
 
-class EarliestIntervalNode(IntervalNode, IntervalNodeProtocol):
+class EarliestIntervalNode(IntervalNode):
     def __init__(self, start: int, end: int, data: Any | None = None) -> None:
         super().__init__(start, end, data)
         self.min_start: int = start
@@ -33,9 +32,7 @@ class EarliestIntervalNode(IntervalNode, IntervalNodeProtocol):
             self.max_length = max(self.max_length, self.right.max_length)
 
 
-class EarliestIntervalTree(
-    IntervalTree[EarliestIntervalNode], CoreIntervalManagerProtocol[Any]
-):
+class EarliestIntervalTree(IntervalTree[EarliestIntervalNode]):
     def __init__(
         self,
         merge_fn: Callable[[Any, Any], Any] | None = None,
@@ -90,31 +87,43 @@ class EarliestIntervalTree(
         # Case 1: start is within the interval and there's enough space
         if node.start <= start < node.end and (node.end - start) >= length:
             # This interval works, but check if there's an earlier one
-            left_candidate = self._find_interval(node.left, start, length)
+            left_candidate = self._find_interval(
+                cast(EarliestIntervalNode | None, node.left), start, length
+            )
             return left_candidate if left_candidate else node
 
         # Case 2: start is before this interval and interval is large enough
         elif start <= node.start and (node.end - node.start) >= length:
             # This interval works, but check if there's an earlier one
-            left_candidate = self._find_interval(node.left, start, length)
+            left_candidate = self._find_interval(
+                cast(EarliestIntervalNode | None, node.left), start, length
+            )
             return left_candidate if left_candidate else node
 
         # Case 3: start is after this interval's end
         elif start >= node.end:
-            return self._find_interval(node.right, start, length)
+            return self._find_interval(
+                cast(EarliestIntervalNode | None, node.right), start, length
+            )
 
         # Case 4: start is before this interval's start but interval is too small
         elif start < node.start:
             # Check both subtrees
-            left_candidate = self._find_interval(node.left, start, length)
+            left_candidate = self._find_interval(
+                cast(EarliestIntervalNode | None, node.left), start, length
+            )
             if left_candidate:
                 return left_candidate
-            return self._find_interval(node.right, start, length)
+            return self._find_interval(
+                cast(EarliestIntervalNode | None, node.right), start, length
+            )
 
         # Case 5: start is within interval but not enough space remaining
         else:
             # Check right subtree for intervals starting after this one
-            return self._find_interval(node.right, start, length)
+            return self._find_interval(
+                cast(EarliestIntervalNode | None, node.right), start, length
+            )
 
     def _insert(
         self, node: EarliestIntervalNode | None, new_node: EarliestIntervalNode
@@ -125,65 +134,3 @@ class EarliestIntervalTree(
 
 
 # Example usage:
-if __name__ == "__main__":
-    tree = EarliestIntervalTree()
-    # Initially, the whole interval [0, 100) is available
-    tree.release_interval(0, 100)
-    print("Initial tree:")
-    tree.print_tree()
-    print(f"Total available length: {tree.get_total_available_length()}")
-
-    # Schedule interval [0, 1
-    tree.reserve_interval(0, 1)
-    print("\nAfter scheduling [0, 1]:")
-    tree.print_tree()
-    print(f"Total available length: {tree.get_total_available_length()}")
-
-    # Unschedule interval [0, 1]
-    tree.release_interval(0, 1)
-    print("\nAfter unscheduling [0, 1]:")
-    tree.print_tree()
-    print(f"Total available length: {tree.get_total_available_length()}")
-
-    # Schedule interval [1, 2]
-    tree.reserve_interval(1, 3)
-    print("\nAfter scheduling [1, 3]:")
-    tree.print_tree()
-    print(f"Total available length: {tree.get_total_available_length()}")
-
-    # Schedule interval [2, 3]
-    tree.reserve_interval(2, 5)
-    print("\nAfter scheduling [2, 5]:")
-    tree.print_tree()
-    print(f"Total available length: {tree.get_total_available_length()}")
-
-    # Schedule interval [10, 20)
-    tree.reserve_interval(10, 20)
-    print("\nAfter scheduling [10, 20):")
-    tree.print_tree()
-    print(f"Total available length: {tree.get_total_available_length()}")
-
-    # Schedule interval [15, 25)
-    tree.reserve_interval(15, 25)
-    print("\nAfter scheduling [15, 25):")
-    tree.print_tree()
-    print(f"Total available length: {tree.get_total_available_length()}")
-
-    # Find interval starting at or after 18 with length at least 5
-    result = tree.find_interval(18, 5)
-    if result:
-        print(f"\nFound interval: [{result.start}, {result.end})")
-    else:
-        print("\nNo suitable interval found.")
-
-    # Unschedule interval [10, 20)
-    tree.release_interval(10, 20)
-    print("\nAfter unscheduling [10, 20):")
-    tree.print_tree()
-    print(f"Total available length: {tree.get_total_available_length()}")
-
-    # Delete interval overlapping multiple intervals
-    tree.reserve_interval(5, 15)
-    print("\nAfter deleting interval [5, 15):")
-    tree.print_tree()
-    print(f"Total available length: {tree.get_total_available_length()}")

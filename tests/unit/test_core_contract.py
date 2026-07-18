@@ -8,7 +8,7 @@ from threading import Event, Thread
 import pytest
 
 import treemendous
-from treemendous.backends import Available, CATALOG, Invalid, Maturity, probe_backend
+from treemendous.backends import CATALOG, Available, Invalid, Maturity, probe_backend
 from treemendous.backends.adapters import PythonBackendAdapter
 from treemendous.basic.avl import IntervalNode, IntervalTree
 from treemendous.basic.avl_earliest import EarliestIntervalTree
@@ -23,7 +23,6 @@ from treemendous.policies import (
     UniformPayloadPolicy,
 )
 from treemendous.rangeset import RangeSet
-
 
 PYTHON_FACTORIES = [
     IntervalManager,

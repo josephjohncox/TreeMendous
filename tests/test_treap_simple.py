@@ -5,9 +5,9 @@ Simple Treap Tests
 Basic functionality tests for treap implementation without external dependencies.
 """
 
-import sys
-import random
 import math
+import random
+import sys
 from pathlib import Path
 
 # Add paths for import resolution

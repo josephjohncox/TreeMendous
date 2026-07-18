@@ -2,6 +2,7 @@
 
 __experimental__ = True
 from treemendous.basic.base import IntervalNodeBase, IntervalTreeBase
+from treemendous.domain import IntervalResult
 
 
 class SegmentTreeNode(IntervalNodeBase["SegmentTreeNode", None]):
@@ -75,36 +76,18 @@ class SegmentTree(IntervalTreeBase[SegmentTreeNode, None]):
     def unschedule_interval(self, start: int, end: int) -> None:
         self._update(self.root, start, end, True)
 
+    def get_intervals(self) -> list[IntervalResult]:
+        """Return available leaf geometry for direct experimental users."""
+        result: list[IntervalResult] = []
 
-# Example usage:
-if __name__ == "__main__":
-    # Initialize segment tree with interval [0, 100)
-    tree = SegmentTree(0, 100)
-    tree.build()
-    print("Initial tree:")
-    tree.print_tree()
-    print(f"Total available length: {tree.get_total_available_length()}")
+        def collect(node: SegmentTreeNode | None) -> None:
+            if node is None or node.total_length == 0:
+                return
+            if node.is_full:
+                result.append(IntervalResult(node.start, node.end))
+                return
+            collect(node.left)
+            collect(node.right)
 
-    # Schedule interval [10, 20)
-    tree.schedule_interval(10, 20)
-    print("\nAfter scheduling [10, 20):")
-    tree.print_tree()
-    print(f"Total available length: {tree.get_total_available_length()}")
-
-    # Schedule interval [30, 40)
-    tree.schedule_interval(30, 40)
-    print("\nAfter scheduling [30, 40):")
-    tree.print_tree()
-    print(f"Total available length: {tree.get_total_available_length()}")
-
-    # Unschedule interval [10, 20)
-    tree.unschedule_interval(10, 20)
-    print("\nAfter unscheduling [10, 20):")
-    tree.print_tree()
-    print(f"Total available length: {tree.get_total_available_length()}")
-
-    # Split at pivot 50 (schedule [50, 50))
-    tree.schedule_interval(50, 50)
-    print("\nAfter splitting at pivot 50:")
-    tree.print_tree()
-    print(f"Total available length: {tree.get_total_available_length()}")
+        collect(self.root)
+        return result

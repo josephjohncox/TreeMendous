@@ -13,8 +13,6 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from treemendous.basic.protocols import standardize_intervals_list
-
 from tests.performance.accelerator_benchmark import (
     HardwareUnavailableError,
     _load_accelerator_class,
@@ -27,6 +25,7 @@ from tests.performance.harness import (
     oracle_summary,
     timing_statistics,
 )
+from treemendous.basic.protocols import standardize_intervals_list
 
 
 def contiguous_same_operation_runs(

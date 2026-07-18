@@ -12,14 +12,13 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from treemendous.backends import CATALOG_BY_ID, Runtime
-
 from tests.performance.harness import (
     BenchmarkWorkload,
     environment_metadata,
     timing_statistics,
 )
 from tests.performance.workload import immutable_query_workload
+from treemendous.backends import CATALOG_BY_ID, Runtime
 
 
 class HardwareUnavailableError(RuntimeError):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Generic, Protocol, TypeVar
+from typing import Any, Generic, Protocol, TypeVar, cast
 
 from treemendous.domain import (
     IntervalResult,
@@ -30,12 +30,17 @@ class IntervalNodeProtocol(Protocol[D]):
     def update_length(self) -> None: ...
 
 
-T = TypeVar("T", bound=IntervalNodeProtocol)
+T = TypeVar("T")
+D_contra = TypeVar("D_contra", contravariant=True)
 
 
-class IntervalManagerProtocol(Protocol[D]):
-    def reserve_interval(self, start: int, end: int, data: D | None = None) -> None: ...
-    def release_interval(self, start: int, end: int, data: D | None = None) -> None: ...
+class IntervalManagerProtocol(Protocol[D_contra]):
+    def reserve_interval(
+        self, start: int, end: int, data: D_contra | None = None
+    ) -> None: ...
+    def release_interval(
+        self, start: int, end: int, data: D_contra | None = None
+    ) -> None: ...
     def find_interval(self, start: int, length: int) -> IntervalResult | None: ...
     def get_intervals(self) -> list[IntervalResult]: ...
 
@@ -107,14 +112,17 @@ class IntervalTreeBase(Generic[T, D], ABC):
     def _print_tree(self, node: T | None, indent: str = "", prefix: str = "") -> None:
         if node is None:
             return
-        self._print_tree(node.right, indent + "    ", "┌── ")
+        view = cast(IntervalNodeProtocol[Any], node)
+        self._print_tree(cast(T | None, view.right), indent + "    ", "┌── ")
         self._print_node(node, indent, prefix)
-        if node.data is not None:
-            print(f"{indent}{prefix}data: {node.data}")
-        self._print_tree(node.left, indent + "    ", "└── ")
+        if view.data is not None:
+            print(f"{indent}{prefix}data: {view.data}")
+        self._print_tree(cast(T | None, view.left), indent + "    ", "└── ")
 
     def get_total_available_length(self) -> int:
-        return self.root.total_length if self.root else 0
+        if self.root is None:
+            return 0
+        return cast(IntervalNodeProtocol[Any], self.root).total_length
 
     def merge_data(self, data1: D | None, data2: D | None) -> D | None:
         if data1 is None:
@@ -148,4 +156,4 @@ class IntervalTreeBase(Generic[T, D], ABC):
     def _print_node(self, node: T, indent: str, prefix: str) -> None: ...
 
     @abstractmethod
-    def get_intervals(self) -> list[IntervalResult]: ...
+    def get_intervals(self) -> list[Any]: ...

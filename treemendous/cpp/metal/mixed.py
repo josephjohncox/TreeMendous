@@ -14,6 +14,7 @@ are applied to both unless sync_cpu=False.
 from __future__ import annotations
 
 import os
+from importlib import import_module
 from typing import Any
 
 from treemendous.basic.boundary import IntervalManager as AllocationIntervalManager
@@ -25,10 +26,10 @@ from treemendous.basic.boundary_summary import (
 from treemendous.domain import Span
 
 try:
-    from treemendous.cpp.metal.boundary_summary_metal import MetalBoundarySummaryManager
-except ImportError as e:  # pragma: no cover - import guarded by availability checks
+    _metal_module = import_module("treemendous.cpp.metal.boundary_summary_metal")
+    MetalBoundarySummaryManager: Any = _metal_module.MetalBoundarySummaryManager
+except ImportError:  # pragma: no cover - guarded by runtime availability
     MetalBoundarySummaryManager = None
-    _import_error = e
 
 
 class MixedBoundarySummaryManager:

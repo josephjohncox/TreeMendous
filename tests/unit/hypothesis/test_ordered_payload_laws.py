@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from hypothesis import given, strategies as st
+from hypothesis import given
+from hypothesis import strategies as st
 
 from treemendous.backends import Capability
 from treemendous.backends.adapters import PythonBackendAdapter

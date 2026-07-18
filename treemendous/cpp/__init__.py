@@ -1,82 +1,81 @@
-"""
-C++ Implementation Wrappers
+"""Compatibility wrappers for optional C++ extension modules."""
 
-This module provides Python wrappers for C++ implementations that ensure
-protocol conformance by converting return types to standardized formats.
-"""
+from __future__ import annotations
 
-from typing import Optional
+from importlib import import_module
+from types import ModuleType
+from typing import Any
+
 from ..basic.protocols import IntervalResult
 
-# Import C++ modules with fallback handling
-try:
-    from . import boundary
-    CPP_BOUNDARY_AVAILABLE = True
-except ImportError:
-    CPP_BOUNDARY_AVAILABLE = False
 
-try:
-    from . import treap
-    CPP_TREAP_AVAILABLE = True
-except ImportError:
-    CPP_TREAP_AVAILABLE = False
+def _optional_module(name: str) -> ModuleType | None:
+    """Import an extension module, returning ``None`` when it is not built."""
+    try:
+        return import_module(f"{__name__}.{name}")
+    except ImportError:
+        return None
 
-try:
-    from . import boundary_summary
-    CPP_BOUNDARY_SUMMARY_AVAILABLE = True
-except ImportError:
-    CPP_BOUNDARY_SUMMARY_AVAILABLE = False
 
-try:
-    from . import summary
-    CPP_SUMMARY_AVAILABLE = True
-except ImportError:
-    CPP_SUMMARY_AVAILABLE = False
+boundary = _optional_module("boundary")
+treap = _optional_module("treap")
+boundary_summary = _optional_module("boundary_summary")
+summary = _optional_module("summary")
+
+CPP_BOUNDARY_AVAILABLE = boundary is not None
+CPP_TREAP_AVAILABLE = treap is not None
+CPP_BOUNDARY_SUMMARY_AVAILABLE = boundary_summary is not None
+CPP_SUMMARY_AVAILABLE = summary is not None
 
 
 class ProtocolCompliantBoundarySummaryManager:
-    """Wrapper for C++ BoundarySummaryManager that ensures protocol compliance"""
-    
-    def __init__(self):
-        if not CPP_BOUNDARY_SUMMARY_AVAILABLE:
+    """Normalize C++ boundary-summary query results to Python value objects."""
+
+    def __init__(self) -> None:
+        if boundary_summary is None:
             raise ImportError("C++ boundary_summary module not available")
-        self._manager = boundary_summary.BoundarySummaryManager()
-    
-    def __getattr__(self, name):
-        # Delegate all other methods to the underlying manager
+        manager_type: Any = getattr(boundary_summary, "BoundarySummaryManager")
+        self._manager: Any = manager_type()
+
+    def __getattr__(self, name: str) -> Any:
         return getattr(self._manager, name)
-    
-    def find_best_fit(self, length: int, prefer_early: bool = True) -> Optional[IntervalResult]:
-        """Find best-fit interval with IntervalResult return type"""
+
+    def find_best_fit(
+        self, length: int, prefer_early: bool = True
+    ) -> IntervalResult | None:
+        """Find the best fit and normalize its result type."""
         result = self._manager.find_best_fit(length, prefer_early)
         if result is None:
             return None
-        
-        # Convert tuple result to IntervalResult
         if isinstance(result, tuple):
             start, end = result
             return IntervalResult(start=start, end=end, length=length)
-        else:
-            # Already an IntervalResult-like object
-            return IntervalResult(start=result.start, end=result.end, length=result.length)
-    
-    def find_largest_available(self) -> Optional[IntervalResult]:
-        """Find largest available interval with IntervalResult return type"""
+        return IntervalResult(start=result.start, end=result.end, length=result.length)
+
+    def find_largest_available(self) -> IntervalResult | None:
+        """Find the largest range and normalize its result type."""
         result = self._manager.find_largest_available()
         if result is None:
             return None
-        
-        # Convert tuple result to IntervalResult  
         if isinstance(result, tuple):
             start, end = result
             return IntervalResult(start=start, end=end, length=end - start)
-        else:
-            # Already an IntervalResult-like object
-            return IntervalResult(start=result.start, end=result.end, length=result.length)
+        return IntervalResult(start=result.start, end=result.end, length=result.length)
 
 
-# Export the protocol-compliant wrapper
-if CPP_BOUNDARY_SUMMARY_AVAILABLE:
-    BoundarySummaryManager = ProtocolCompliantBoundarySummaryManager
-else:
-    BoundarySummaryManager = None
+BoundarySummaryManager: type[ProtocolCompliantBoundarySummaryManager] | None = (
+    ProtocolCompliantBoundarySummaryManager if CPP_BOUNDARY_SUMMARY_AVAILABLE else None
+)
+
+__all__ = [
+    "BoundarySummaryManager",
+    "CPP_BOUNDARY_AVAILABLE",
+    "CPP_BOUNDARY_SUMMARY_AVAILABLE",
+    "CPP_SUMMARY_AVAILABLE",
+    "CPP_TREAP_AVAILABLE",
+    "ProtocolCompliantBoundarySummaryManager",
+    "boundary",
+    "boundary_summary",
+    "summary",
+    "treap",
+]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import venv
@@ -94,6 +95,36 @@ print(json.dumps({'backend': 'cpp_boundary', 'free': ranges.snapshot().total_fre
     except json.JSONDecodeError as exc:
         pytest.fail(f"wheel smoke produced invalid JSON: {result.stdout!r}: {exc}")
     assert smoke_output["free"] == 90
+
+    readme = Path(__file__).resolve().parents[2] / "README.md"
+    blocks = re.findall(r"```python\n(.*?)```", readme.read_text(), flags=re.DOTALL)
+    if not blocks:
+        pytest.fail("README must contain an executable Python quickstart")
+    for index, block in enumerate(blocks):
+        completed = subprocess.run(
+            [str(python), "-c", block],
+            cwd=unrelated,
+            env=clean_environment,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if completed.returncode != 0:
+            pytest.fail(
+                f"wheel README Python block {index} failed:\n{completed.stderr}"
+            )
+
+    example = readme.parent / "examples/basic_rangeset.py"
+    completed = subprocess.run(
+        [str(python), str(example)],
+        cwd=unrelated,
+        env=clean_environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "allocated [9, 11)"
 
 
 def test_metal_wheel_resource_and_device_from_arbitrary_cwd(tmp_path: Path) -> None:

@@ -15,9 +15,8 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass
 from typing import Any, Protocol
 
-from treemendous import Span, create_range_set
-
 from tests.performance.oracle import RangeOracle
+from treemendous import Span, create_range_set
 
 
 @dataclass(frozen=True)

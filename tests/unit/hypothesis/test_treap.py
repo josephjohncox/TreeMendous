@@ -5,11 +5,13 @@ Tests verify that treap maintains both BST and heap properties
 while providing correct interval management functionality.
 """
 
-import pytest
-from hypothesis import given, strategies as st
-from typing import List, Tuple
-import random
 import math
+import random
+from typing import List, Tuple
+
+import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from treemendous.basic.treap import IntervalTreap, TreapNode
 
@@ -86,7 +88,7 @@ def test_treap_basic_operations(operations: List[Tuple[int, int]]) -> None:
 
     # Verify total length calculation
     intervals = treap.get_intervals()
-    calculated_total = sum(interval.length for interval in intervals)
+    calculated_total = sum(interval.end - interval.start for interval in intervals)
     assert treap.get_total_available_length() == calculated_total
 
     # Reserve some intervals and verify
@@ -157,7 +159,7 @@ def test_treap_find_operations(length: int) -> None:
         # No suitable interval found - verify this is correct
         intervals = treap.get_intervals()
         if intervals:
-            max_available = max(interval.length for interval in intervals)
+            max_available = max(interval.end - interval.start for interval in intervals)
             assert max_available < length, (
                 f"Should have found interval of length {length}, max available is {max_available}"
             )
@@ -422,7 +424,9 @@ def test_treap_correctness_vs_simple_tree(intervals: List[Tuple[int, int]]) -> N
 
     # Individual intervals might differ due to merging strategies, but total coverage should be same
     treap_total = sum(end - start for start, end in treap_intervals)
-    simple_total = sum(interval.length for interval in simple_intervals_formatted)
+    simple_total = sum(
+        interval.end - interval.start for interval in simple_intervals_formatted
+    )
     assert treap_total == simple_total
 
 
@@ -441,6 +445,7 @@ def test_treap_edge_cases():
     assert treap.get_total_available_length() == 10
 
     sample = treap.sample_random_interval()
+    assert sample is not None
     assert sample.start == 10 and sample.end == 20
 
     # Zero-length interval (should be no-op)
@@ -483,22 +488,11 @@ def test_treap_stress_operations():
         else:
             treap.release_interval(start, end)
 
-        # Verify invariants less frequently and handle failures gracefully
-        if i % 100 == 0:  # Check every 100th operation only
-            try:
-                validate_treap_invariants(treap)
-            except AssertionError:
-                # Treap properties can be temporarily violated during complex operations
-                # This is acceptable for stress testing
-                pass
+        # Structural invariant failures are always correctness failures.
+        if i % 100 == 0:
+            validate_treap_invariants(treap)
 
-    # Final verification (handle failures gracefully for stress test)
-    try:
-        validate_treap_invariants(treap)
-    except AssertionError as e:
-        # For stress tests, we allow some property violations
-        # as long as basic functionality works
-        print(f"Note: Treap properties violated after stress test: {e}")
+    validate_treap_invariants(treap)
 
     # Tree should be reasonably balanced
     stats = treap.get_statistics()

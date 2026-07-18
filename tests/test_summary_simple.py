@@ -4,8 +4,8 @@ Simple test of the summary interval tree implementation.
 This tests just the core functionality without external dependencies.
 """
 
-import sys
 import os
+import sys
 
 # Add the specific module path to avoid importing dependencies
 sys.path.insert(
