@@ -22,11 +22,21 @@ from treemendous.backends.types import Available, Maturity
 
 SCHEMA = "treemendous-validated-benchmark-suite-v2"
 PROFILE_NAMES = ("smoke", "standard", "large")
+SECTION_NAMES = (
+    "all",
+    "sampled",
+    "qualification",
+    "qualification-catalog",
+    "qualification-lease",
+    "qualification-scheduling",
+    "payload",
+)
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", choices=PROFILE_NAMES, default="smoke")
+    parser.add_argument("--section", choices=SECTION_NAMES, default="all")
     parser.add_argument("--backends", nargs="+")
     parser.add_argument("--output", type=Path)
     parser.add_argument(
@@ -81,12 +91,33 @@ def _ci_provenance() -> dict[str, str]:
     return {name.lower(): os.environ[name] for name in names if name in os.environ}
 
 
+def _qualification_selected(section: str, workload_name: str) -> bool:
+    if section in {"all", "qualification"}:
+        return True
+    return (
+        (section == "qualification-catalog" and workload_name.startswith("immutable"))
+        or (section == "qualification-lease" and workload_name.startswith("lease"))
+        or (
+            section == "qualification-scheduling"
+            and workload_name.startswith("cpu-scheduling")
+        )
+    )
+
+
 def run_profile(
-    profile: BenchmarkProfile, backend_ids: tuple[str, ...]
+    profile: BenchmarkProfile,
+    backend_ids: tuple[str, ...],
+    *,
+    section: str = "all",
 ) -> dict[str, Any]:
-    """Run sampled measurements and separate large-scale qualifications."""
+    """Run one complete profile or a durable independently runnable section."""
+    if section not in SECTION_NAMES:
+        raise ValueError(f"unknown benchmark section: {section}")
     sampled: list[dict[str, Any]] = []
-    for workload in profile.sampled_workloads:
+    sampled_workloads = (
+        profile.sampled_workloads if section in {"all", "sampled"} else ()
+    )
+    for workload in sampled_workloads:
         print(
             f"sampled: {workload.name} "
             f"({len(workload.operations):,} operations, {len(backend_ids)} backends)",
@@ -104,6 +135,8 @@ def run_profile(
 
     qualifications: list[dict[str, Any]] = []
     for workload in profile.qualification_workloads:
+        if not _qualification_selected(section, workload.name):
+            continue
         print(
             f"qualify: {workload.name} "
             f"({len(workload.operations):,} operations, {len(backend_ids)} backends)",
@@ -111,23 +144,26 @@ def run_profile(
         )
         qualifications.append(qualify_backends(backend_ids, workload))
 
-    print(
-        f"qualify: payload policies ({profile.payload_operations:,} operations, "
-        f"{len(backend_ids)} backends)",
-        flush=True,
-    )
-    payload_reports = qualify_payload_backends(
-        backend_ids,
-        scale=profile.payload_scale,
-        operations=profile.payload_operations,
-        seed=71,
-    )
+    payload_reports: list[dict[str, Any]] = []
+    if section in {"all", "payload"}:
+        print(
+            f"qualify: payload policies ({profile.payload_operations:,} operations, "
+            f"{len(backend_ids)} backends)",
+            flush=True,
+        )
+        payload_reports = qualify_payload_backends(
+            backend_ids,
+            scale=profile.payload_scale,
+            operations=profile.payload_operations,
+            seed=71,
+        )
 
     return {
         "schema": SCHEMA,
         "generated_at": datetime.now(UTC).isoformat(),
         "profile": {
             "name": profile.name,
+            "section": section,
             "description": profile.description,
             "samples": profile.samples,
             "warmups": profile.warmups,
@@ -151,7 +187,10 @@ def run_profile(
 
 def _markdown(report: dict[str, Any], digest: str) -> str:
     lines = [
-        f"# Tree-Mendous benchmark: {report['profile']['name']}",
+        (
+            f"# Tree-Mendous benchmark: {report['profile']['name']} "
+            f"/ {report['profile'].get('section', 'all')}"
+        ),
         "",
         f"- Commit: `{report['environment']['commit']}`",
         f"- Generated: `{report['generated_at']}`",
@@ -253,8 +292,9 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     profile = benchmark_profile(args.profile)
     backend_ids = _stable_backends(args.backends, require_all=args.require_all_stable)
-    report = run_profile(profile, backend_ids)
-    output = args.output or Path("build/benchmarks") / f"{profile.name}.json"
+    report = run_profile(profile, backend_ids, section=args.section)
+    suffix = profile.name if args.section == "all" else f"{profile.name}-{args.section}"
+    output = args.output or Path("build/benchmarks") / f"{suffix}.json"
     artifacts = write_artifacts(report, output)
     print("wrote:")
     for artifact in artifacts:

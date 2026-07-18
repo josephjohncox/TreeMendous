@@ -76,11 +76,11 @@ def immutable_query_workload(
         interval_index = rng.randrange(interval_count)
         interval_start, interval_end = domain[interval_index]
         coordinate = rng.randrange(extent)
-        if index and index % 997 == 0:
+        if index == queries_per_snapshot - 1 or (index and index % 997 == 0):
             operations.append(Operation("snapshot"))
-        elif index and index % 499 == 0:
+        elif index == queries_per_snapshot - 2 or (index and index % 499 == 0):
             operations.append(Operation("stats"))
-        elif index and index % 101 == 0:
+        elif index == queries_per_snapshot - 3 or (index and index % 101 == 0):
             operations.append(
                 Operation(
                     "overlaps",

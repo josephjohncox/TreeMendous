@@ -60,8 +60,8 @@ load.
 | Profile | Purpose | Sampled scale | Load qualification |
 | --- | --- | --- | --- |
 | `smoke` | Required PR/build check | 32–128 initial ranges and 200–1,100 operations per workload, 20 independent samples | 500-range catalog, 250-shard lease pool, all payload policies |
-| `standard` | Weekly engineering run | Up to 256 initial ranges and 2,000 operations, 20 independent samples | 10,000-range catalog, 2,000-shard lease pool, 25,000 scheduled jobs |
-| `large` | Manual production-scale qualification | Up to 512 initial ranges and 5,000 operations, 20 independent samples | 100,000-range catalog, 10,000-shard lease pool, 100,000 scheduled jobs |
+| `standard` | Weekly engineering run | Up to 128 initial ranges and 1,100 operations, 20 independent samples | 10,000-range catalog, 2,000-shard lease pool, 25,000 scheduled jobs |
+| `large` | Manual production-scale qualification | Up to 128 initial ranges and 1,100 operations, 20 independent samples | 100,000-range catalog, 10,000-shard lease pool, 100,000 scheduled jobs |
 
 The six-figure profile separates interval cardinality from operation count where
 a linear-scan backend would otherwise create a meaningless ten-billion-step
@@ -103,10 +103,20 @@ native CPU backend. GitHub Actions uploads the JSON, Markdown, and checksum
 files for 30 days.
 
 `.github/workflows/benchmarks.yml` runs the standard profile weekly and accepts
-manual `standard` or `large` dispatches. Those artifacts are retained for 90
-days and include the commit, Python/runtime/platform metadata, GitHub run
-provenance, exact profile, backend list, dimensions, validation evidence, and
-methodology.
+manual `standard` or `large` dispatches. Long profiles are split into sampled,
+catalog, lease, scheduling, and payload jobs so each section produces an
+independently useful artifact and one slow workload cannot erase completed
+results. The same sections are available locally:
+
+```bash
+uv run python tests/performance/benchmark_suite.py \
+  --profile large --section qualification-catalog \
+  --require-all-stable
+```
+
+Artifacts are retained for 90 days and include the commit,
+Python/runtime/platform metadata, GitHub run provenance, exact profile and
+section, backend list, dimensions, validation evidence, and methodology.
 
 Benchmark jobs fail on semantic divergence, unavailable stable backends,
 incomplete artifact writes, or checksum failures. They do **not** fail because

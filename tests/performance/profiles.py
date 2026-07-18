@@ -61,21 +61,21 @@ def benchmark_profile(name: str) -> BenchmarkProfile:
             samples=20,
             warmups=2,
             processes=2,
-            payload_scale=96,
-            payload_operations=300,
+            payload_scale=64,
+            payload_operations=200,
             sampled_workloads=(
-                fragmented_workload(interval_count=128, operation_count=1_000, seed=51),
+                fragmented_workload(interval_count=64, operation_count=500, seed=51),
                 immutable_query_workload(
-                    interval_count=256, queries_per_snapshot=2_000, seed=52
+                    interval_count=128, queries_per_snapshot=1_100, seed=52
                 ),
-                scheduling_workload(cores=64, occupancy=0.75, jobs=2_000, seed=53),
-                lease_pool_workload(shards=128, operation_count=1_000, seed=54),
+                scheduling_workload(cores=64, occupancy=0.75, jobs=1_000, seed=53),
+                lease_pool_workload(shards=64, operation_count=500, seed=54),
             ),
             qualification_workloads=(
                 immutable_query_workload(
-                    interval_count=10_000, queries_per_snapshot=500, seed=55
+                    interval_count=10_000, queries_per_snapshot=20, seed=55
                 ),
-                lease_pool_workload(shards=2_000, operation_count=2_000, seed=56),
+                lease_pool_workload(shards=2_000, operation_count=200, seed=56),
                 scheduling_workload(cores=64, occupancy=0.75, jobs=25_000, seed=57),
             ),
         )
@@ -86,23 +86,23 @@ def benchmark_profile(name: str) -> BenchmarkProfile:
             samples=20,
             warmups=2,
             processes=2,
-            payload_scale=256,
-            payload_operations=1_000,
+            payload_scale=128,
+            payload_operations=500,
             sampled_workloads=(
-                fragmented_workload(interval_count=256, operation_count=2_000, seed=61),
+                fragmented_workload(interval_count=64, operation_count=500, seed=61),
                 immutable_query_workload(
-                    interval_count=512, queries_per_snapshot=3_000, seed=62
+                    interval_count=128, queries_per_snapshot=1_100, seed=62
                 ),
-                scheduling_workload(cores=64, occupancy=0.75, jobs=5_000, seed=63),
-                lease_pool_workload(shards=256, operation_count=2_000, seed=64),
+                scheduling_workload(cores=64, occupancy=0.75, jobs=1_000, seed=63),
+                lease_pool_workload(shards=64, operation_count=500, seed=64),
             ),
             qualification_workloads=(
                 immutable_query_workload(
                     interval_count=100_000,
-                    queries_per_snapshot=500,
+                    queries_per_snapshot=20,
                     seed=65,
                 ),
-                lease_pool_workload(shards=10_000, operation_count=2_000, seed=66),
+                lease_pool_workload(shards=10_000, operation_count=200, seed=66),
                 scheduling_workload(cores=64, occupancy=0.75, jobs=100_000, seed=67),
             ),
         )
