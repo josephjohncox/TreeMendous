@@ -57,13 +57,13 @@ backend-status: install-dev
     uv run python -c 'from treemendous import BackendRegistry; registry = BackendRegistry.discover(); print("\n".join(f"{spec.id}: {registry.states[spec.id]}" for spec in registry.specs))'
 
 benchmark-smoke output="build/benchmarks/smoke.json": build-cpp
-    uv run python tests/performance/benchmark_suite.py --profile smoke --require-all-stable --output "{{output}}"
+    uv run python -m tests.performance.benchmark_suite --profile smoke --require-all-stable --output "{{output}}"
 
 benchmark-standard output="build/benchmarks/standard.json": build-cpp
-    uv run python tests/performance/benchmark_suite.py --profile standard --require-all-stable --output "{{output}}"
+    uv run python -m tests.performance.benchmark_suite --profile standard --require-all-stable --output "{{output}}"
 
 benchmark-large output="build/benchmarks/large.json": build-cpp
-    uv run python tests/performance/benchmark_suite.py --profile large --require-all-stable --output "{{output}}"
+    uv run python -m tests.performance.benchmark_suite --profile large --require-all-stable --output "{{output}}"
 
 test-gpu: install-dev
     uv run python tests/performance/gpu_benchmark.py

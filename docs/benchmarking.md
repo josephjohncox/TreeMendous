@@ -109,7 +109,7 @@ independently useful artifact and one slow workload cannot erase completed
 results. The same sections are available locally:
 
 ```bash
-uv run python tests/performance/benchmark_suite.py \
+uv run python -m tests.performance.benchmark_suite \
   --profile large --section qualification-catalog \
   --require-all-stable
 ```

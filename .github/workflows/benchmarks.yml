@@ -52,7 +52,7 @@ jobs:
         shell: bash
         run: |
           output="build/benchmarks/${BENCHMARK_PROFILE}-${BENCHMARK_SECTION}.json"
-          uv run python tests/performance/benchmark_suite.py \
+          uv run python -m tests.performance.benchmark_suite \
             --profile "$BENCHMARK_PROFILE" \
             --section "$BENCHMARK_SECTION" \
             --require-all-stable \

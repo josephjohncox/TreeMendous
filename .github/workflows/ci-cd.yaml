@@ -153,7 +153,7 @@ jobs:
       - run: uv run python setup.py build_ext --inplace
       - name: Run every stable backend and payload policy under realistic traces
         run: >-
-          uv run python tests/performance/benchmark_suite.py
+          uv run python -m tests.performance.benchmark_suite
           --profile smoke --require-all-stable
           --output build/benchmarks/smoke.json
       # actions/upload-artifact v4
