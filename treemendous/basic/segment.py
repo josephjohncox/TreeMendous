@@ -1,8 +1,10 @@
-from typing import Optional
+"""Experimental eager segment tree; not part of the stable RangeSet interface."""
+
+__experimental__ = True
 from treemendous.basic.base import IntervalNodeBase, IntervalTreeBase
 
 
-class SegmentTreeNode(IntervalNodeBase['SegmentTreeNode', None]):
+class SegmentTreeNode(IntervalNodeBase["SegmentTreeNode", None]):
     def __init__(self, start: int, end: int) -> None:
         super().__init__(start, end)
         self.total_length: int = self.length
@@ -15,12 +17,15 @@ class SegmentTreeNode(IntervalNodeBase['SegmentTreeNode', None]):
         else:
             self.total_length = self.length if self.is_full else 0
 
+
 class SegmentTree(IntervalTreeBase[SegmentTreeNode, None]):
     def __init__(self, start: int, end: int) -> None:
         super().__init__(SegmentTreeNode(start, end))
 
     def _print_node(self, node: SegmentTreeNode, indent: str, prefix: str) -> None:
-        print(f"{indent}{prefix}{node.start}-{node.end} (len={node.length}, total_len={node.total_length}, is_full={node.is_full})")
+        print(
+            f"{indent}{prefix}{node.start}-{node.end} (len={node.length}, total_len={node.total_length}, is_full={node.is_full})"
+        )
 
     def _build(self, node: SegmentTreeNode | None) -> None:
         if node is None:
@@ -36,7 +41,9 @@ class SegmentTree(IntervalTreeBase[SegmentTreeNode, None]):
     def build(self) -> None:
         self._build(self.root)
 
-    def _update(self, node: Optional[SegmentTreeNode], start: int, end: int, is_full: bool) -> None:
+    def _update(
+        self, node: SegmentTreeNode | None, start: int, end: int, is_full: bool
+    ) -> None:
         if node is None:
             return
         if node.end <= start or node.start >= end:
@@ -52,8 +59,12 @@ class SegmentTree(IntervalTreeBase[SegmentTreeNode, None]):
                 node.left = SegmentTreeNode(node.start, mid)
                 node.right = SegmentTreeNode(mid, node.end)
                 node.left.is_full = node.right.is_full = node.is_full
-                node.left.total_length = (node.left.end - node.left.start) if node.left.is_full else 0
-                node.right.total_length = (node.right.end - node.right.start) if node.right.is_full else 0
+                node.left.total_length = (
+                    (node.left.end - node.left.start) if node.left.is_full else 0
+                )
+                node.right.total_length = (
+                    (node.right.end - node.right.start) if node.right.is_full else 0
+                )
             self._update(node.left, start, end, is_full)
             self._update(node.right, start, end, is_full)
             node.update_node()
@@ -63,7 +74,6 @@ class SegmentTree(IntervalTreeBase[SegmentTreeNode, None]):
 
     def unschedule_interval(self, start: int, end: int) -> None:
         self._update(self.root, start, end, True)
-    
 
 
 # Example usage:

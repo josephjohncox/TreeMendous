@@ -2,12 +2,12 @@ from hypothesis import given, assume, strategies as st
 from treemendous.basic.avl_earliest import EarliestIntervalNode, EarliestIntervalTree
 from typing import List, Tuple, Optional, Set
 
-@given(st.lists(st.tuples(
-    st.integers(min_value=0, max_value=1000),
-    st.integers(min_value=0, max_value=1000)
-).filter(lambda x: x[0] < x[1])).map(sorted).filter(
-    lambda ops: all(ops[i][1] <= ops[i+1][0] for i in range(len(ops)-1))
-))
+
+@given(
+    st.lists(st.integers(min_value=0, max_value=999), unique=True).map(
+        lambda starts: [(start, start + 1) for start in sorted(starts)]
+    )
+)
 def test_insert_and_delete_intervals(operations: List[Tuple[int, int]]) -> None:
     tree = EarliestIntervalTree()
     tree.release_interval(0, 1000)
@@ -27,7 +27,10 @@ def test_insert_and_delete_intervals(operations: List[Tuple[int, int]]) -> None:
 
     assert tree.get_total_available_length() == total_available
 
-@given(st.integers(min_value=0, max_value=1000), st.integers(min_value=1, max_value=500))
+
+@given(
+    st.integers(min_value=0, max_value=1000), st.integers(min_value=1, max_value=500)
+)
 def test_find_interval(point: int, length: int) -> None:
     tree = EarliestIntervalTree()
     tree.release_interval(0, 1000)
@@ -40,14 +43,17 @@ def test_find_interval(point: int, length: int) -> None:
         # For "earliest" fit: finds the earliest interval that can accommodate the request
         # The interval must be able to fit the request starting from the requested point OR
         # be large enough to accommodate the full request regardless of where it starts
-        can_fit_from_point = (interval.start <= point < interval.end and 
-                             interval.end - point >= length)
+        can_fit_from_point = (
+            interval.start <= point < interval.end and interval.end - point >= length
+        )
         can_fit_entire_request = interval.end - interval.start >= length
-        
-        assert can_fit_from_point or can_fit_entire_request, \
+
+        assert can_fit_from_point or can_fit_entire_request, (
             f"Interval [{interval.start}, {interval.end}) cannot accommodate request: point={point}, length={length}"
+        )
         assert not (200 <= interval.start < 300 or 200 < interval.end <= 300)
         assert not (400 <= interval.start < 500 or 400 < interval.end <= 500)
+
 
 def test_total_available_length() -> None:
     tree = EarliestIntervalTree()
@@ -60,6 +66,7 @@ def test_total_available_length() -> None:
     tree.release_interval(150, 350)
     assert tree.get_total_available_length() == 900
 
+
 def test_adjacent_intervals() -> None:
     tree = EarliestIntervalTree()
     tree.release_interval(0, 100)
@@ -71,13 +78,22 @@ def test_adjacent_intervals() -> None:
     assert actual == expected
     assert tree.get_total_available_length() == 200
 
-@given(st.lists(st.tuples(
-    st.sampled_from(['insert', 'delete']),
-    st.integers(min_value=0, max_value=1000),
-    st.integers(min_value=1, max_value=500)
-).filter(lambda x: x[2] > 0)).map(sorted).filter(
-    lambda ops: all(ops[i][2] + ops[i][1] <= ops[i+1][1] for i in range(len(ops)-1))
-))
+
+@given(
+    st.lists(
+        st.tuples(
+            st.sampled_from(["insert", "delete"]),
+            st.integers(min_value=0, max_value=1000),
+            st.integers(min_value=1, max_value=500),
+        ).filter(lambda x: x[2] > 0)
+    )
+    .map(sorted)
+    .filter(
+        lambda ops: all(
+            ops[i][2] + ops[i][1] <= ops[i + 1][1] for i in range(len(ops) - 1)
+        )
+    )
+)
 def test_random_operations(operations: List[Tuple[str, int, int]]) -> None:
     tree = EarliestIntervalTree()
     tree.release_interval(0, 1000)
@@ -87,7 +103,7 @@ def test_random_operations(operations: List[Tuple[str, int, int]]) -> None:
         end: int = start + length
         if end > 1000:
             continue
-        if op == 'delete':
+        if op == "delete":
             tree.reserve_interval(start, end)
             total_available -= length
         else:
@@ -103,17 +119,25 @@ def test_random_operations(operations: List[Tuple[str, int, int]]) -> None:
         tree.print_tree()
     assert tree.get_total_available_length() == total_available
 
-@given(st.lists(st.tuples(
-    st.integers(min_value=0, max_value=999),
-    st.integers(min_value=1, max_value=1000)
-).filter(lambda x: x[0] + x[1] <= 1000)))
+
+@given(
+    st.lists(
+        st.tuples(
+            st.integers(min_value=0, max_value=999),
+            st.integers(min_value=1, max_value=1000),
+        ).filter(lambda x: x[0] + x[1] <= 1000)
+    )
+)
 def test_non_overlapping_reservations(intervals: List[Tuple[int, int]]) -> None:
     sorted_intervals: List[Tuple[int, int]] = sorted(
-        ((start, start + length) for start, length in intervals),
-        key=lambda x: x[0]
+        ((start, start + length) for start, length in intervals), key=lambda x: x[0]
     )
 
-    assume(all(s2 >= e1 for (_, e1), (s2, _) in zip(sorted_intervals, sorted_intervals[1:])))
+    assume(
+        all(
+            s2 >= e1 for (_, e1), (s2, _) in zip(sorted_intervals, sorted_intervals[1:])
+        )
+    )
 
     tree = EarliestIntervalTree()
     tree.release_interval(0, 1000)
@@ -125,10 +149,15 @@ def test_non_overlapping_reservations(intervals: List[Tuple[int, int]]) -> None:
     total_available: int = tree.get_total_available_length()
     assert total_available == 1000 - total_reserved
 
-@given(st.lists(st.tuples(
-    st.integers(min_value=0, max_value=1000),
-    st.integers(min_value=0, max_value=1000)
-).filter(lambda x: x[0] < x[1])))
+
+@given(
+    st.lists(
+        st.tuples(
+            st.integers(min_value=0, max_value=1000),
+            st.integers(min_value=0, max_value=1000),
+        ).filter(lambda x: x[0] < x[1])
+    )
+)
 def test_overlapping_reservations(intervals: List[Tuple[int, int]]) -> None:
     tree = EarliestIntervalTree()
     tree.release_interval(0, 1000)

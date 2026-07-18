@@ -1,11 +1,14 @@
-from typing import Any, Callable, Optional, List
+from collections.abc import Callable
+from typing import Any
 
-from treemendous.basic.base import IntervalNodeProtocol
 from treemendous.basic.avl import IntervalNode, IntervalTree
+from treemendous.basic.base import IntervalNodeProtocol
 from treemendous.basic.protocols import CoreIntervalManagerProtocol, IntervalResult
+from treemendous.domain import validate_coordinate, validate_length
+
 
 class EarliestIntervalNode(IntervalNode, IntervalNodeProtocol):
-    def __init__(self, start: int, end: int, data: Optional[Any] = None) -> None:
+    def __init__(self, start: int, end: int, data: Any | None = None) -> None:
         super().__init__(start, end, data)
         self.min_start: int = start
         self.max_end: int = end
@@ -13,7 +16,7 @@ class EarliestIntervalNode(IntervalNode, IntervalNodeProtocol):
 
     def update_stats(self) -> None:
         super().update_stats()
-        
+
         self.min_start = self.start
         self.max_end = self.end
         self.max_length = self.end - self.start
@@ -29,12 +32,15 @@ class EarliestIntervalNode(IntervalNode, IntervalNodeProtocol):
             self.max_end = max(self.max_end, self.right.max_end)
             self.max_length = max(self.max_length, self.right.max_length)
 
-class EarliestIntervalTree(IntervalTree[EarliestIntervalNode], CoreIntervalManagerProtocol[Any]):
+
+class EarliestIntervalTree(
+    IntervalTree[EarliestIntervalNode], CoreIntervalManagerProtocol[Any]
+):
     def __init__(
         self,
-        merge_fn: Optional[Callable[[Any, Any], Any]] = None,
-        split_fn: Optional[Callable[[Any, int, int, int, int], Any]] = None,
-        can_merge: Optional[Callable[[Optional[Any], Optional[Any]], bool]] = None,
+        merge_fn: Callable[[Any, Any], Any] | None = None,
+        split_fn: Callable[[Any, int, int, int, int], Any] | None = None,
+        can_merge: Callable[[Any | None, Any | None], bool] | None = None,
         merge_idempotent: bool = False,
         split_idempotent: bool = False,
     ) -> None:
@@ -48,45 +54,55 @@ class EarliestIntervalTree(IntervalTree[EarliestIntervalNode], CoreIntervalManag
         )
 
     def _print_node(self, node: EarliestIntervalNode, indent: str, prefix: str) -> None:
-        print(f"{indent}{prefix}{node.start}-{node.end} "
-              f"(min_start={node.min_start}, max_end={node.max_end}, max_length={node.max_length})")
+        print(
+            f"{indent}{prefix}{node.start}-{node.end} "
+            f"(min_start={node.min_start}, max_end={node.max_end}, max_length={node.max_length})"
+        )
 
-    def find_interval(self, start: int, length: int) -> Optional[IntervalResult]:
+    def find_interval(self, start: int, length: int) -> IntervalResult | None:
+        validate_coordinate(start, "start")
+        validate_length(length)
         node = self._find_interval(self.root, start, length)
         if node:
-            # Allocate from the requested start point if possible, otherwise from interval start  
+            # Allocate from the requested start point if possible, otherwise from interval start
             alloc_start = max(start, node.start)
             if node.end - alloc_start >= length:
-                return IntervalResult(start=alloc_start, end=alloc_start + length, data=node.data)
+                return IntervalResult(
+                    start=alloc_start, end=alloc_start + length, data=node.data
+                )
         return None
 
-    def get_intervals(self) -> List[IntervalResult]:
+    def get_intervals(self) -> list[IntervalResult]:
         """Get all available intervals as IntervalResult objects"""
         intervals = super().get_intervals()  # Get List[Tuple[int, int, data]]
-        return [IntervalResult(start=start, end=end, data=data) for start, end, data in intervals]
-    
-    def _find_interval(self, node: Optional[EarliestIntervalNode], start: int, 
-                      length: int) -> Optional[EarliestIntervalNode]:
+        return [
+            IntervalResult(start=start, end=end, data=data)
+            for start, end, data in intervals
+        ]
+
+    def _find_interval(
+        self, node: EarliestIntervalNode | None, start: int, length: int
+    ) -> EarliestIntervalNode | None:
         if not node:
             return None
-        
+
         # Check if this interval can satisfy the request
         # Case 1: start is within the interval and there's enough space
         if node.start <= start < node.end and (node.end - start) >= length:
             # This interval works, but check if there's an earlier one
             left_candidate = self._find_interval(node.left, start, length)
             return left_candidate if left_candidate else node
-        
+
         # Case 2: start is before this interval and interval is large enough
         elif start <= node.start and (node.end - node.start) >= length:
             # This interval works, but check if there's an earlier one
             left_candidate = self._find_interval(node.left, start, length)
             return left_candidate if left_candidate else node
-        
+
         # Case 3: start is after this interval's end
         elif start >= node.end:
             return self._find_interval(node.right, start, length)
-        
+
         # Case 4: start is before this interval's start but interval is too small
         elif start < node.start:
             # Check both subtrees
@@ -94,14 +110,15 @@ class EarliestIntervalTree(IntervalTree[EarliestIntervalNode], CoreIntervalManag
             if left_candidate:
                 return left_candidate
             return self._find_interval(node.right, start, length)
-        
+
         # Case 5: start is within interval but not enough space remaining
         else:
             # Check right subtree for intervals starting after this one
             return self._find_interval(node.right, start, length)
 
-    def _insert(self, node: Optional[EarliestIntervalNode], 
-                new_node: EarliestIntervalNode) -> EarliestIntervalNode:
+    def _insert(
+        self, node: EarliestIntervalNode | None, new_node: EarliestIntervalNode
+    ) -> EarliestIntervalNode:
         node = super()._insert(node, new_node)
         node.update_stats()  # Update the earliest-specific stats
         return node
@@ -139,7 +156,6 @@ if __name__ == "__main__":
     print("\nAfter scheduling [2, 5]:")
     tree.print_tree()
     print(f"Total available length: {tree.get_total_available_length()}")
-
 
     # Schedule interval [10, 20)
     tree.reserve_interval(10, 20)

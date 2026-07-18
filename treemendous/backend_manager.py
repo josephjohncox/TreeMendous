@@ -1,648 +1,356 @@
-"""
-Unified Backend Manager for Tree-Mendous
+"""Compatibility facade over the typed immutable backend catalog."""
 
-Provides clean, protocol-based backend selection and management with proper dataclasses.
-Eliminates protocol drift by enforcing consistent interfaces.
-"""
+from __future__ import annotations
 
-import sys
-from pathlib import Path
-from typing import Optional, Dict, Any, Type, List, Union
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from typing import Any
 
-# Import protocols
-try:
-    from treemendous.basic.protocols import (
-        CoreIntervalManagerProtocol,
-        EnhancedIntervalManagerProtocol,
-        PerformanceTrackingProtocol,
-        RandomizedProtocol,
-        BackendConfiguration,
-        ImplementationType,
-        PerformanceTier,
-        IntervalResult,
-        AvailabilityStats,
-        PerformanceStats,
-        standardize_interval_result,
-        standardize_intervals_list,
-        standardize_availability_stats,
-        standardize_performance_stats,
-    )
-except ImportError:
-    sys.path.insert(0, str(Path(__file__).parent / 'basic'))
-    from protocols import (
-        CoreIntervalManagerProtocol,
-        EnhancedIntervalManagerProtocol,
-        PerformanceTrackingProtocol,
-        RandomizedProtocol,
-        BackendConfiguration,
-        ImplementationType,
-        PerformanceTier,
-        IntervalResult,
-        AvailabilityStats,
-        PerformanceStats,
-        standardize_interval_result,
-        standardize_intervals_list,
-        standardize_availability_stats,
-        standardize_performance_stats,
-    )
+from treemendous.backends import (
+    CATALOG,
+    CATALOG_BY_ID,
+    Available,
+    BackendRequest,
+    BackendSpec,
+    Capability,
+    Invalid,
+    Runtime,
+    Unavailable,
+    probe_backend,
+    select_backend,
+)
+from treemendous.backends.adapters import CppBackendAdapter, PythonBackendAdapter
+from treemendous.basic.protocols import (
+    AvailabilityStats,
+    BackendConfiguration,
+    ImplementationType,
+    IntervalResult,
+    PerformanceStats,
+    PerformanceTier,
+    standardize_interval_result,
+    standardize_performance_stats,
+)
+from treemendous.domain import BackendInvalidError, BackendUnavailableError, Span
+from treemendous.policies import PayloadPolicy
+from treemendous.rangeset import RangeSet
+
+_CAPABILITY_NAMES = {
+    Capability.CORE: "core-operations",
+    Capability.PAYLOADS: "payloads",
+    Capability.ANALYTICS: "summary-stats",
+    Capability.BEST_FIT: "best-fit",
+    Capability.RANDOM_SAMPLE: "random-sampling",
+    Capability.ATOMIC_ALLOCATE: "atomic-allocate",
+}
 
 
-@dataclass
+def _implementation_type(spec: BackendSpec) -> ImplementationType:
+    return {
+        "boundary": ImplementationType.BOUNDARY,
+        "avl": ImplementationType.AVL_TREE,
+        "summary": ImplementationType.SUMMARY_TREE,
+        "treap": ImplementationType.TREAP,
+    }[spec.algorithm.value]
+
+
+@dataclass(frozen=True)
 class RuntimeBackendInfo:
-    """Runtime information about a backend after loading and testing"""
     config: BackendConfiguration
-    implementation_class: Type
-    instance_created: bool = False
-    basic_ops_working: bool = False
-    enhanced_features_available: List[str] = field(default_factory=list)
-    detected_features: List[str] = field(default_factory=list)
-    performance_tier_confirmed: PerformanceTier = PerformanceTier.BASELINE
+    implementation_class: type[Any]
+    instance_created: bool
+    basic_ops_working: bool
+    enhanced_features_available: tuple[str, ...]
+    detected_features: tuple[str, ...]
+    performance_tier_confirmed: PerformanceTier
+    probe_reason: str | None = None
 
 
-class UnifiedIntervalManager:
-    """
-    Unified wrapper that provides consistent interface over any backend implementation.
-    
-    This wrapper eliminates protocol drift by standardizing all return types and method signatures
-    while delegating to the underlying implementation.
-    """
-    
-    def __init__(self, backend_impl: Any, backend_info: RuntimeBackendInfo):
-        self._impl = backend_impl
-        self._info = backend_info
+class UnifiedIntervalManager(RangeSet):
+    """Legacy method surface backed by one explicit adapter."""
+
+    def __init__(
+        self, adapter, info: RuntimeBackendInfo, capabilities: frozenset[Capability]
+    ):
+        super().__init__(adapter, capabilities=capabilities, initially_available=False)
+        self._info = info
         self._operation_count = 0
-    
-    # Core protocol methods (standardized)
-    def release_interval(self, start: int, end: int, data: Optional[Any] = None) -> None:
-        """Add interval to available space"""
-        self._operation_count += 1
-        # Handle implementations that don't support data parameter
-        try:
-            return self._impl.release_interval(start, end, data)
-        except TypeError:
-            # Fallback for implementations without data support
-            return self._impl.release_interval(start, end)
-    
-    def reserve_interval(self, start: int, end: int, data: Optional[Any] = None) -> None:
-        """Remove interval from available space"""
-        self._operation_count += 1
-        # Handle implementations that don't support data parameter
-        try:
-            return self._impl.reserve_interval(start, end, data)
-        except TypeError:
-            # Fallback for implementations without data support
-            return self._impl.reserve_interval(start, end)
-    
-    def find_interval(self, start: int, length: int) -> Optional[IntervalResult]:
-        """Find available interval - returns standardized IntervalResult"""
-        result = self._impl.find_interval(start, length)
-        return standardize_interval_result(result)
-    
-    def get_intervals(self) -> List[IntervalResult]:
-        """Get all available intervals - returns standardized list"""
-        intervals = self._impl.get_intervals()
-        return standardize_intervals_list(intervals)
-    
-    def get_total_available_length(self) -> int:
-        """Get total available space"""
-        return self._impl.get_total_available_length()
-    
-    # Enhanced methods (available if implementation supports them)
-    def get_availability_stats(self) -> Optional[AvailabilityStats]:
-        """Get comprehensive availability statistics"""
-        if hasattr(self._impl, 'get_availability_stats'):
-            stats = self._impl.get_availability_stats()
-            return standardize_availability_stats(stats)
-        return None
-    
-    def find_best_fit(self, length: int, prefer_early: bool = True) -> Optional[IntervalResult]:
-        """Find best-fit interval"""
-        if hasattr(self._impl, 'find_best_fit'):
-            result = self._impl.find_best_fit(length, prefer_early)
-            return standardize_interval_result(result)
-        return None
-    
-    def find_largest_available(self) -> Optional[IntervalResult]:
-        """Find largest available interval"""
-        if hasattr(self._impl, 'find_largest_available'):
-            result = self._impl.find_largest_available()
-            return standardize_interval_result(result)
-        return None
-    
-    def get_performance_stats(self) -> Optional[PerformanceStats]:
-        """Get performance statistics"""
-        if hasattr(self._impl, 'get_performance_stats'):
-            stats = self._impl.get_performance_stats()
-            perf_stats = standardize_performance_stats(stats)
-            # Add our wrapper stats
-            return PerformanceStats(
-                operation_count=perf_stats.operation_count + self._operation_count,
-                cache_hits=perf_stats.cache_hits,
-                cache_hit_rate=perf_stats.cache_hit_rate,
-                implementation_name=self._info.config.name,
-                language=self._info.config.language
-            )
-        return PerformanceStats(
-            operation_count=self._operation_count,
-            implementation_name=self._info.config.name,
-            language=self._info.config.language
-        )
-    
-    # Randomized methods (available for treaps, etc.)
-    def sample_random_interval(self) -> Optional[IntervalResult]:
-        """Sample random interval (treaps only)"""
-        if hasattr(self._impl, 'sample_random_interval'):
-            result = self._impl.sample_random_interval()
-            return standardize_interval_result(result)
-        return None
-    
+
+    def release_interval(self, start: int, end: int, data: Any = None) -> None:
+        span = Span(start, end)
+        with self._lock:
+            self.add(span) if data is None else self.add(span, data)
+            self._operation_count += 1
+
+    def reserve_interval(self, start: int, end: int, data: Any = None) -> None:
+        del data
+        span = Span(start, end)
+        with self._lock:
+            self.discard(span)
+            self._operation_count += 1
+
+    def get_availability_stats(self) -> AvailabilityStats:
+        return self.stats()
+
+    def find_best_fit(
+        self, length: int, prefer_early: bool = True
+    ) -> IntervalResult | None:
+        with self._lock:
+            raw = self._adapter.implementation
+            if not hasattr(raw, "find_best_fit"):
+                return None
+            return standardize_interval_result(raw.find_best_fit(length, prefer_early))
+
+    def find_largest_available(self) -> IntervalResult | None:
+        with self._lock:
+            raw = self._adapter.implementation
+            if not hasattr(raw, "find_largest_available"):
+                return None
+            return standardize_interval_result(raw.find_largest_available())
+
+    def sample_random_interval(self) -> IntervalResult | None:
+        with self._lock:
+            raw = self._adapter.implementation
+            if not hasattr(raw, "sample_random_interval"):
+                return None
+            return standardize_interval_result(raw.sample_random_interval())
+
     def verify_properties(self) -> bool:
-        """Verify implementation-specific properties"""
-        if hasattr(self._impl, 'verify_treap_properties'):
-            return self._impl.verify_treap_properties()
-        if hasattr(self._impl, 'verify_properties'):
-            return self._impl.verify_properties()
-        return True  # Assume valid if no verification method
-    
-    # Metadata access
+        with self._lock:
+            raw = self._adapter.implementation
+            verifier = getattr(raw, "verify_properties", None) or getattr(
+                raw, "verify_treap_properties", None
+            )
+            return verifier() if verifier else True
+
+    def get_performance_stats(self) -> PerformanceStats:
+        with self._lock:
+            raw = self._adapter.implementation
+            if hasattr(raw, "get_performance_stats"):
+                stats = standardize_performance_stats(raw.get_performance_stats())
+                return PerformanceStats(
+                    operation_count=stats.operation_count + self._operation_count,
+                    cache_hits=stats.cache_hits,
+                    implementation_name=self._info.config.name,
+                    language=self._info.config.language,
+                )
+            return PerformanceStats(
+                operation_count=self._operation_count,
+                implementation_name=self._info.config.name,
+                language=self._info.config.language,
+            )
+
     def get_backend_info(self) -> RuntimeBackendInfo:
-        """Get backend information"""
         return self._info
-    
+
     def get_implementation_type(self) -> ImplementationType:
-        """Get implementation type"""
         return self._info.config.implementation_type
-    
+
     def get_performance_tier(self) -> PerformanceTier:
-        """Get performance tier"""
         return self._info.config.performance_tier
-    
+
     def supports_feature(self, feature: str) -> bool:
-        """Check if implementation supports a specific feature"""
-        return feature in self._info.config.features
-    
-    # Direct access to underlying implementation (for advanced usage)
-    def get_raw_implementation(self) -> Any:
-        """Get direct access to underlying implementation"""
-        return self._impl
+        return (
+            feature in self._info.config.features
+            or feature in self._info.detected_features
+        )
 
 
 class TreeMendousBackendManager:
-    """
-    Manages all Tree-Mendous backend implementations with proper protocol enforcement.
-    
-    Discovers, tests, and provides unified access to all available implementations
-    while ensuring consistent interfaces through protocol standardization.
-    """
-    
-    def __init__(self):
-        self._backend_configs: Dict[str, RuntimeBackendInfo] = {}
-        self._discover_and_validate_backends()
-    
-    def _discover_and_validate_backends(self):
-        """Discover and validate all available backend implementations"""
-        
-        # Python implementations
-        self._register_python_backends()
-        
-        # C++ implementations
-        self._register_cpp_backends()
-        
-        # GPU implementations (CUDA)
-        self._register_gpu_backends()
-        
-        # Validate all registered backends
-        self._validate_backends()
-    
-    def _register_python_backends(self):
-        """Register and test Python implementations"""
-        
-        python_backends = [
-            BackendConfiguration(
-                implementation_id="py_boundary",
-                name="Python Boundary Manager",
-                language="Python",
-                implementation_type=ImplementationType.BOUNDARY,
-                performance_tier=PerformanceTier.BASELINE,
-                features=["core-operations"],
-                constructor_args={}
-            ),
-            BackendConfiguration(
-                implementation_id="py_avl_earliest",
-                name="Python AVL Earliest",
-                language="Python",
-                implementation_type=ImplementationType.AVL_TREE,
-                performance_tier=PerformanceTier.OPTIMIZED,
-                features=["core-operations", "self-balancing", "earliest-fit"],
-                constructor_args={}
-            ),
-            BackendConfiguration(
-                implementation_id="py_summary",
-                name="Python Summary Tree",
-                language="Python", 
-                implementation_type=ImplementationType.SUMMARY_TREE,
-                performance_tier=PerformanceTier.OPTIMIZED,
-                features=["core-operations", "summary-stats", "best-fit", "analytics"],
-                constructor_args={}
-            ),
-            BackendConfiguration(
-                implementation_id="py_treap",
-                name="Python Treap",
-                language="Python",
-                implementation_type=ImplementationType.TREAP,
-                performance_tier=PerformanceTier.OPTIMIZED,
-                features=["core-operations", "probabilistic-balance", "random-sampling"],
-                constructor_args={"random_seed": 42}
-            ),
-            BackendConfiguration(
-                implementation_id="py_boundary_summary",
-                name="Python Boundary Summary",
-                language="Python",
-                implementation_type=ImplementationType.BOUNDARY,
-                performance_tier=PerformanceTier.OPTIMIZED,
-                features=["core-operations", "summary-stats", "caching", "best-fit"],
-                constructor_args={}
-            ),
-        ]
-        
-        for config in python_backends:
-            self._try_register_backend(config, self._load_python_implementation)
-    
-    def _register_cpp_backends(self):
-        """Register and test C++ implementations"""
-        
-        cpp_backends = [
-            BackendConfiguration(
-                implementation_id="cpp_boundary",
-                name="C++ Boundary Manager",
-                language="C++",
-                implementation_type=ImplementationType.BOUNDARY,
-                performance_tier=PerformanceTier.HIGH_PERFORMANCE,
-                features=["core-operations", "native-performance"],
-                constructor_args={}
-            ),
-            BackendConfiguration(
-                implementation_id="cpp_treap",
-                name="C++ Treap",
-                language="C++",
-                implementation_type=ImplementationType.TREAP,
-                performance_tier=PerformanceTier.HIGH_PERFORMANCE,
-                features=["core-operations", "native-performance", "probabilistic-balance"],
-                constructor_args={"seed": 42}  # C++ uses 'seed' not 'random_seed'
-            ),
-            BackendConfiguration(
-                implementation_id="cpp_boundary_summary",
-                name="C++ Boundary Summary",
-                language="C++",
-                implementation_type=ImplementationType.BOUNDARY,
-                performance_tier=PerformanceTier.HIGH_PERFORMANCE,
-                features=["core-operations", "native-performance", "summary-stats", "caching"],
-                constructor_args={}
-            ),
-            BackendConfiguration(
-                implementation_id="cpp_boundary_optimized",
-                name="C++ Boundary (Optimized)",
-                language="C++",
-                implementation_type=ImplementationType.BOUNDARY,
-                performance_tier=PerformanceTier.HIGH_PERFORMANCE,
-                features=["core-operations", "native-performance", "small-vector", "branch-hints"],
-                constructor_args={}
-            ),
-            BackendConfiguration(
-                implementation_id="cpp_boundary_summary_optimized",
-                name="C++ Boundary Summary (Optimized)",
-                language="C++",
-                implementation_type=ImplementationType.BOUNDARY,
-                performance_tier=PerformanceTier.HIGH_PERFORMANCE,
-                features=["core-operations", "native-performance", "summary-stats", "caching", "small-vector", "branch-hints"],
-                constructor_args={}
-            ),
-        ]
-        
-        for config in cpp_backends:
-            self._try_register_backend(config, self._load_cpp_implementation)
-    
-    def _register_gpu_backends(self):
-        """Register and test GPU/CUDA implementations"""
-        
-        gpu_backends = [
-            BackendConfiguration(
-                implementation_id="gpu_boundary_summary",
-                name="GPU Boundary Summary (CUDA)",
-                language="C++/CUDA",
-                implementation_type=ImplementationType.BOUNDARY,
-                performance_tier=PerformanceTier.HIGH_PERFORMANCE,
-                features=["core-operations", "gpu-accelerated", "parallel-reduction", 
-                         "summary-stats", "massive-parallelism", "O(1) analytics"],
-                constructor_args={}
-            ),
-            BackendConfiguration(
-                implementation_id="metal_boundary_summary",
-                name="Metal Boundary Summary (MPS)",
-                language="C++/Metal",
-                implementation_type=ImplementationType.BOUNDARY,
-                performance_tier=PerformanceTier.HIGH_PERFORMANCE,
-                features=["core-operations", "gpu-accelerated", "metal-performance-shaders",
-                         "summary-stats", "apple-silicon", "O(1) analytics"],
-                constructor_args={}
-            ),
-            BackendConfiguration(
-                implementation_id="metal_boundary_summary_mixed",
-                name="Metal Boundary Summary (Mixed)",
-                language="C++/Metal",
-                implementation_type=ImplementationType.BOUNDARY,
-                performance_tier=PerformanceTier.HIGH_PERFORMANCE,
-                features=["core-operations", "mixed-policy", "gpu-best-fit", "cpu-summary",
-                         "apple-silicon", "cached-analytics"],
-                constructor_args={}
-            ),
-        ]
-        
-        for config in gpu_backends:
-            self._try_register_backend(config, self._load_gpu_implementation)
-    
-    def _try_register_backend(self, config: BackendConfiguration, loader_func):
-        """Try to register a backend implementation"""
+    """Loads, semantically probes, and selects immutable backend specs."""
+
+    def __init__(self) -> None:
+        self._probes = {spec.id: probe_backend(spec) for spec in CATALOG}
+        self._infos = {spec.id: self._info(spec) for spec in CATALOG}
+
+    def _info(self, spec: BackendSpec) -> RuntimeBackendInfo:
+        probe = self._probes[spec.id]
+        available = isinstance(probe, Available)
+        features = tuple(sorted(_CAPABILITY_NAMES[cap] for cap in spec.capabilities))
         try:
-            impl_class = loader_func(config)
-            if impl_class:
-                runtime_info = RuntimeBackendInfo(
-                    config=config,
-                    implementation_class=impl_class
+            implementation_class = spec.loader()
+        except Exception:
+            implementation_class = object
+        reason = (
+            None
+            if available
+            else getattr(probe, "reason", getattr(probe, "error", None))
+        )
+        if spec.id == "cpp_boundary_optimized":
+            tier = PerformanceTier.BASELINE
+        elif spec.runtime is not Runtime.PYTHON:
+            tier = PerformanceTier.HIGH_PERFORMANCE
+        else:
+            tier = PerformanceTier.OPTIMIZED
+        config = BackendConfiguration(
+            implementation_id=spec.id,
+            name=spec.name,
+            language=spec.runtime.value,
+            implementation_type=_implementation_type(spec),
+            performance_tier=tier,
+            features=features,
+            available=available,
+            constructor_args=spec.constructor_args,
+        )
+        return RuntimeBackendInfo(
+            config,
+            implementation_class,
+            available,
+            available,
+            features,
+            features,
+            tier,
+            reason,
+        )
+
+    def _spec(self, backend_id: str) -> BackendSpec:
+        try:
+            return CATALOG_BY_ID[backend_id]
+        except KeyError as exc:
+            raise BackendUnavailableError(f"unknown backend: {backend_id}") from exc
+
+    def _require_available(self, spec: BackendSpec) -> None:
+        probe = self._probes[spec.id]
+        if isinstance(probe, Invalid):
+            raise BackendInvalidError(
+                f"backend {spec.id} failed validation: {probe.error}"
+            )
+        if isinstance(probe, Unavailable):
+            raise BackendUnavailableError(
+                f"backend {spec.id} unavailable: {probe.reason}"
+            )
+
+    @staticmethod
+    def _adapter(spec: BackendSpec, implementation: Any):
+        if spec.runtime is Runtime.PYTHON:
+            return PythonBackendAdapter(implementation)
+        return CppBackendAdapter(implementation)
+
+    def create_manager(
+        self, backend_id: str | None = None, **constructor_options: Any
+    ) -> UnifiedIntervalManager:
+        if backend_id is None or backend_id == "auto":
+            spec = select_backend(CATALOG, self._probes, BackendRequest()).selected
+        else:
+            spec = self._spec(backend_id)
+            self._require_available(spec)
+        args = dict(spec.constructor_args)
+        args.update(constructor_options)
+        implementation = spec.loader()(**args)
+        return UnifiedIntervalManager(
+            self._adapter(spec, implementation), self._infos[spec.id], spec.capabilities
+        )
+
+    def create_range_set(
+        self,
+        domain,
+        backend_id: str | None = None,
+        require: frozenset[Capability] = frozenset({Capability.CORE}),
+        payload_policy: PayloadPolicy[Any] | None = None,
+        initially_available: bool = True,
+        **constructor_options: Any,
+    ) -> RangeSet:
+        if backend_id is None or backend_id == "auto":
+            spec = select_backend(
+                CATALOG, self._probes, BackendRequest(require=require)
+            ).selected
+        else:
+            spec = self._spec(backend_id)
+            self._require_available(spec)
+            if not require <= spec.capabilities:
+                raise BackendUnavailableError(
+                    f"backend {backend_id} lacks required capabilities"
                 )
-                config.available = True
-                self._backend_configs[config.implementation_id] = runtime_info
-                
-        except ImportError:
-            # Implementation not available (C++ not compiled, etc.)
-            pass
-        except Exception as e:
-            print(f"⚠️  Failed to register {config.implementation_id}: {e}")
-    
-    def _load_python_implementation(self, config: BackendConfiguration) -> Optional[Type]:
-        """Load Python implementation"""
-        module_map = {
-            "py_boundary": ("treemendous.basic.boundary", "IntervalManager"),
-            "py_avl_earliest": ("treemendous.basic.avl_earliest", "EarliestIntervalTree"),
-            "py_summary": ("treemendous.basic.summary", "SummaryIntervalTree"),
-            "py_treap": ("treemendous.basic.treap", "IntervalTreap"),
-            "py_boundary_summary": ("treemendous.basic.boundary_summary", "BoundarySummaryManager"),
-        }
-        
-        if config.implementation_id not in module_map:
-            return None
-        
-        module_path, class_name = module_map[config.implementation_id]
-        module = __import__(module_path, fromlist=[class_name])
-        return getattr(module, class_name)
-    
-    def _load_cpp_implementation(self, config: BackendConfiguration) -> Optional[Type]:
-        """Load C++ implementation"""
-        module_map = {
-            "cpp_boundary": ("treemendous.cpp.boundary", "IntervalManager"),
-            "cpp_treap": ("treemendous.cpp.treap", "IntervalTreap"),
-            "cpp_boundary_summary": ("treemendous.cpp.boundary_summary", "BoundarySummaryManager"),
-            "cpp_boundary_optimized": ("treemendous.cpp.boundary_optimized", "IntervalManager"),
-            "cpp_boundary_summary_optimized": ("treemendous.cpp.boundary_summary_optimized", "BoundarySummaryManager"),
-        }
-        
-        if config.implementation_id not in module_map:
-            return None
-        
-        module_path, class_name = module_map[config.implementation_id]
-        module = __import__(module_path, fromlist=[class_name])
-        return getattr(module, class_name)
-    
-    def _load_gpu_implementation(self, config: BackendConfiguration) -> Optional[Type]:
-        """Load GPU/CUDA or Metal implementation"""
-        module_map = {
-            "gpu_boundary_summary": ("treemendous.cpp.gpu.boundary_summary_gpu", "GPUBoundarySummaryManager"),
-            "metal_boundary_summary": ("treemendous.cpp.metal.boundary_summary_metal", "MetalBoundarySummaryManager"),
-            "metal_boundary_summary_mixed": ("treemendous.cpp.metal.mixed", "MixedBoundarySummaryManager"),
-        }
-        
-        if config.implementation_id not in module_map:
-            return None
-        
-        try:
-            # Check availability based on backend type
-            if "gpu" in config.implementation_id:
-                from treemendous.cpp.gpu import is_gpu_available
-                if not is_gpu_available():
-                    return None
-            elif "metal" in config.implementation_id:
-                from treemendous.cpp.metal import is_metal_available
-                if not is_metal_available():
-                    return None
-        except ImportError:
-            return None
-        
-        module_path, class_name = module_map[config.implementation_id]
-        module = __import__(module_path, fromlist=[class_name])
-        return getattr(module, class_name)
-    
-    def _validate_backends(self):
-        """Validate all registered backends by testing basic functionality"""
-        for backend_id, runtime_info in self._backend_configs.items():
-            try:
-                # Test instantiation
-                instance = self._create_raw_instance(backend_id)
-                runtime_info.instance_created = True
-                
-                # Test basic operations
-                instance.release_interval(0, 100)
-                total = instance.get_total_available_length()
-                if total == 100:
-                    runtime_info.basic_ops_working = True
-                
-                # Detect enhanced features
-                enhanced_features = []
-                if hasattr(instance, 'get_availability_stats'):
-                    enhanced_features.append("availability-stats")
-                if hasattr(instance, 'find_best_fit'):
-                    enhanced_features.append("best-fit")
-                if hasattr(instance, 'sample_random_interval'):
-                    enhanced_features.append("random-sampling")
-                if hasattr(instance, 'get_performance_stats'):
-                    enhanced_features.append("performance-tracking")
-                
-                runtime_info.detected_features = enhanced_features
-                runtime_info.enhanced_features_available = enhanced_features
-                
-            except Exception as e:
-                print(f"⚠️  Backend validation failed for {backend_id}: {e}")
-                runtime_info.config.available = False
-    
-    def _create_raw_instance(self, backend_id: str) -> Any:
-        """Create raw implementation instance"""
-        if backend_id not in self._backend_configs:
-            raise ValueError(f"Backend '{backend_id}' not found")
-        
-        runtime_info = self._backend_configs[backend_id]
-        impl_class = runtime_info.implementation_class
-        constructor_args = runtime_info.config.constructor_args
-        
-        return impl_class(**constructor_args)
-    
-    def create_manager(self, backend_id: Optional[str] = None) -> UnifiedIntervalManager:
-        """
-        Create unified interval manager with standardized interface.
-        
-        Args:
-            backend_id: Specific backend to use, or None for auto-selection
-            
-        Returns:
-            UnifiedIntervalManager with consistent interface
-        """
-        if backend_id is None:
-            backend_id = self.select_best_backend()
-        
-        if backend_id not in self._backend_configs:
-            raise ValueError(f"Backend '{backend_id}' not available")
-        
-        runtime_info = self._backend_configs[backend_id]
-        raw_impl = self._create_raw_instance(backend_id)
-        
-        return UnifiedIntervalManager(raw_impl, runtime_info)
-    
+        args = dict(spec.constructor_args)
+        args.update(constructor_options)
+        implementation = spec.loader()(**args)
+        return RangeSet(
+            self._adapter(spec, implementation),
+            domain=domain,
+            capabilities=spec.capabilities,
+            payload_policy=payload_policy,
+            initially_available=initially_available,
+        )
+
     def select_best_backend(self) -> str:
-        """Auto-select the best available backend"""
-        available = self.get_available_backends()
-        
-        if not available:
-            raise RuntimeError("No Tree-Mendous backends available")
-        
-        # Priority order: C++ Boundary Summary > C++ Treap > Python Boundary Summary > etc.
-        priority_order = [
-            "cpp_boundary_summary",
-            "cpp_treap", 
-            "cpp_boundary",
-            "py_boundary_summary",
-            "py_summary",
-            "py_treap",
-            "py_avl_earliest",
-            "py_boundary",
-        ]
-        
-        for backend_id in priority_order:
-            if backend_id in available:
-                return backend_id
-        
-        # Fallback to first available
-        return list(available.keys())[0]
-    
-    def get_available_backends(self) -> Dict[str, RuntimeBackendInfo]:
-        """Get all available and working backends"""
+        return select_backend(CATALOG, self._probes, BackendRequest()).selected.id
+
+    def get_available_backends(self) -> dict[str, RuntimeBackendInfo]:
         return {
-            k: v for k, v in self._backend_configs.items() 
-            if v.config.available and v.basic_ops_working
+            backend_id: info
+            for backend_id, info in self._infos.items()
+            if info.config.available
         }
-    
-    def get_backends_by_type(self, impl_type: ImplementationType) -> Dict[str, RuntimeBackendInfo]:
-        """Get backends by implementation type"""
-        available = self.get_available_backends()
+
+    def get_backends_by_type(
+        self, impl_type: ImplementationType
+    ) -> dict[str, RuntimeBackendInfo]:
         return {
-            k: v for k, v in available.items()
-            if v.config.implementation_type == impl_type
+            key: info
+            for key, info in self.get_available_backends().items()
+            if info.config.implementation_type is impl_type
         }
-    
-    def get_backends_by_language(self, language: str) -> Dict[str, RuntimeBackendInfo]:
-        """Get backends by language"""
-        available = self.get_available_backends()
+
+    def get_backends_by_language(self, language: str) -> dict[str, RuntimeBackendInfo]:
         return {
-            k: v for k, v in available.items()
-            if v.config.language.lower() == language.lower()
+            key: info
+            for key, info in self.get_available_backends().items()
+            if info.config.language.lower() == language.lower()
         }
-    
-    def get_backends_with_feature(self, feature: str) -> Dict[str, RuntimeBackendInfo]:
-        """Get backends that support a specific feature"""
-        available = self.get_available_backends()
+
+    def get_backends_with_feature(self, feature: str) -> dict[str, RuntimeBackendInfo]:
         return {
-            k: v for k, v in available.items()
-            if feature in v.detected_features or feature in v.config.features
+            key: info
+            for key, info in self.get_available_backends().items()
+            if feature in info.config.features
         }
-    
-    def print_backend_status(self):
-        """Print comprehensive backend status"""
-        print("🌳 Tree-Mendous Backend Status")
-        print("=" * 50)
-        
-        available = self.get_available_backends()
-        unavailable = {k: v for k, v in self._backend_configs.items() if not v.config.available}
-        
-        print(f"✅ Available Backends ({len(available)}):")
-        for backend_id, info in available.items():
-            features_str = ", ".join(info.detected_features)
-            print(f"  • {info.config.name}")
-            print(f"    Language: {info.config.language}")
-            print(f"    Type: {info.config.implementation_type.value}")
-            print(f"    Tier: {info.config.performance_tier.value}")
-            print(f"    Features: {features_str}")
-            print()
-        
-        if unavailable:
-            print(f"❌ Unavailable Backends ({len(unavailable)}):")
-            for backend_id, info in unavailable.items():
-                print(f"  • {info.config.name} ({info.config.language})")
-        
-        # Language breakdown
-        python_count = len(self.get_backends_by_language("Python"))
-        cpp_count = len(self.get_backends_by_language("C++"))
-        print(f"📊 Language Breakdown: {python_count} Python, {cpp_count} C++")
-        
-        # Feature matrix
-        all_features = set()
-        for info in available.values():
-            all_features.update(info.detected_features)
-        
-        if all_features:
-            print(f"\n🎯 Feature Matrix:")
-            print(f"{'Backend':<25} {'Features'}")
-            print("-" * 50)
-            for backend_id, info in available.items():
-                features_icons = []
-                for feature in sorted(all_features):
-                    if feature in info.detected_features:
-                        features_icons.append("✅")
-                    else:
-                        features_icons.append("❌")
-                print(f"{info.config.name[:24]:<25} {' '.join(features_icons)}")
+
+    def print_backend_status(self) -> None:
+        for spec in CATALOG:
+            info = self._infos[spec.id]
+            status = (
+                "available"
+                if info.config.available
+                else f"unavailable ({info.probe_reason})"
+            )
+            print(f"{spec.id}: {status}")
 
 
-# Global singleton
-_global_backend_manager: Optional[TreeMendousBackendManager] = None
+_global_backend_manager: TreeMendousBackendManager | None = None
 
 
 def get_backend_manager() -> TreeMendousBackendManager:
-    """Get global backend manager singleton"""
     global _global_backend_manager
     if _global_backend_manager is None:
         _global_backend_manager = TreeMendousBackendManager()
     return _global_backend_manager
 
 
-def create_interval_tree(backend: Optional[str] = None) -> UnifiedIntervalManager:
-    """
-    Create interval tree with unified interface.
-    
-    Args:
-        backend: Backend ID or None for auto-selection
-        
-    Returns:
-        UnifiedIntervalManager with standardized protocol
-    """
-    manager = get_backend_manager()
-    return manager.create_manager(backend)
+def create_interval_tree(
+    backend: str | None = None, **options: Any
+) -> UnifiedIntervalManager:
+    return get_backend_manager().create_manager(backend, **options)
 
 
-def list_available_backends() -> Dict[str, RuntimeBackendInfo]:
-    """List all available backends"""
-    manager = get_backend_manager()
-    return manager.get_available_backends()
+def create_range_set(
+    domain,
+    backend: str | None = None,
+    require=frozenset({Capability.CORE}),
+    payload_policy: PayloadPolicy[Any] | None = None,
+    initially_available: bool = True,
+    **options: Any,
+) -> RangeSet:
+    return get_backend_manager().create_range_set(
+        domain,
+        backend,
+        require,
+        payload_policy,
+        initially_available,
+        **options,
+    )
 
 
-def print_backend_status():
-    """Print comprehensive backend status"""
-    manager = get_backend_manager()
-    manager.print_backend_status()
+def list_available_backends() -> dict[str, RuntimeBackendInfo]:
+    return get_backend_manager().get_available_backends()
+
+
+def print_backend_status() -> None:
+    get_backend_manager().print_backend_status()
