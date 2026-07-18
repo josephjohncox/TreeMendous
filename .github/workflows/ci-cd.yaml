@@ -36,6 +36,7 @@ jobs:
           uv export --frozen --no-dev --no-emit-project \
             --output-file /tmp/treemendous-core-requirements.txt
           uv run --frozen --no-sync pip-audit \
+            --disable-pip --no-deps \
             --requirement /tmp/treemendous-core-requirements.txt
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -125,8 +126,13 @@ jobs:
         shell: bash
         run: |
           asan_runtime=$(gcc -print-file-name=libasan.so)
-          export LD_PRELOAD="$asan_runtime"
-          export ASAN_OPTIONS=detect_leaks=1:halt_on_error=1
+          libstdcpp_runtime=$(g++ -print-file-name=libstdc++.so.6)
+          # libasan initializes before Python imports the extension. Preload
+          # libstdc++ too so ASan can resolve its __cxa_throw interceptor.
+          export LD_PRELOAD="$asan_runtime:$libstdcpp_runtime"
+          # CPython and pybind11 retain process-lifetime singletons.
+          # This lane targets memory-safety and UB failures, not LSAN totals.
+          export ASAN_OPTIONS=detect_leaks=0:halt_on_error=1
           export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
           uv run pytest tests/unit/test_native_core_contract.py \
             tests/unit/test_core_contract.py -q

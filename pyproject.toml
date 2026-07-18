@@ -62,6 +62,9 @@ examples = ["ortools>=9.14.6206"]
 
 [tool.pytest.ini_options]
 addopts = "--hypothesis-explain -vv --strict-markers --strict-config"
+# Keep repository-only test helpers importable consistently when pytest is
+# launched through an installed console script or coverage on CI.
+pythonpath = ["."]
 filterwarnings = ["error"]
 markers = [
   "unit: fast implementation-independent tests",
