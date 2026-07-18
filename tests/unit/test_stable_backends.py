@@ -9,25 +9,17 @@ import pytest
 from treemendous.backends import (
     CATALOG,
     Available,
-    Capability,
     Invalid,
     Maturity,
-    Runtime,
     Unavailable,
     probe_backend,
 )
-from treemendous.backends.adapters import CppBackendAdapter, PythonBackendAdapter
+from treemendous.backends.adapters import BackendAdapter
 from treemendous.domain import Span
 from treemendous.policies import JoinPayloadPolicy
 from treemendous.rangeset import RangeSet
 
 STABLE_SPECS = tuple(spec for spec in CATALOG if spec.maturity is Maturity.STABLE)
-
-
-def _adapter(spec: Any, implementation: Any):
-    if spec.runtime is Runtime.PYTHON:
-        return PythonBackendAdapter(implementation)
-    return CppBackendAdapter(implementation)
 
 
 def _expect_equal(actual: Any, expected: Any) -> None:
@@ -44,15 +36,10 @@ def stable_rangeset(request: pytest.FixtureRequest) -> tuple[Any, RangeSet]:
     assert not isinstance(state, Invalid), f"{spec.id}: {state.error}"
     assert isinstance(state, Available)
     implementation = spec.loader()(**dict(spec.constructor_args))
-    policy = (
-        JoinPayloadPolicy(lambda left, right: left | right, frozenset())
-        if Capability.PAYLOADS in spec.capabilities
-        else None
-    )
+    policy = JoinPayloadPolicy(lambda left, right: left | right, frozenset())
     ranges = RangeSet(
-        _adapter(spec, implementation),
+        BackendAdapter(implementation),
         domain=(0, 100),
-        capabilities=state.validated_capabilities,
         initially_available=False,
         payload_policy=policy,
     )
@@ -103,29 +90,25 @@ def test_stable_invalid_mutations_are_atomic(
     before = ranges.snapshot()
     for start, end in ((1, 1), (9, 4)):
         with pytest.raises(ValueError):
-            ranges.release_interval(start, end)
+            ranges.add(Span(start, end))
         assert ranges.snapshot() == before
         with pytest.raises(ValueError):
-            ranges.reserve_interval(start, end)
+            ranges.discard(Span(start, end))
         assert ranges.snapshot() == before
 
 
-def test_stable_allocate_and_capabilities(
-    stable_rangeset: tuple[Any, RangeSet],
-) -> None:
-    spec, ranges = stable_rangeset
+def test_stable_allocate(stable_rangeset: tuple[Any, RangeSet]) -> None:
+    _, ranges = stable_rangeset
     ranges.add(Span(0, 100))
     allocated = ranges.allocate(10, not_before=5, not_after=20)
     assert allocated is not None and allocated.span == Span(5, 15)
     assert ranges.snapshot().total_free == 90
-    assert Capability.CORE in spec.capabilities
-    assert Capability.ATOMIC_ALLOCATE in spec.capabilities
 
 
-def test_payload_capability_geometry(stable_rangeset: tuple[Any, RangeSet]) -> None:
-    spec, ranges = stable_rangeset
-    if Capability.PAYLOADS not in spec.capabilities:
-        pytest.skip(f"{spec.id}: payload capability not declared")
+def test_payload_geometry_is_backend_independent(
+    stable_rangeset: tuple[Any, RangeSet],
+) -> None:
+    _, ranges = stable_rangeset
     ranges.add(Span(0, 10), frozenset({"A"}))
     ranges.add(Span(5, 15), frozenset({"B"}))
     _expect_equal(

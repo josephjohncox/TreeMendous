@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Allocate a two-hour CPU scheduling window with the public facade."""
+"""Allocate a two-hour CPU scheduling window with the public API."""
 
 from treemendous import Span, create_range_set
 
@@ -11,7 +11,7 @@ def main() -> None:
 
     booking = schedule.allocate(2, not_before=9, not_after=17)
     assert booking is not None
-    assert (booking.start, booking.end) == (9, 11)
+    assert booking.span == Span(9, 11)
 
     stats = schedule.stats()
     assert stats.total_free == 6

@@ -1,5 +1,5 @@
-"""Backend adapter exports."""
+"""Canonical backend adapter seam."""
 
-from .base import BackendAdapter, CppBackendAdapter, PythonBackendAdapter
+from .base import BackendAdapter
 
-__all__ = ["BackendAdapter", "CppBackendAdapter", "PythonBackendAdapter"]
+__all__ = ["BackendAdapter"]

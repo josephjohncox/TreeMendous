@@ -10,11 +10,9 @@ from typing import Any
 
 class Capability(Enum):
     CORE = auto()
-    PAYLOADS = auto()
     ANALYTICS = auto()
     BEST_FIT = auto()
     RANDOM_SAMPLE = auto()
-    ATOMIC_ALLOCATE = auto()
 
 
 class Algorithm(Enum):

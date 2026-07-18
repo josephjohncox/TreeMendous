@@ -11,10 +11,10 @@ from pathlib import Path
 import pytest
 
 from scripts.verify_artifact_contents import (
+    CPU_EXTENSIONS,
     METAL_EXTENSION,
     METAL_RESOURCE,
     REQUIRED_SDIST,
-    STABLE_EXTENSIONS,
     ArtifactPolicyError,
     artifact_paths,
     verify_sdist,
@@ -39,8 +39,8 @@ def _wheel(path: Path, names: set[str]) -> None:
             archive.writestr(name, b"input")
 
 
-def _stable_extension_names() -> set[str]:
-    return {f"{stem}.fake.so" for stem in STABLE_EXTENSIONS}
+def _cpu_extension_names() -> set[str]:
+    return {f"{stem}.fake.so" for stem in CPU_EXTENSIONS}
 
 
 @pytest.mark.parametrize(
@@ -82,15 +82,15 @@ def test_wheel_policy_rejects_generated_host_artifacts(
 ) -> None:
     artifact = tmp_path / "treemendous-0-cp312-macosx.whl"
     leaked = f"treemendous/cpp/leaked{suffix}"
-    _wheel(artifact, _stable_extension_names() | {leaked})
+    _wheel(artifact, _cpu_extension_names() | {leaked})
     with pytest.raises(ArtifactPolicyError, match=rf"leaked{suffix}"):
         verify_wheel(artifact)
 
 
-def test_wheel_policy_requires_every_stable_cpu_extension(tmp_path: Path) -> None:
-    for index, missing in enumerate(sorted(STABLE_EXTENSIONS)):
+def test_wheel_policy_requires_every_cpu_extension(tmp_path: Path) -> None:
+    for index, missing in enumerate(sorted(CPU_EXTENSIONS)):
         artifact = tmp_path / f"treemendous-0-cp312-macosx-{index}.whl"
-        names = _stable_extension_names() - {f"{missing}.fake.so"}
+        names = _cpu_extension_names() - {f"{missing}.fake.so"}
         _wheel(artifact, names)
         with pytest.raises(ArtifactPolicyError, match=missing.rsplit("/", 1)[-1]):
             verify_wheel(artifact)
@@ -100,7 +100,7 @@ def test_metal_wheel_requires_installed_metallib(tmp_path: Path) -> None:
     artifact = tmp_path / "treemendous-0-cp312-macosx.whl"
     _wheel(
         artifact,
-        _stable_extension_names() | {f"{METAL_EXTENSION}.fake.so"},
+        _cpu_extension_names() | {f"{METAL_EXTENSION}.fake.so"},
     )
     with pytest.raises(ArtifactPolicyError, match="metal_resource=False"):
         verify_wheel(artifact)
@@ -108,7 +108,7 @@ def test_metal_wheel_requires_installed_metallib(tmp_path: Path) -> None:
 
 def test_cpu_wheel_rejects_orphan_metallib(tmp_path: Path) -> None:
     artifact = tmp_path / "treemendous-0-cp312-macosx.whl"
-    _wheel(artifact, _stable_extension_names() | {METAL_RESOURCE})
+    _wheel(artifact, _cpu_extension_names() | {METAL_RESOURCE})
     with pytest.raises(ArtifactPolicyError, match="metal_extension=False"):
         verify_wheel(artifact)
 
@@ -117,21 +117,21 @@ def test_metal_wheel_accepts_matched_extension_and_resource(tmp_path: Path) -> N
     artifact = tmp_path / "treemendous-0-cp312-macosx.whl"
     _wheel(
         artifact,
-        _stable_extension_names() | {f"{METAL_EXTENSION}.fake.so", METAL_RESOURCE},
+        _cpu_extension_names() | {f"{METAL_EXTENSION}.fake.so", METAL_RESOURCE},
     )
     assert verify_wheel(artifact)["metal_resource"] == METAL_RESOURCE
 
 
 def test_manylinux_gate_rejects_generic_linux_wheel(tmp_path: Path) -> None:
     artifact = tmp_path / "treemendous-0-cp312-cp312-linux_x86_64.whl"
-    _wheel(artifact, _stable_extension_names())
+    _wheel(artifact, _cpu_extension_names())
     with pytest.raises(ArtifactPolicyError, match="generic_linux=True"):
         verify_wheel(artifact, require_manylinux=True)
 
 
 def test_manylinux_gate_accepts_repaired_wheel(tmp_path: Path) -> None:
     artifact = tmp_path / "treemendous-0-cp312-cp312-manylinux_2_17_x86_64.whl"
-    _wheel(artifact, _stable_extension_names())
+    _wheel(artifact, _cpu_extension_names())
     assert verify_wheel(artifact, require_manylinux=True)["kind"] == "wheel"
 
 

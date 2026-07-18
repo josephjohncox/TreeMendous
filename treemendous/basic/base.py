@@ -1,60 +1,41 @@
-"""Shared implementation helpers for legacy Python interval trees."""
+"""Shared implementation helpers for internal Python backends."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from typing import Any, Generic, Protocol, TypeVar, cast
 
 from treemendous.domain import (
-    IntervalResult,
     Span,
     validate_coordinate,
     validate_length,
 )
-from treemendous.policies import LegacyPayloadPolicy
-
-D = TypeVar("D")
 
 
-class IntervalNodeProtocol(Protocol[D]):
+class IntervalNodeProtocol(Protocol):
     start: int
     end: int
     length: int
     height: int
     total_length: int
-    data: D | None
-    left: IntervalNodeProtocol[D] | None
-    right: IntervalNodeProtocol[D] | None
+    left: IntervalNodeProtocol | None
+    right: IntervalNodeProtocol | None
 
     def update_stats(self) -> None: ...
     def update_length(self) -> None: ...
 
 
 T = TypeVar("T")
-D_contra = TypeVar("D_contra", contravariant=True)
 
 
-class IntervalManagerProtocol(Protocol[D_contra]):
-    def reserve_interval(
-        self, start: int, end: int, data: D_contra | None = None
-    ) -> None: ...
-    def release_interval(
-        self, start: int, end: int, data: D_contra | None = None
-    ) -> None: ...
-    def find_interval(self, start: int, length: int) -> IntervalResult | None: ...
-    def get_intervals(self) -> list[IntervalResult]: ...
-
-
-class IntervalNodeBase(Generic[T, D]):
-    def __init__(self, start: int, end: int, data: D | None = None) -> None:
+class IntervalNodeBase(Generic[T]):
+    def __init__(self, start: int, end: int) -> None:
         Span(start, end)
         self.start = start
         self.end = end
         self.length = end - start
         self._height = 1
         self._total_length = self.length
-        self.data = data
         self.left: T | None = None
         self.right: T | None = None
 
@@ -78,30 +59,9 @@ class IntervalNodeBase(Generic[T, D]):
         self.length = self.end - self.start
 
 
-class IntervalTreeBase(Generic[T, D], ABC):
-    def __init__(
-        self,
-        root: T | None = None,
-        merge_fn: Callable[[D, D], D] | None = None,
-        split_fn: Callable[[D, int, int, int, int], D] | None = None,
-        can_merge: Callable[[D | None, D | None], bool] | None = None,
-        merge_idempotent: bool = False,
-        split_idempotent: bool = False,
-    ) -> None:
+class IntervalTreeBase(Generic[T], ABC):
+    def __init__(self, root: T | None = None) -> None:
         self.root = root
-        self.merge_fn = merge_fn
-        self.split_fn = split_fn
-        self.can_merge_fn = can_merge
-        self.merge_idempotent = merge_idempotent
-        # Kept only as a constructor compatibility field. Restriction callbacks
-        # are always invoked; idempotence is not a valid reason to skip them.
-        self.split_idempotent = split_idempotent
-        self._payload_policy = LegacyPayloadPolicy(
-            merge_fn=merge_fn,
-            split_fn=split_fn,
-            can_merge_fn=can_merge,
-            merge_idempotent=merge_idempotent,
-        )
 
     @staticmethod
     def validate_span(start: int, end: int) -> Span:
@@ -119,41 +79,15 @@ class IntervalTreeBase(Generic[T, D], ABC):
     def _print_tree(self, node: T | None, indent: str = "", prefix: str = "") -> None:
         if node is None:
             return
-        view = cast(IntervalNodeProtocol[Any], node)
+        view = cast(IntervalNodeProtocol, node)
         self._print_tree(cast(T | None, view.right), indent + "    ", "┌── ")
         self._print_node(node, indent, prefix)
-        if view.data is not None:
-            print(f"{indent}{prefix}data: {view.data}")
         self._print_tree(cast(T | None, view.left), indent + "    ", "└── ")
 
     def get_total_available_length(self) -> int:
         if self.root is None:
             return 0
-        return cast(IntervalNodeProtocol[Any], self.root).total_length
-
-    def merge_data(self, data1: D | None, data2: D | None) -> D | None:
-        if data1 is None:
-            return data2
-        if data2 is None:
-            return data1
-        return self._payload_policy.combine(data1, data2)
-
-    def split_data(
-        self,
-        data: D | None,
-        old_start: int,
-        old_end: int,
-        new_start: int,
-        new_end: int,
-    ) -> D | None:
-        if data is None or self.split_fn is None:
-            return data
-        return self._payload_policy.restrict(
-            data, Span(old_start, old_end), Span(new_start, new_end)
-        )
-
-    def can_merge_data(self, data1: D | None, data2: D | None) -> bool:
-        return self._payload_policy.can_merge(cast(D, data1), cast(D, data2))
+        return cast(IntervalNodeProtocol, self.root).total_length
 
     @abstractmethod
     def _print_node(self, node: T, indent: str, prefix: str) -> None: ...

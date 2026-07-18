@@ -18,8 +18,6 @@ from .types import (
 
 _PRIORITY = (
     "cpp_boundary",
-    # cpp_boundary_optimized is intentionally a parity alias, not a faster path.
-    "cpp_boundary_optimized",
     "py_boundary_summary",
     "py_summary",
     "py_treap",

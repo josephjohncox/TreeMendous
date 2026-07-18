@@ -10,7 +10,8 @@ from typing import Any
 
 from tests.performance.harness import benchmark_backends
 from tests.performance.workload import fragmented_workload, scheduling_workload
-from treemendous import list_available_backends
+from treemendous import BackendRegistry
+from treemendous.backends import Available
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -22,11 +23,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--processes", type=int, default=2)
     parser.add_argument("--backends", nargs="+")
     parser.add_argument("--output", type=Path)
-    parser.add_argument(
-        "--validate",
-        action="store_true",
-        help="retained for compatibility; validation is always mandatory",
-    )
     parser.add_argument(
         "--quick",
         action="store_true",
@@ -41,7 +37,12 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _default_backends() -> tuple[str, ...]:
-    available = list_available_backends()
+    registry = BackendRegistry.discover()
+    available = {
+        backend_id
+        for backend_id, state in registry.states.items()
+        if isinstance(state, Available)
+    }
     preferred = (
         "py_boundary",
         "py_avl_earliest",
@@ -49,7 +50,6 @@ def _default_backends() -> tuple[str, ...]:
         "py_treap",
         "py_boundary_summary",
         "cpp_boundary",
-        "cpp_boundary_optimized",
     )
     return tuple(backend for backend in preferred if backend in available)
 
@@ -113,10 +113,14 @@ def main(argv: list[str] | None = None) -> int:
                 cores=cores,
                 occupancy=occupancy,
                 jobs=args.operations,
-                seed=42 + cores + int(occupancy * 100),
+                seed=42 + cores + occupancy_percent,
             )
             for cores in (1, 8, 64)
-            for occupancy in (0.25, 0.50, 0.75)
+            for occupancy, occupancy_percent in (
+                (0.25, 25),
+                (0.50, 50),
+                (0.75, 75),
+            )
         )
 
     reports = [

@@ -36,12 +36,10 @@ REQUIRED_SDIST = {
     "treemendous/cpp/metal/boundary_summary_metal_bindings.cpp",
     "treemendous/cpp/metal/boundary_summary_metal.metal",
 }
-STABLE_EXTENSIONS = {
+CPU_EXTENSIONS = {
     "treemendous/cpp/boundary",
     "treemendous/cpp/treap",
     "treemendous/cpp/boundary_summary",
-    "treemendous/cpp/summary",
-    "treemendous/cpp/boundary_optimized",
     "treemendous/cpp/boundary_summary_optimized",
 }
 METAL_EXTENSION = "treemendous/cpp/metal/boundary_summary_metal"
@@ -129,8 +127,8 @@ def verify_wheel(path: Path, *, require_manylinux: bool = False) -> dict[str, ob
     generated = sorted(
         name for name in names if _suffix(name) in WHEEL_FORBIDDEN_GENERATED_SUFFIXES
     )
-    missing_stable = sorted(
-        stem for stem in STABLE_EXTENSIONS if not _contains_extension(names, stem)
+    missing_cpu = sorted(
+        stem for stem in CPU_EXTENSIONS if not _contains_extension(names, stem)
     )
     metal_present = _contains_extension(names, METAL_EXTENSION)
     resource_present = METAL_RESOURCE in names
@@ -140,7 +138,7 @@ def verify_wheel(path: Path, *, require_manylinux: bool = False) -> dict[str, ob
     if (
         leaked_sources
         or generated
-        or missing_stable
+        or missing_cpu
         or metal_mismatch
         or (require_manylinux and generic_linux)
         or missing_manylinux
@@ -148,7 +146,7 @@ def verify_wheel(path: Path, *, require_manylinux: bool = False) -> dict[str, ob
         raise ArtifactPolicyError(
             "wheel policy failure: "
             f"sources={leaked_sources!r}; generated={generated!r}; "
-            f"stable={missing_stable!r}; metal_extension={metal_present!r}; "
+            f"cpu_extensions={missing_cpu!r}; metal_extension={metal_present!r}; "
             f"metal_resource={resource_present!r}; generic_linux={generic_linux!r}; "
             f"manylinux_required={require_manylinux!r}"
         )

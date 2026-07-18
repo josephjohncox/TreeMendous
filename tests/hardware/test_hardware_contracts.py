@@ -6,7 +6,6 @@ import os
 import pytest
 
 from treemendous.backends import CATALOG_BY_ID, Unavailable, probe_backend
-from treemendous.cpp.metal.mixed import MixedBoundarySummaryManager
 
 
 def test_cuda_catalog_is_experimental_capability_empty_and_unavailable() -> None:
@@ -24,32 +23,6 @@ def test_metal_catalog_is_experimental_32_bit_and_unavailable() -> None:
     state = probe_backend(spec)
     assert isinstance(state, Unavailable)
     assert "experimental" in state.reason
-
-
-def test_mixed_metal_invalid_batch_does_not_partially_mutate_replicas() -> None:
-    class Recorder:
-        def __init__(self) -> None:
-            self.calls: list[tuple[str, tuple[object, ...]]] = []
-
-        def reserve_interval(self, *args) -> None:
-            self.calls.append(("reserve", args))
-
-        def batch_reserve(self, intervals) -> None:
-            self.calls.append(("batch_reserve", tuple(intervals)))
-
-    cpu = Recorder()
-    metal = Recorder()
-    allocated = Recorder()
-    mixed = MixedBoundarySummaryManager.__new__(MixedBoundarySummaryManager)
-    mixed.sync_cpu = True
-    mixed.__dict__["cpu_manager"] = cpu
-    mixed.__dict__["metal_manager"] = metal
-    mixed.__dict__["allocated_manager"] = allocated
-    with pytest.raises(ValueError):
-        mixed.batch_reserve([(0, 10), (5, 5)])
-    assert not cpu.calls
-    assert not metal.calls
-    assert not allocated.calls
 
 
 @pytest.mark.cuda

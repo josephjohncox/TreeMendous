@@ -10,7 +10,7 @@ just check
 `just check` runs Ruff lint and format checks across tracked Python, mypy across
 the package, branch coverage with the checked-in threshold, documentation
 contracts, packaging policy checks, and bytecode compilation. `just test` runs
-the full suite and unified backend validation. `just validate` combines the test
+the full suite and stable-backend validation. `just validate` combines the test
 and quality gates.
 
 Tests use strict marker and configuration handling. Mark platform/toolchain-only

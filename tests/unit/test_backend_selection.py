@@ -54,16 +54,16 @@ def _available(spec: BackendSpec) -> Available:
 
 def test_selection_is_priority_driven_not_catalog_order() -> None:
     python = _spec("py_boundary")
-    optimized = _spec("cpp_boundary_optimized", runtime=Runtime.CPP)
+    native = _spec("cpp_boundary", runtime=Runtime.CPP)
     summary = _spec("py_summary")
-    specs = (python, summary, optimized)
+    specs = (python, summary, native)
     probes = {spec.id: _available(spec) for spec in specs}
 
     forward = select_backend(specs, probes, BackendRequest())
     reverse = select_backend(tuple(reversed(specs)), probes, BackendRequest())
 
-    assert forward.selected is optimized
-    assert reverse.selected is optimized
+    assert forward.selected is native
+    assert reverse.selected is native
     assert not forward.rejected
 
 

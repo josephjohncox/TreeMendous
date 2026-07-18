@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from pybind11.setup_helpers import Pybind11Extension, build_ext
-from setuptools import setup
+from setuptools import setup  # type: ignore[import-untyped]
 
 
 def _boost_paths() -> tuple[list[str], list[str]]:
@@ -67,7 +67,7 @@ class PortableBuildExt(build_ext):
 
 
 def make_cpu_extensions() -> list[Pybind11Extension]:
-    """Create the stable and compatibility CPU extension definitions."""
+    """Create the cataloged CPU extension definitions."""
     with_icl = os.environ.get("TREE_MENDOUS_WITH_ICL") == "1"
     include_dirs, library_dirs = _boost_paths()
     define_macros: list[tuple[str, str | None]] = []
@@ -99,17 +99,6 @@ def make_cpu_extensions() -> list[Pybind11Extension]:
         Pybind11Extension(
             "treemendous.cpp.boundary_summary",
             ["treemendous/cpp/boundary_summary_bindings.cpp"],
-            **common,
-        ),
-        Pybind11Extension(
-            "treemendous.cpp.summary",
-            ["treemendous/cpp/summary_bindings.cpp"],
-            define_macros=[*define_macros, ("WITH_SUMMARY_STATS", None)],
-            **{key: value for key, value in common.items() if key != "define_macros"},
-        ),
-        Pybind11Extension(
-            "treemendous.cpp.boundary_optimized",
-            ["treemendous/cpp/boundary_optimized_bindings.cpp"],
             **common,
         ),
         Pybind11Extension(

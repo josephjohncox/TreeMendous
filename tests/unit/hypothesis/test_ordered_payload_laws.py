@@ -5,8 +5,7 @@ from __future__ import annotations
 from hypothesis import given
 from hypothesis import strategies as st
 
-from treemendous.backends import Capability
-from treemendous.backends.adapters import PythonBackendAdapter
+from treemendous.backends.adapters import BackendAdapter
 from treemendous.basic.boundary import IntervalManager
 from treemendous.domain import Span
 from treemendous.policies import OrderedPayloadPolicy
@@ -17,7 +16,6 @@ EVENTS = (
     (Span(5, 15), ("B",)),
     (Span(7, 12), ("C",)),
 )
-CAPABILITIES = frozenset({Capability.CORE, Capability.PAYLOADS})
 
 
 @given(st.permutations(EVENTS))
@@ -28,8 +26,7 @@ def test_ordered_fold_is_invariant_under_insertion_permutation(permutation) -> N
         event_key_fn=lambda value: value,
     )
     ranges = RangeSet(
-        PythonBackendAdapter(IntervalManager()),
-        capabilities=CAPABILITIES,
+        BackendAdapter(IntervalManager()),
         initially_available=False,
         payload_policy=policy,
     )

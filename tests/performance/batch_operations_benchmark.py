@@ -11,7 +11,7 @@ import time
 from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, cast
 
 from tests.performance.accelerator_benchmark import (
     HardwareUnavailableError,
@@ -25,7 +25,16 @@ from tests.performance.harness import (
     oracle_summary,
     timing_statistics,
 )
-from treemendous.basic.protocols import standardize_intervals_list
+from treemendous.backends.normalize import normalize_intervals
+
+
+class BatchImplementation(Protocol):
+    def release_interval(self, start: int, end: int) -> None: ...
+    def reserve_interval(self, start: int, end: int) -> None: ...
+    def batch_release(self, intervals: list[tuple[int, int]]) -> None: ...
+    def batch_reserve(self, intervals: list[tuple[int, int]]) -> None: ...
+    def get_intervals(self) -> Any: ...
+    def get_total_available_length(self) -> int: ...
 
 
 def contiguous_same_operation_runs(
@@ -82,7 +91,7 @@ def batch_workload(
     )
 
 
-def _new_raw(backend_id: str):
+def _new_raw(backend_id: str) -> BatchImplementation:
     implementation_class, _ = _load_accelerator_class(backend_id)
     implementation = implementation_class()
     if not all(
@@ -91,23 +100,23 @@ def _new_raw(backend_id: str):
         raise HardwareUnavailableError(
             f"{backend_id} does not expose both transactional batch methods"
         )
-    return implementation
+    return cast(BatchImplementation, implementation)
 
 
-def _setup(implementation: object, workload: BenchmarkWorkload) -> None:
+def _setup(implementation: BatchImplementation, workload: BenchmarkWorkload) -> None:
     for operation in workload.setup:
         assert operation.start is not None and operation.end is not None
         implementation.release_interval(operation.start, operation.end)
 
 
-def _state(implementation: object) -> tuple[tuple[int, int], ...]:
+def _state(implementation: BatchImplementation) -> tuple[tuple[int, int], ...]:
     return tuple(
         (interval.start, interval.end)
-        for interval in standardize_intervals_list(implementation.get_intervals())
+        for interval in normalize_intervals(implementation.get_intervals())
     )
 
 
-def _total(implementation: object) -> int:
+def _total(implementation: BatchImplementation) -> int:
     try:
         return int(implementation.get_total_available_length())
     except (AttributeError, TypeError, ValueError) as exc:
@@ -137,7 +146,7 @@ def _changed_components(
     return components + (1 if cursor < end else 0)
 
 
-def _apply_scalar(implementation: object, operation: Operation) -> None:
+def _apply_scalar(implementation: BatchImplementation, operation: Operation) -> None:
     assert operation.start is not None and operation.end is not None
     if operation.kind == "add":
         implementation.release_interval(operation.start, operation.end)
@@ -145,7 +154,9 @@ def _apply_scalar(implementation: object, operation: Operation) -> None:
         implementation.reserve_interval(operation.start, operation.end)
 
 
-def _execute_scalar(implementation: object, operations: tuple[Operation, ...]) -> None:
+def _execute_scalar(
+    implementation: BatchImplementation, operations: tuple[Operation, ...]
+) -> None:
     for operation in operations:
         try:
             _apply_scalar(implementation, operation)
@@ -159,8 +170,13 @@ def _execute_scalar(implementation: object, operations: tuple[Operation, ...]) -
                 )
 
 
-def _execute_batch_run(implementation: object, run: tuple[Operation, ...]) -> None:
-    spans = [(operation.start, operation.end) for operation in run]
+def _execute_batch_run(
+    implementation: BatchImplementation, run: tuple[Operation, ...]
+) -> None:
+    spans: list[tuple[int, int]] = []
+    for operation in run:
+        assert operation.start is not None and operation.end is not None
+        spans.append((operation.start, operation.end))
     expected_errors = [
         operation.expected_error for operation in run if operation.expected_error
     ]
@@ -181,13 +197,15 @@ def _execute_batch_run(implementation: object, run: tuple[Operation, ...]) -> No
             )
 
 
-def _execute_batch(implementation: object, operations: tuple[Operation, ...]) -> None:
+def _execute_batch(
+    implementation: BatchImplementation, operations: tuple[Operation, ...]
+) -> None:
     for run in contiguous_same_operation_runs(operations):
         _execute_batch_run(implementation, run)
 
 
 def _observe_scalar(
-    factory: Callable[[], object], workload: BenchmarkWorkload
+    factory: Callable[[], BatchImplementation], workload: BenchmarkWorkload
 ) -> ReplaySummary:
     implementation = factory()
     _setup(implementation, workload)
@@ -252,7 +270,10 @@ def _observe_scalar(
 
 
 def _validate_implementation(
-    factory: Callable[[], object], workload: BenchmarkWorkload, *, name: str
+    factory: Callable[[], BatchImplementation],
+    workload: BenchmarkWorkload,
+    *,
+    name: str,
 ) -> ReplaySummary:
     initial_count, expected = oracle_summary(workload)
     observed = _observe_scalar(factory, workload)
@@ -287,7 +308,7 @@ def _validate_implementation(
 
 
 def _validated_timing(
-    factory: Callable[[], object],
+    factory: Callable[[], BatchImplementation],
     workload: BenchmarkWorkload,
     *,
     name: str,
@@ -331,7 +352,7 @@ def benchmark_batches(
         interval_count=interval_count, operation_count=operation_count
     )
     implementation_class, device_info = _load_accelerator_class(backend_id)
-    factory = implementation_class
+    factory = cast(Callable[[], BatchImplementation], implementation_class)
     probe = factory()
     if not all(hasattr(probe, method) for method in ("batch_release", "batch_reserve")):
         raise HardwareUnavailableError(
@@ -341,8 +362,8 @@ def benchmark_batches(
     for batched in (False, True):
         for _ in range(warmups):
             _validated_timing(factory, workload, name=backend_id, batched=batched)
-    collected = {"scalar": [], "contiguous_batch": []}
-    setup_times = {"scalar": [], "contiguous_batch": []}
+    collected: dict[str, list[int]] = {"scalar": [], "contiguous_batch": []}
+    setup_times: dict[str, list[int]] = {"scalar": [], "contiguous_batch": []}
     for index in range(samples):
         modes = ["scalar", "contiguous_batch"]
         random.Random(0xBA7C + index).shuffle(modes)

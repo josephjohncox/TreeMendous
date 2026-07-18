@@ -6,15 +6,28 @@ with comprehensive summary statistics for O(1) analytics. This hybrid approach
 provides the best of both worlds: simple implementation with advanced analytics.
 """
 
-import warnings
-from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any
 
 from sortedcontainers import SortedDict
 
-from treemendous.basic.protocols import IntervalResult, PerformanceStats
-from treemendous.domain import ManagedDomain, Span, validate_coordinate, validate_length
+from treemendous.domain import (
+    IntervalResult,
+    ManagedDomain,
+    Span,
+    validate_coordinate,
+    validate_length,
+)
+
+
+@dataclass(frozen=True)
+class BoundaryPerformanceStats:
+    operation_count: int
+    cache_hits: int
+
+    @property
+    def cache_hit_rate(self) -> float:
+        return self.cache_hits / self.operation_count if self.operation_count else 0.0
 
 
 @dataclass
@@ -136,15 +149,9 @@ class BoundarySummaryManager:
 
     def __init__(
         self,
-        merge_fn: Callable[[Any, Any], Any] | None = None,
-        split_fn: Callable[[Any, int, int, int, int], Any] | None = None,
-        can_merge: Callable[[Any | None, Any | None], bool] | None = None,
-        merge_idempotent: bool = False,
-        split_idempotent: bool = False,
         managed_domain: ManagedDomain | Span | tuple[int, int] | None = None,
-    ):
-        # Core boundary management
-        self.intervals: SortedDict[int, tuple[int, Any | None]] = SortedDict()
+    ) -> None:
+        self.intervals: SortedDict[int, tuple[int, None]] = SortedDict()
 
         # Summary statistics caching
         self._cached_summary: BoundarySummary | None = None
@@ -158,48 +165,10 @@ class BoundarySummaryManager:
         )
         self._domain_explicit = managed_domain is not None
 
-        # Performance tracking
         self._operation_count = 0
         self._cache_hits = 0
-        self._merge_fn = merge_fn
-        self._split_fn = split_fn
-        self._can_merge = can_merge
-        self._merge_idempotent = merge_idempotent
-        self._split_idempotent = split_idempotent
 
-    def _merge_data(self, data1: Any | None, data2: Any | None) -> Any | None:
-        if data1 is None:
-            return data2
-        if data2 is None:
-            return data1
-        if self._merge_idempotent and (data1 is data2 or data1 == data2):
-            return data1
-        if self._merge_fn is None:
-            if isinstance(data1, set) and isinstance(data2, set):
-                return data1 | data2
-            return data1
-        return self._merge_fn(data1, data2)
-
-    def _split_data(
-        self,
-        data: Any | None,
-        old_start: int,
-        old_end: int,
-        new_start: int,
-        new_end: int,
-    ) -> Any | None:
-        if data is None:
-            return None
-        if self._split_fn is None:
-            return data
-        return self._split_fn(data, old_start, old_end, new_start, new_end)
-
-    def _can_merge_data(self, data1: Any | None, data2: Any | None) -> bool:
-        if self._can_merge is None:
-            return True
-        return self._can_merge(data1, data2)
-
-    def release_interval(self, start: int, end: int, data: Any | None = None) -> None:
+    def release_interval(self, start: int, end: int) -> None:
         """Add interval to available space with summary update"""
         span = Span(start, end)
         if self._domain_explicit:
@@ -211,35 +180,28 @@ class BoundarySummaryManager:
 
         # Find insertion position
         idx = self.intervals.bisect_left(start)
-        merged_data = data
 
-        # Merge with previous interval if overlapping or adjacent
+        # Merge with the previous interval if overlapping or adjacent.
         if idx > 0:
             prev_start = self.intervals.keys()[idx - 1]
-            prev_end, prev_data = self.intervals[prev_start]
-            if prev_end > start or (
-                prev_end == start and self._can_merge_data(prev_data, merged_data)
-            ):
+            prev_end, _ = self.intervals[prev_start]
+            if prev_end >= start:
                 start = prev_start
                 end = max(end, prev_end)
-                merged_data = self._merge_data(merged_data, prev_data)
                 idx -= 1
                 del self.intervals[prev_start]
 
         # Merge with following intervals if overlapping
         while idx < len(self.intervals):
             curr_start = self.intervals.keys()[idx]
-            curr_end, curr_data = self.intervals[curr_start]
+            curr_end, _ = self.intervals[curr_start]
             if curr_start > end:
                 break
-            if curr_start == end and not self._can_merge_data(merged_data, curr_data):
-                break
             end = max(end, curr_end)
-            merged_data = self._merge_data(merged_data, curr_data)
             del self.intervals[curr_start]
 
         # Insert merged interval
-        self.intervals[start] = (end, merged_data)
+        self.intervals[start] = (end, None)
         if not self._domain_explicit:
             self._managed_domain = (
                 self._managed_domain.extended(span)
@@ -249,7 +211,7 @@ class BoundarySummaryManager:
         if tuple(self.intervals.items()) != before:
             self._summary_dirty = True
 
-    def reserve_interval(self, start: int, end: int, data: Any | None = None) -> None:
+    def reserve_interval(self, start: int, end: int) -> None:
         """Remove interval from available space with summary update"""
         span = Span(start, end)
         if self._domain_explicit:
@@ -266,13 +228,13 @@ class BoundarySummaryManager:
             if prev_end > start:
                 idx -= 1
 
-        intervals_to_add: list[tuple[int, int, Any | None]] = []
+        intervals_to_add: list[tuple[int, int]] = []
         keys_to_delete = []
 
         keys = list(self.intervals.keys())
         while idx < len(keys):
             curr_start = keys[idx]
-            curr_end, curr_data = self.intervals[curr_start]
+            curr_end, _ = self.intervals[curr_start]
 
             if curr_start >= end:
                 break
@@ -283,17 +245,11 @@ class BoundarySummaryManager:
             if overlap_start < overlap_end:
                 keys_to_delete.append(curr_start)
 
-                # Add non-overlapping parts
+                # Retain the non-overlapping geometry.
                 if curr_start < start:
-                    left_data = self._split_data(
-                        curr_data, curr_start, curr_end, curr_start, start
-                    )
-                    intervals_to_add.append((curr_start, start, left_data))
+                    intervals_to_add.append((curr_start, start))
                 if curr_end > end:
-                    right_data = self._split_data(
-                        curr_data, curr_start, curr_end, end, curr_end
-                    )
-                    intervals_to_add.append((end, curr_end, right_data))
+                    intervals_to_add.append((end, curr_end))
 
             idx += 1
 
@@ -301,8 +257,8 @@ class BoundarySummaryManager:
         for key in keys_to_delete:
             del self.intervals[key]
 
-        for s, e, interval_data in intervals_to_add:
-            self.intervals[s] = (e, interval_data)
+        for remaining_start, remaining_end in intervals_to_add:
+            self.intervals[remaining_start] = (remaining_end, None)
         if keys_to_delete:
             self._summary_dirty = True
 
@@ -312,32 +268,28 @@ class BoundarySummaryManager:
         validate_length(length)
         idx = self.intervals.bisect_right(start) - 1
         if idx >= 0:
-            s = self.intervals.keys()[idx]
-            e, data = self.intervals[s]
-            allocation_start = max(start, s)
-            if allocation_start + length <= e:
-                return IntervalResult(
-                    allocation_start, allocation_start + length, data=data
-                )
+            interval_start = self.intervals.keys()[idx]
+            interval_end, _ = self.intervals[interval_start]
+            allocation_start = max(start, interval_start)
+            if allocation_start + length <= interval_end:
+                return IntervalResult(allocation_start, allocation_start + length)
             idx += 1
         else:
             idx = 0
         while idx < len(self.intervals):
-            s = self.intervals.keys()[idx]
-            e, data = self.intervals[s]
-            allocation_start = max(start, s)
-            if allocation_start + length <= e:
-                return IntervalResult(
-                    allocation_start, allocation_start + length, data=data
-                )
+            interval_start = self.intervals.keys()[idx]
+            interval_end, _ = self.intervals[interval_start]
+            allocation_start = max(start, interval_start)
+            if allocation_start + length <= interval_end:
+                return IntervalResult(allocation_start, allocation_start + length)
             idx += 1
         return None
 
     def get_intervals(self) -> list[IntervalResult]:
         """Get all available intervals"""
         return [
-            IntervalResult(start=start, end=end, data=data)
-            for start, (end, data) in self.intervals.items()
+            IntervalResult(start=start, end=end)
+            for start, (end, _) in self.intervals.items()
         ]
 
     def get_total_available_length(self) -> int:
@@ -405,19 +357,17 @@ class BoundarySummaryManager:
         """Find earliest fit or least-waste fit with deterministic ties."""
         validate_length(length)
         candidates = [
-            (start, end, data)
-            for start, (end, data) in self.intervals.items()
+            (start, end)
+            for start, (end, _) in self.intervals.items()
             if end - start >= length
         ]
         if not candidates:
             return None
         if prefer_early:
-            start, _, data = min(candidates, key=lambda item: item[0])
+            start, _ = min(candidates, key=lambda item: item[0])
         else:
-            start, end, data = min(
-                candidates, key=lambda item: (item[1] - item[0], item[0])
-            )
-        return IntervalResult(start=start, end=start + length, data=data)
+            start, _ = min(candidates, key=lambda item: (item[1] - item[0], item[0]))
+        return IntervalResult(start=start, end=start + length)
 
     def find_largest_available(self) -> IntervalResult | None:
         """Find largest available interval using summary optimization"""
@@ -427,20 +377,17 @@ class BoundarySummaryManager:
             return None
 
         # Find the interval with largest size
-        for start, (end, data) in self.intervals.items():
+        for start, (end, _) in self.intervals.items():
             if (end - start) == summary.largest_interval_length:
-                return IntervalResult(start=start, end=end, data=data)
+                return IntervalResult(start=start, end=end)
 
         return None
 
-    def get_performance_stats(self) -> PerformanceStats:
-        """Get implementation-specific performance statistics"""
-        return PerformanceStats(
+    def get_performance_stats(self) -> BoundaryPerformanceStats:
+        """Return cache counters for this raw backend."""
+        return BoundaryPerformanceStats(
             operation_count=self._operation_count,
             cache_hits=self._cache_hits,
-            cache_hit_rate=self._cache_hits / max(1, self._operation_count),
-            implementation_name="boundary_summary",
-            language="Python",
         )
 
     def print_intervals(self) -> None:
@@ -448,9 +395,8 @@ class BoundarySummaryManager:
         print("Boundary-Based Summary Interval Manager:")
         print(f"Available intervals ({len(self.intervals)}):")
 
-        for start, (end, data) in self.intervals.items():
-            suffix = f" data={data}" if data is not None else ""
-            print(f"  [{start}, {end}) length={end - start}{suffix}")
+        for start, (end, _) in self.intervals.items():
+            print(f"  [{start}, {end}) length={end - start}")
 
         summary = self.get_summary()
         print("\nSummary Statistics:")
@@ -462,44 +408,3 @@ class BoundarySummaryManager:
 
         perf = self.get_performance_stats()
         print(f"  Cache hit rate: {perf.cache_hit_rate:.1%}")
-
-
-# Convenience functions for different use cases
-def create_boundary_summary_manager() -> BoundarySummaryManager:
-    """Create boundary summary manager with optimal configuration"""
-    return BoundarySummaryManager()
-
-
-def demo_boundary_summary_performance() -> None:
-    """Run the deprecated, deterministic boundary-summary console demo.
-
-    The historical function remains callable for compatibility, but importing
-    this module never runs it. Use the validated performance harness for timing.
-    """
-    warnings.warn(
-        "demo_boundary_summary_performance is deprecated; use the validated "
-        "performance harness instead",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    manager = BoundarySummaryManager()
-    manager.release_interval(0, 10_000)
-    for operation, start, end in (
-        ("reserve", 1_000, 1_500),
-        ("reserve", 3_000, 3_200),
-        ("reserve", 5_000, 5_800),
-        ("release", 2_000, 2_500),
-        ("reserve", 7_000, 7_300),
-        ("release", 6_000, 6_500),
-    ):
-        if operation == "reserve":
-            manager.reserve_interval(start, end)
-        else:
-            manager.release_interval(start, end)
-
-    summary = manager.get_summary()
-    performance = manager.get_performance_stats()
-    print("Boundary Summary Manager Performance Demo")
-    print(f"Total free: {summary.total_free_length}")
-    print(f"Intervals: {summary.interval_count}")
-    print(f"Operations: {performance.operation_count}")

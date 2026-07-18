@@ -34,9 +34,9 @@ PYBIND11_MODULE(boundary_summary, m) {
         .def_readwrite("end", &IntervalResult::end)
         .def_readwrite("length", &IntervalResult::length)
         .def("__repr__", [](const IntervalResult &ir) {
-            return "IntervalResult(start=" + std::to_string(ir.start) + 
-                   ", end=" + std::to_string(ir.end) + 
-                   ", length=" + std::to_string(ir.length) + ", data=None)";
+            return "IntervalResult(start=" + std::to_string(ir.start) +
+                   ", end=" + std::to_string(ir.end) +
+                   ", length=" + std::to_string(ir.length) + ")";
         });
     
     // AvailabilityStats structure
@@ -112,64 +112,4 @@ PYBIND11_MODULE(boundary_summary, m) {
         .def("print_intervals", &BoundarySummaryManager::print_intervals,
              "Print intervals with summary information");
     
-    // Module-level utilities
-    m.def("benchmark_boundary_summary", []() {
-        BoundarySummaryManager manager;
-        manager.release_interval(0, 100000);
-        
-        // Generate random operations
-        std::mt19937 rng(42);
-        std::uniform_int_distribution<int> op_dist(0, 1);
-        std::uniform_int_distribution<int> start_dist(0, 90000);
-        std::uniform_int_distribution<int> length_dist(1, 1000);
-        
-        const int num_operations = 10000;
-        
-        auto start_time = std::chrono::high_resolution_clock::now();
-        
-        for (int i = 0; i < num_operations; ++i) {
-            std::string op = (op_dist(rng) == 0) ? "reserve" : "release";
-            int start = start_dist(rng);
-            int end = start + length_dist(rng);
-            
-            if (op == "reserve") {
-                manager.reserve_interval(start, end);
-            } else {
-                manager.release_interval(start, end);
-            }
-        }
-        
-        auto end_time = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
-        
-        // Benchmark summary access
-        auto summary_start = std::chrono::high_resolution_clock::now();
-        for (int i = 0; i < 1000; ++i) {
-            auto stats = manager.get_availability_stats();
-        }
-        auto summary_end = std::chrono::high_resolution_clock::now();
-        auto summary_duration = std::chrono::duration_cast<std::chrono::microseconds>(summary_end - summary_start);
-        
-        py::dict result;
-        result["operations"] = num_operations;
-        result["time_microseconds"] = duration.count();
-        result["ops_per_second"] = static_cast<double>(num_operations) / (duration.count() / 1000000.0);
-        result["summary_time_microseconds"] = summary_duration.count();
-        result["avg_summary_time_us"] = static_cast<double>(summary_duration.count()) / 1000.0;
-        
-        auto summary = manager.get_summary();
-        result["final_intervals"] = summary.interval_count;
-        result["fragmentation"] = summary.fragmentation_index;
-        result["utilization"] = summary.utilization;
-        
-        auto perf = manager.get_performance_stats();
-        result["cache_hit_rate"] = perf.cache_hit_rate;
-        
-        return result;
-    }, "Benchmark boundary summary manager performance");
-    
-    // Version and metadata
-    m.attr("__version__") = "0.2.0";
-    m.attr("__author__") = "Joseph Cox";
-    m.attr("__description__") = "Boundary-based interval manager with summary statistics";
 }

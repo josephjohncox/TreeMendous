@@ -4,22 +4,45 @@
 
 #include <map>
 #include <vector>
+#if __cplusplus >= 201703L
 #include <optional>
+template <typename T> using Optional = std::optional<T>;
+constexpr auto kNoValue = std::nullopt;
+#else
+#include <memory>
+struct NoValue {};
+constexpr NoValue kNoValue{};
+template <typename T> class Optional {
+public:
+    Optional() = default;
+    Optional(NoValue) {}
+    Optional(const T& value) : value_(std::make_shared<T>(value)) {}
+
+    Optional& operator=(const T& value) {
+        value_ = std::make_shared<T>(value);
+        return *this;
+    }
+
+    explicit operator bool() const { return has_value(); }
+    bool has_value() const { return static_cast<bool>(value_); }
+    T& value() { return *value_; }
+    const T& value() const { return *value_; }
+
+private:
+    std::shared_ptr<T> value_;
+};
+#endif
 #include <iostream>
 #include <algorithm>
-#include <cmath>
 #include <numeric>
 #include <iomanip>
 #include <climits>
-#include <random>
-#include <chrono>
 
 struct IntervalResult {
     int start;
     int end;
     int length;
-    void* data = nullptr;  // For compatibility, though we don't use it
-    
+
     IntervalResult(int s, int e) : start(s), end(e), length(e - s) {}
     IntervalResult(int s, int e, int len) : start(s), end(e), length(len) {}
 };
@@ -66,8 +89,9 @@ struct BoundarySummary {
 
 class BoundarySummaryManager {
 public:
-    BoundarySummaryManager() : operation_count_(0), cache_hits_(0), summary_dirty_(true),
-                               managed_start_(-1), managed_end_(-1) {}
+    BoundarySummaryManager() : summary_dirty_(true), cache_hits_(0),
+                               managed_start_(-1), managed_end_(-1),
+                               operation_count_(0) {}
     
     void release_interval(int start, int end) {
         if (start >= end) return;
@@ -144,7 +168,7 @@ public:
         }
     }
     
-    std::optional<IntervalResult> find_interval(int start, int length) {
+    Optional<IntervalResult> find_interval(int start, int length) {
         auto it = intervals_.lower_bound(start);
         
         if (it != intervals_.end()) {
@@ -168,11 +192,11 @@ public:
             }
         }
         
-        return std::nullopt;
+        return kNoValue;
     }
     
-    std::optional<IntervalResult> find_best_fit(int length, bool prefer_early = true) {
-        std::optional<IntervalResult> best_candidate;
+    Optional<IntervalResult> find_best_fit(int length, bool prefer_early = true) {
+        Optional<IntervalResult> best_candidate;
         int best_fit_size = INT_MAX;
         int best_start = INT_MAX;
         
@@ -197,11 +221,11 @@ public:
         return best_candidate;
     }
     
-    std::optional<IntervalResult> find_largest_available() {
+    Optional<IntervalResult> find_largest_available() {
         BoundarySummary summary = get_summary();
         
         if (summary.largest_interval_length == 0) {
-            return std::nullopt;
+            return kNoValue;
         }
         
         // Find the interval with largest size
@@ -211,7 +235,7 @@ public:
             }
         }
         
-        return std::nullopt;
+        return kNoValue;
     }
     
     BoundarySummary get_summary() {
@@ -310,7 +334,7 @@ private:
     std::map<int, int> intervals_;
     
     // Summary caching
-    mutable std::optional<BoundarySummary> cached_summary_;
+    mutable Optional<BoundarySummary> cached_summary_;
     mutable bool summary_dirty_;
     mutable int cache_hits_;
     

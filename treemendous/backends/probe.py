@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from treemendous.basic.protocols import (
-    standardize_interval_result,
-    standardize_intervals_list,
-)
+from treemendous.backends.normalize import normalize_interval, normalize_intervals
 
 from .types import (
     Available,
@@ -24,7 +21,7 @@ from .types import (
 def _shape(implementation: Any) -> tuple[tuple[int, int], ...]:
     return tuple(
         (item.start, item.end)
-        for item in standardize_intervals_list(implementation.get_intervals())
+        for item in normalize_intervals(implementation.get_intervals())
     )
 
 
@@ -51,13 +48,13 @@ def _probe_core(spec: BackendSpec, implementation: Any) -> None:
     implementation.release_interval(10, 20)
     if _shape(implementation) != ((0, 5), (10, 20)):
         raise AssertionError("snapshot is not ordered and canonical")
-    found = standardize_interval_result(implementation.find_interval(0, 8))
+    found = normalize_interval(implementation.find_interval(0, 8))
     if found is None or (found.start, found.end) != (10, 18):
         raise AssertionError("fragmented first-fit semantic check failed")
-    containing = standardize_interval_result(implementation.find_interval(11, 3))
+    containing = normalize_interval(implementation.find_interval(11, 3))
     if containing is None or (containing.start, containing.end) != (11, 14):
         raise AssertionError("containing-start first-fit semantic check failed")
-    if standardize_interval_result(implementation.find_interval(0, 50)) is not None:
+    if normalize_interval(implementation.find_interval(0, 50)) is not None:
         raise AssertionError("no-fit query must return None")
     if implementation.get_total_available_length() != 15:
         raise AssertionError("total measure semantic check failed")
@@ -97,82 +94,6 @@ def _probe_native_limits(spec: BackendSpec) -> None:
             raise AssertionError("outside-int64 conversion must raise OverflowError")
 
 
-def _rangeset(spec: BackendSpec, *, payload_policy: Any = None) -> Any:
-    from treemendous.backends.adapters import CppBackendAdapter, PythonBackendAdapter
-    from treemendous.rangeset import RangeSet
-
-    implementation = spec.loader()(**dict(spec.constructor_args))
-    adapter_type = (
-        PythonBackendAdapter if spec.runtime is Runtime.PYTHON else CppBackendAdapter
-    )
-    return RangeSet(
-        adapter_type(implementation),
-        capabilities=spec.capabilities,
-        initially_available=False,
-        payload_policy=payload_policy,
-    )
-
-
-def _probe_payloads(spec: BackendSpec) -> None:
-    from treemendous.domain import Span
-    from treemendous.policies import (
-        JoinPayloadPolicy,
-        OrderedPayloadPolicy,
-        UniformPayloadPolicy,
-    )
-
-    join_ranges = _rangeset(
-        spec,
-        payload_policy=JoinPayloadPolicy(lambda left, right: left | right, frozenset()),
-    )
-    join_ranges.add(Span(0, 5), frozenset({"A"}))
-    join_ranges.add(Span(5, 10), frozenset({"B"}))
-    fit = join_ranges.first_fit(
-        10, not_before=0, payload_predicate=lambda data: bool(data)
-    )
-    if fit is None or fit.data != (frozenset({"A"}), frozenset({"B"})):
-        raise AssertionError("payload query failed across accepted segments")
-
-    uniform = _rangeset(spec, payload_policy=UniformPayloadPolicy())
-    uniform.add(Span(0, 10), "A")
-    before = uniform.snapshot()
-    try:
-        uniform.add(Span(5, 15), "B")
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("uniform payload conflict was accepted")
-    if uniform.snapshot() != before:
-        raise AssertionError("uniform payload conflict changed state")
-
-    policy = OrderedPayloadPolicy(
-        lambda left, right: left + right, (), event_key_fn=lambda value: value
-    )
-    observed = []
-    for events in (
-        ((Span(0, 10), ("A",)), (Span(5, 15), ("B",))),
-        ((Span(5, 15), ("B",)), (Span(0, 10), ("A",))),
-    ):
-        ordered = _rangeset(spec, payload_policy=policy)
-        for span, data in events:
-            ordered.add(span, data)
-        observed.append(tuple((x.start, x.end, x.data) for x in ordered.intervals()))
-    if observed[0] != observed[1]:
-        raise AssertionError("ordered payload fold depends on insertion order")
-
-
-def _probe_atomic_allocate(spec: BackendSpec) -> None:
-    from treemendous.domain import Span
-
-    ranges = _rangeset(spec)
-    ranges.add(Span(0, 10))
-    allocated = ranges.allocate(4, not_before=2, not_after=8)
-    if allocated is None or allocated.span != Span(2, 6):
-        raise AssertionError("atomic allocation returned the wrong fit")
-    if tuple((x.start, x.end) for x in ranges.intervals()) != ((0, 2), (6, 10)):
-        raise AssertionError("atomic allocation did not reserve exactly its result")
-
-
 def _probe_analytics(spec: BackendSpec) -> None:
     implementation = spec.loader()(**dict(spec.constructor_args))
     if not hasattr(implementation, "get_availability_stats"):
@@ -190,10 +111,10 @@ def _probe_best_fit(spec: BackendSpec) -> None:
         raise AssertionError("best-fit API is absent")
     implementation.release_interval(0, 20)
     implementation.release_interval(30, 35)
-    found = standardize_interval_result(implementation.find_best_fit(5, False))
+    found = normalize_interval(implementation.find_best_fit(5, False))
     if found is None or (found.start, found.end) != (30, 35):
         raise AssertionError("best-fit semantic check failed")
-    if standardize_interval_result(implementation.find_best_fit(50)) is not None:
+    if normalize_interval(implementation.find_best_fit(50)) is not None:
         raise AssertionError("best-fit no-fit must return None")
 
 
@@ -202,17 +123,15 @@ def _probe_random_sample(spec: BackendSpec) -> None:
     if not hasattr(implementation, "sample_random_interval"):
         raise AssertionError("random-sampling API is absent")
     implementation.release_interval(3, 8)
-    sampled = standardize_interval_result(implementation.sample_random_interval())
+    sampled = normalize_interval(implementation.sample_random_interval())
     if sampled is None or (sampled.start, sampled.end) != (3, 8):
         raise AssertionError("random sample escaped available geometry")
 
 
 _CAPABILITY_PROBES = {
-    Capability.PAYLOADS: _probe_payloads,
     Capability.ANALYTICS: _probe_analytics,
     Capability.BEST_FIT: _probe_best_fit,
     Capability.RANDOM_SAMPLE: _probe_random_sample,
-    Capability.ATOMIC_ALLOCATE: _probe_atomic_allocate,
 }
 
 

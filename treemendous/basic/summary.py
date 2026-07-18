@@ -6,9 +6,8 @@ to enable efficient scheduling queries. Each node maintains summary information 
 the free space distribution in its subtree, allowing for fast "best fit" operations.
 """
 
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
 from treemendous.basic.base import IntervalNodeBase, IntervalTreeBase
 from treemendous.domain import ManagedDomain, Span, validate_coordinate, validate_length
@@ -114,14 +113,14 @@ class TreeSummary:
         )
 
 
-class SummaryIntervalNode(IntervalNodeBase["SummaryIntervalNode", Any]):
+class SummaryIntervalNode(IntervalNodeBase["SummaryIntervalNode"]):
     """AVL tree node with comprehensive summary statistics"""
 
-    def __init__(self, start: int, end: int, data: Any | None = None) -> None:
-        super().__init__(start, end, data)
+    def __init__(self, start: int, end: int) -> None:
+        super().__init__(start, end)
         self.summary: TreeSummary = TreeSummary.from_interval(start, end)
         self.height: int = 1
-        self.total_length: int = end - start  # For compatibility
+        self.total_length: int = end - start
 
     def update_stats(self) -> None:
         """Update height, total_length, and summary statistics"""
@@ -130,7 +129,7 @@ class SummaryIntervalNode(IntervalNodeBase["SummaryIntervalNode", Any]):
         # Update height (AVL tree invariant)
         self.height = 1 + max(self.get_height(self.left), self.get_height(self.right))
 
-        # Update total length for compatibility
+        # Update the subtree measure.
         self.total_length = self.length
         if self.left:
             self.total_length += self.left.total_length
@@ -149,25 +148,14 @@ class SummaryIntervalNode(IntervalNodeBase["SummaryIntervalNode", Any]):
         return node.height if node else 0
 
 
-class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode, Any]):
+class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode]):
     """AVL interval tree with summary statistics for efficient scheduling"""
 
     def __init__(
         self,
-        merge_fn: Callable[[Any, Any], Any] | None = None,
-        split_fn: Callable[[Any, int, int, int, int], Any] | None = None,
-        can_merge: Callable[[Any | None, Any | None], bool] | None = None,
-        merge_idempotent: bool = False,
-        split_idempotent: bool = False,
         managed_domain: ManagedDomain | Span | tuple[int, int] | None = None,
     ) -> None:
-        super().__init__(
-            merge_fn=merge_fn,
-            split_fn=split_fn,
-            can_merge=can_merge,
-            merge_idempotent=merge_idempotent,
-            split_idempotent=split_idempotent,
-        )
+        super().__init__()
         self.root: SummaryIntervalNode | None = None
         self._managed_domain = (
             managed_domain
@@ -213,7 +201,7 @@ class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode, Any]):
         )
 
     # Implement required abstract methods
-    def reserve_interval(self, start: int, end: int, data: Any | None = None) -> None:
+    def reserve_interval(self, start: int, end: int) -> None:
         """Mark interval as occupied (remove from free space)"""
         span = Span(start, end)
         if self._domain_explicit:
@@ -222,7 +210,7 @@ class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode, Any]):
                 raise ValueError("span must be contained in the managed domain")
         self.root = self._delete_interval(self.root, start, end)
 
-    def release_interval(self, start: int, end: int, data: Any | None = None) -> None:
+    def release_interval(self, start: int, end: int) -> None:
         """Mark interval as free (add to available space)"""
         span = Span(start, end)
         if self._domain_explicit:
@@ -233,15 +221,11 @@ class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode, Any]):
         overlapping_nodes: list[SummaryIntervalNode] = []
         self.root = self._delete_overlaps(self.root, start, end, overlapping_nodes)
 
-        # Merge with overlapping intervals
-        merged_data = data
         for node in overlapping_nodes:
             start = min(start, node.start)
             end = max(end, node.end)
-            merged_data = self.merge_data(merged_data, node.data)
 
-        # Insert merged interval
-        new_node = SummaryIntervalNode(start, end, merged_data)
+        new_node = SummaryIntervalNode(start, end)
         self.root = self._insert(self.root, new_node)
         if not self._domain_explicit:
             self._managed_domain = (
@@ -254,9 +238,9 @@ class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode, Any]):
         """Find the earliest available interval at or after ``start``."""
         validate_coordinate(start, "start")
         validate_length(length)
-        intervals: list[tuple[int, int, Any | None]] = []
+        intervals: list[tuple[int, int]] = []
         self._collect_intervals(self.root, intervals)
-        for interval_start, interval_end, _ in intervals:
+        for interval_start, interval_end in intervals:
             allocation_start = max(start, interval_start)
             if allocation_start + length <= interval_end:
                 return allocation_start, allocation_start + length
@@ -321,23 +305,23 @@ class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode, Any]):
             "bounds": (summary.earliest_free_start, summary.latest_free_end),
         }
 
-    def get_intervals(self) -> list[tuple[int, int, Any | None]]:
+    def get_intervals(self) -> list[tuple[int, int]]:
         """Get all free intervals"""
-        intervals: list[tuple[int, int, Any | None]] = []
+        intervals: list[tuple[int, int]] = []
         self._collect_intervals(self.root, intervals)
         return intervals
 
     def _collect_intervals(
         self,
         node: SummaryIntervalNode | None,
-        intervals: list[tuple[int, int, Any | None]],
+        intervals: list[tuple[int, int]],
     ) -> None:
         """Collect all intervals via in-order traversal"""
         if not node:
             return
 
         self._collect_intervals(node.left, intervals)
-        intervals.append((node.start, node.end, node.data))
+        intervals.append((node.start, node.end))
         self._collect_intervals(node.right, intervals)
 
     def _find_interval_optimized(
@@ -455,19 +439,11 @@ class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode, Any]):
 
             # Create left remainder if exists
             if node.start < start:
-                left_data = self.split_data(
-                    node.data, node.start, node.end, node.start, start
-                )
-                left_node = SummaryIntervalNode(node.start, start, left_data)
-                nodes_to_insert.append(left_node)
+                nodes_to_insert.append(SummaryIntervalNode(node.start, start))
 
             # Create right remainder if exists
             if node.end > end:
-                right_data = self.split_data(
-                    node.data, node.start, node.end, end, node.end
-                )
-                right_node = SummaryIntervalNode(end, node.end, right_data)
-                nodes_to_insert.append(right_node)
+                nodes_to_insert.append(SummaryIntervalNode(end, node.end))
 
             # Remove current node and process subtrees
             node = self._merge_subtrees(
@@ -496,15 +472,11 @@ class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode, Any]):
         if not node:
             return None
 
-        if node.end < start or (
-            node.end == start and not self.can_merge_data(node.data, None)
-        ):
+        if node.end < start:
             node.right = self._delete_overlaps(
                 node.right, start, end, overlapping_nodes
             )
-        elif node.start > end or (
-            node.start == end and not self.can_merge_data(node.data, None)
-        ):
+        elif node.start > end:
             node.left = self._delete_overlaps(node.left, start, end, overlapping_nodes)
         else:
             # Overlap detected

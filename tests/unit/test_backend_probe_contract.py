@@ -90,18 +90,18 @@ class _InitiallyNonEmpty(IntervalManager):
 
 
 class _AcceptsInvalidRelease(IntervalManager):
-    def release_interval(self, start: int, end: int, data=None) -> None:
+    def release_interval(self, start: int, end: int) -> None:
         if start == end:
             return
-        super().release_interval(start, end, data)
+        super().release_interval(start, end)
 
 
 class _MutatesBeforeInvalidRelease(IntervalManager):
-    def release_interval(self, start: int, end: int, data=None) -> None:
+    def release_interval(self, start: int, end: int) -> None:
         if start == end:
-            super().release_interval(0, 1, data)
+            super().release_interval(0, 1)
             raise ValueError("invalid after mutation")
-        super().release_interval(start, end, data)
+        super().release_interval(start, end)
 
 
 class _NeverFits(IntervalManager):
@@ -110,7 +110,7 @@ class _NeverFits(IntervalManager):
 
 
 class _IgnoresValidReserve(IntervalManager):
-    def reserve_interval(self, start: int, end: int, data=None) -> None:
+    def reserve_interval(self, start: int, end: int) -> None:
         if start == end:
             Span(start, end)
         return None

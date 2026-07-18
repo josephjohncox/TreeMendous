@@ -49,8 +49,6 @@ def test_wheel_clean_install_and_arbitrary_cwd(tmp_path: Path) -> None:
         "treemendous.cpp.boundary",
         "treemendous.cpp.treap",
         "treemendous.cpp.boundary_summary",
-        "treemendous.cpp.summary",
-        "treemendous.cpp.boundary_optimized",
         "treemendous.cpp.boundary_summary_optimized",
     )
     clean_environment = {
@@ -71,15 +69,10 @@ def test_wheel_clean_install_and_arbitrary_cwd(tmp_path: Path) -> None:
     code = """
 import json
 from treemendous import Span, create_range_set
-from treemendous.cpp import boundary, boundary_optimized
 ranges = create_range_set((0, 100), backend='cpp_boundary')
 result = ranges.discard(Span(20, 30), require_covered=True)
 assert result.changed_length == 10
 assert ranges.first_fit(10, not_before=20).start == 30
-for module in (boundary, boundary_optimized):
-    manager = module.IntervalManager()
-    manager.release_interval(-(2**63), -1)
-    assert manager.find_interval(-(2**63), 2**63 - 1) == (-(2**63), -1)
 print(json.dumps({'backend': 'cpp_boundary', 'free': ranges.snapshot().total_free}))
 """
     result = subprocess.run(

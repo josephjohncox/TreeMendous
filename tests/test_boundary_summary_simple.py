@@ -6,29 +6,18 @@ Basic functionality tests for boundary summary implementations without external 
 """
 
 import sys
-from pathlib import Path
+from importlib import import_module
+from typing import Any
 
-# Add paths for import resolution
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-sys.path.insert(0, str(project_root / "treemendous" / "basic"))
+from treemendous.basic.boundary_summary import BoundarySummaryManager
 
+PY_AVAILABLE = True
 try:
-    from boundary_summary import BoundarySummaryManager
-
-    print("✅ Python Boundary Summary loaded successfully")
-    PY_AVAILABLE = True
-except ImportError as e:
-    print(f"❌ Failed to load Python Boundary Summary: {e}")
-    PY_AVAILABLE = False
-
-try:
-    from treemendous.cpp import BoundarySummaryManager as CppBoundarySummaryManager
-
-    print("✅ C++ Boundary Summary loaded successfully")
+    CppBoundarySummaryManager = import_module(
+        "treemendous.cpp.boundary_summary"
+    ).BoundarySummaryManager
     CPP_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️  C++ Boundary Summary not available: {e}")
+except ImportError:
     CPP_AVAILABLE = False
 
 
@@ -73,13 +62,13 @@ def test_basic_functionality():
         print("    ✓ Multiple intervals work correctly")
 
         # Test advanced queries
-        stats = manager.get_availability_stats()
-        if hasattr(stats, "total_free"):  # C++ object
-            total_free = stats.total_free
-            fragmentation = stats.fragmentation
-        else:  # Python dict
+        stats: Any = manager.get_availability_stats()
+        if isinstance(stats, dict):
             total_free = stats["total_free"]
             fragmentation = stats["fragmentation"]
+        else:
+            total_free = stats.total_free
+            fragmentation = stats.fragmentation
 
         assert total_free == 50
         assert fragmentation >= 0.0 and fragmentation <= 1.0

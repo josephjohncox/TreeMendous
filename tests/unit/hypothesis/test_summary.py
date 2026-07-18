@@ -76,7 +76,7 @@ def calculate_expected_stats(intervals: List[Tuple[int, int]]) -> Dict[str, Any]
     total_free = sum(end - start for start, end in intervals)
     contiguous_count = len(intervals)
     largest_free = max(end - start for start, end in intervals)
-    avg_free = float(total_free) / contiguous_count
+    avg_free = total_free / contiguous_count
 
     return {
         "total_free": total_free,
@@ -105,7 +105,7 @@ def test_summary_statistics_consistency(operations: List[Tuple[int, int]]) -> No
         validate_tree_invariants(tree)
 
     # Get actual intervals and calculate expected stats
-    intervals = [(start, end) for start, end, _ in tree.get_intervals()]
+    intervals = tree.get_intervals()
     expected_stats = calculate_expected_stats(intervals)
 
     # Compare with tree's reported statistics
@@ -175,7 +175,7 @@ def test_find_best_fit_correctness(length: int) -> None:
         # Verify the interval is actually available
         intervals = tree.get_intervals()
         found_available = False
-        for istart, iend, _ in intervals:
+        for istart, iend in intervals:
             if istart <= start and end <= iend:
                 found_available = True
                 break

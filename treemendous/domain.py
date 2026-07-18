@@ -8,15 +8,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, TypeAlias, cast
 
 
 class TreeMendousError(Exception):
     """Base class for public Tree-Mendous errors."""
-
-
-class UnsupportedCapabilityError(TreeMendousError):
-    """Raised when a backend does not implement a requested capability."""
 
 
 class BackendUnavailableError(TreeMendousError):
@@ -68,6 +64,9 @@ class Span:
         return self.start < other.end and other.start < self.end
 
 
+SpanInput: TypeAlias = Span | tuple[int, int] | Iterable[Span | tuple[int, int]]
+
+
 @dataclass(frozen=True)
 class IntervalResult:
     """Canonical result returned by interval queries."""
@@ -96,9 +95,7 @@ class ManagedDomain:
 
     spans: tuple[Span, ...]
 
-    def __init__(
-        self, spans: Span | tuple[int, int] | Iterable[Span | tuple[int, int]]
-    ):
+    def __init__(self, spans: SpanInput):
         if isinstance(spans, Span):
             raw = [spans]
         elif (
@@ -149,6 +146,9 @@ class ManagedDomain:
             else:
                 merged.append(part)
         return ManagedDomain(merged)
+
+
+DomainInput: TypeAlias = ManagedDomain | SpanInput
 
 
 @dataclass(frozen=True)

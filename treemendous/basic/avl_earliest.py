@@ -1,14 +1,12 @@
-from collections.abc import Callable
-from typing import Any, cast
+from typing import cast
 
 from treemendous.basic.avl import IntervalNode, IntervalTree
-from treemendous.basic.protocols import IntervalResult
-from treemendous.domain import validate_coordinate, validate_length
+from treemendous.domain import IntervalResult, validate_coordinate, validate_length
 
 
 class EarliestIntervalNode(IntervalNode):
-    def __init__(self, start: int, end: int, data: Any | None = None) -> None:
-        super().__init__(start, end, data)
+    def __init__(self, start: int, end: int) -> None:
+        super().__init__(start, end)
         self.min_start: int = start
         self.max_end: int = end
         self.max_length: int = end - start
@@ -33,22 +31,8 @@ class EarliestIntervalNode(IntervalNode):
 
 
 class EarliestIntervalTree(IntervalTree[EarliestIntervalNode]):
-    def __init__(
-        self,
-        merge_fn: Callable[[Any, Any], Any] | None = None,
-        split_fn: Callable[[Any, int, int, int, int], Any] | None = None,
-        can_merge: Callable[[Any | None, Any | None], bool] | None = None,
-        merge_idempotent: bool = False,
-        split_idempotent: bool = False,
-    ) -> None:
-        super().__init__(
-            EarliestIntervalNode,
-            merge_fn=merge_fn,
-            split_fn=split_fn,
-            can_merge=can_merge,
-            merge_idempotent=merge_idempotent,
-            split_idempotent=split_idempotent,
-        )
+    def __init__(self) -> None:
+        super().__init__(EarliestIntervalNode)
 
     def _print_node(self, node: EarliestIntervalNode, indent: str, prefix: str) -> None:
         print(
@@ -64,18 +48,8 @@ class EarliestIntervalTree(IntervalTree[EarliestIntervalNode]):
             # Allocate from the requested start point if possible, otherwise from interval start
             alloc_start = max(start, node.start)
             if node.end - alloc_start >= length:
-                return IntervalResult(
-                    start=alloc_start, end=alloc_start + length, data=node.data
-                )
+                return IntervalResult(start=alloc_start, end=alloc_start + length)
         return None
-
-    def get_intervals(self) -> list[IntervalResult]:
-        """Get all available intervals as IntervalResult objects"""
-        intervals = super().get_intervals()  # Get List[Tuple[int, int, data]]
-        return [
-            IntervalResult(start=start, end=end, data=data)
-            for start, end, data in intervals
-        ]
 
     def _find_interval(
         self, node: EarliestIntervalNode | None, start: int, length: int

@@ -1,4 +1,4 @@
-"""Thread-safe canonical range-set facade."""
+"""Thread-safe canonical range-set implementation."""
 
 from __future__ import annotations
 
@@ -10,16 +10,15 @@ from threading import RLock
 from typing import Any
 
 from treemendous.backends.adapters import BackendAdapter
-from treemendous.backends.types import Capability
 from treemendous.domain import (
     AvailabilityStats,
+    DomainInput,
     IntervalResult,
     ManagedDomain,
     ManagedDomainRequiredError,
     MutationResult,
     RangeSnapshot,
     Span,
-    UnsupportedCapabilityError,
     validate_coordinate,
     validate_length,
 )
@@ -27,7 +26,6 @@ from treemendous.policies import (
     JoinPayloadPolicy,
     OrderedPayloadPolicy,
     PayloadPolicy,
-    UniformPayloadPolicy,
 )
 
 _MISSING = object()
@@ -66,17 +64,15 @@ def _subtract_geometry(
 class RangeSet:
     """A normalized free-range set backed by an explicit adapter.
 
-    Payload-capable instances keep pointwise payload segmentation at the facade
-    boundary while the backend stores geometry only. This prevents legacy tree
-    merge hooks from smearing a value across an overlap or silently dropping it.
+    Payload policies live entirely at this seam while every backend stores only
+    geometry. Backend choice therefore cannot change payload semantics.
     """
 
     def __init__(
         self,
         adapter: BackendAdapter,
         *,
-        domain: ManagedDomain | Span | tuple[int, int] | None = None,
-        capabilities: frozenset[Capability] = frozenset({Capability.CORE}),
+        domain: DomainInput | None = None,
         initially_available: bool = True,
         payload_policy: PayloadPolicy[Any] | None = None,
     ) -> None:
@@ -86,21 +82,11 @@ class RangeSet:
             if isinstance(domain, ManagedDomain)
             else (ManagedDomain(domain) if domain is not None else None)
         )
-        self._capabilities = capabilities
         self._lock = RLock()
-        payloads = Capability.PAYLOADS in capabilities
-        if payloads and not adapter.supports_payloads:
-            raise UnsupportedCapabilityError(
-                "adapter cannot preserve the catalogued payload capability"
-            )
-        if payload_policy is not None and not payloads:
-            raise UnsupportedCapabilityError(
-                "backend does not support payload policies"
-            )
-        self._payload_policy = payload_policy or (
-            UniformPayloadPolicy() if payloads else None
+        self._payload_policy = payload_policy
+        self._payload_segments: list[IntervalResult] | None = (
+            [] if payload_policy is not None else None
         )
-        self._payload_segments: list[IntervalResult] | None = [] if payloads else None
         self._ordered_events: list[_OrderedEvent] | None = (
             [] if isinstance(self._payload_policy, OrderedPayloadPolicy) else None
         )
@@ -123,10 +109,6 @@ class RangeSet:
     @property
     def domain(self) -> ManagedDomain | None:
         return self._domain
-
-    @property
-    def capabilities(self) -> frozenset[Capability]:
-        return self._capabilities
 
     @property
     def payload_policy(self) -> PayloadPolicy[Any] | None:
@@ -304,11 +286,8 @@ class RangeSet:
     def add(self, span: Span, payload: Any = _MISSING) -> MutationResult:
         self._validate_domain(span)
         with self._lock:
-            if (
-                payload is not _MISSING
-                and Capability.PAYLOADS not in self._capabilities
-            ):
-                raise UnsupportedCapabilityError("backend does not support payloads")
+            if payload is not _MISSING and self._payload_policy is None:
+                raise ValueError("payload requires an explicit payload policy")
             before = self._geometry_intervals()
             covered = self._covered(span, before)
             prospective_payloads = None
@@ -405,13 +384,8 @@ class RangeSet:
             validate_coordinate(not_after, "not_after")
             if not_after <= not_before:
                 raise ValueError("not_after must be greater than not_before")
-        if (
-            payload_predicate is not None
-            and Capability.PAYLOADS not in self._capabilities
-        ):
-            raise UnsupportedCapabilityError(
-                "backend does not support payload predicates"
-            )
+        if payload_predicate is not None and self._payload_policy is None:
+            raise ValueError("payload predicate requires an explicit payload policy")
         with self._lock:
             if self._payload_segments is None:
                 for interval in self._geometry_intervals():
@@ -516,37 +490,4 @@ class RangeSet:
                 free_chunks=len(intervals),
                 largest_chunk=largest,
                 bounds=self._domain.bounds,
-            )
-
-    # Legacy compatibility methods ---------------------------------------------
-    def release_interval(self, start: int, end: int, data: Any = None) -> None:
-        span = Span(start, end)
-        self.add(span) if data is None else self.add(span, data)
-
-    def reserve_interval(self, start: int, end: int, data: Any = None) -> None:
-        del data
-        self.discard(Span(start, end))
-
-    def find_interval(self, start: int, length: int) -> IntervalResult | None:
-        return self.first_fit(length, not_before=start)
-
-    def get_intervals(self) -> list[IntervalResult]:
-        return list(self.intervals())
-
-    def get_total_available_length(self) -> int:
-        with self._lock:
-            return self._adapter.total()
-
-    def get_availability_stats(self) -> AvailabilityStats | None:
-        """Compatibility alias; canonical callers should use :meth:`stats`."""
-        return self.stats()
-
-    def get_raw_implementation(self) -> Any:
-        with self._lock:
-            return self._adapter.implementation
-
-    def require(self, capability: Capability) -> None:
-        if capability not in self._capabilities:
-            raise UnsupportedCapabilityError(
-                f"backend does not support {capability.name}"
             )

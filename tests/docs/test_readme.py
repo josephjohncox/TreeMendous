@@ -10,6 +10,8 @@ import tomllib
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 README = ROOT / "README.md"
 MAINTAINED_DOCS = (
@@ -71,15 +73,15 @@ def test_maintained_relative_links_resolve() -> None:
 
 def test_installed_version_matches_project_metadata() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    assert project["project"]["version"] == "0.3.0"
+    assert project["project"]["version"] == "1.0.0"
     assert version("treemendous") == project["project"]["version"]
 
 
-def test_release_tag_contract_tracks_the_releasable_minor_version() -> None:
+def test_release_tag_contract_tracks_the_releasable_major_version() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text()
     assert 'expected="v${version}"' in workflow
     assert 'GITHUB_REF_NAME" != "$expected' in workflow
-    assert 'version = "0.3.0"' in (ROOT / "pyproject.toml").read_text()
+    assert 'version = "1.0.0"' in (ROOT / "pyproject.toml").read_text()
 
 
 def test_version_resolution_uses_metadata_and_source_fallback(monkeypatch) -> None:
@@ -95,7 +97,7 @@ def test_version_resolution_uses_metadata_and_source_fallback(monkeypatch) -> No
     assert treemendous._resolve_version() == "0.0.0+dev"
 
 
-def test_implicit_uniform_payload_policy_matches_documented_behavior() -> None:
+def test_payloads_require_an_explicit_policy() -> None:
     from treemendous import Span, create_range_set
 
     ranges = create_range_set(
@@ -103,11 +105,5 @@ def test_implicit_uniform_payload_policy_matches_documented_behavior() -> None:
         backend="py_boundary",
         initially_available=False,
     )
-    ranges.add(Span(0, 4), payload="cpu")
-    ranges.add(Span(4, 8), payload="cpu")
-    intervals = ranges.intervals()
-    result = ranges.first_fit(8, not_before=0)
-    assert result is not None
-    assert len(intervals) == 1
-    assert intervals[0] == result
-    assert intervals[0].data == "cpu"
+    with pytest.raises(ValueError, match="payload policy"):
+        ranges.add(Span(0, 4), payload="cpu")

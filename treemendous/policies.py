@@ -18,7 +18,7 @@ def _require_subspan(source: Span, target: Span) -> None:
 
 
 class PayloadPolicy(Protocol[D]):
-    """Policy governing payload merge compatibility and split restriction."""
+    """Policy governing payload combination and subspan restriction."""
 
     def can_merge(self, left: D, right: D) -> bool: ...
     def combine(self, left: D, right: D) -> D: ...
@@ -100,33 +100,3 @@ class OrderedPayloadPolicy(Generic[D]):
     def restrict(self, data: D, source: Span, target: Span) -> D:
         _require_subspan(source, target)
         return self.restrict_fn(data, source, target) if self.restrict_fn else data
-
-
-@dataclass(frozen=True)
-class LegacyPayloadPolicy(Generic[D]):
-    """Compatibility adapter for the historical merge/split hooks."""
-
-    merge_fn: Callable[[D, D], D] | None = None
-    split_fn: Callable[[D, int, int, int, int], D] | None = None
-    can_merge_fn: Callable[[D, D], bool] | None = None
-    merge_idempotent: bool = False
-
-    def can_merge(self, left: D, right: D) -> bool:
-        return self.can_merge_fn(left, right) if self.can_merge_fn else True
-
-    def combine(self, left: D, right: D) -> D:
-        if self.merge_idempotent and left == right:
-            return left
-        if self.merge_fn:
-            return self.merge_fn(left, right)
-        if isinstance(left, set) and isinstance(right, set):
-            return left | right  # type: ignore[return-value]
-        return left
-
-    def restrict(self, data: D, source: Span, target: Span) -> D:
-        _require_subspan(source, target)
-        if self.split_fn:
-            return self.split_fn(
-                data, source.start, source.end, target.start, target.end
-            )
-        return data

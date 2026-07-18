@@ -1,7 +1,7 @@
 # Tree-Mendous
 
-Tree-Mendous is an **alpha** Python library for managing available integer ranges
-with interchangeable Python and native CPU backends. The canonical API models
+Tree-Mendous is a Python library for managing available integer ranges with
+interchangeable Python and native CPU backends. The API models
 half-open ranges: `[start, end)` includes `start` and excludes `end`.
 
 ## Install
@@ -43,25 +43,25 @@ boundary: the allocated end may equal it. Empty or reversed spans and
 non-positive lengths raise `ValueError`; non-integer coordinates raise
 `TypeError`. Mutations outside the managed domain fail before changing state.
 
-Payload-capable Python backends safely default to `UniformPayloadPolicy`:
-adjacent or overlapping payloads merge only when equal, and `None` is ordinary
-data rather than an identity. Supply an explicit policy only when non-uniform
-join or ordered semantics are required:
+Payload algebra belongs to `RangeSet`, not to a backend. Supply an explicit
+policy whenever values are attached; the same policy behaves identically on
+Python and native geometry backends:
 
 ```python
-from treemendous import Span, create_range_set
+from treemendous import Span, UniformPayloadPolicy, create_range_set
 
 cpus = create_range_set(
     domain=(0, 8),
     backend="py_boundary",
     initially_available=False,
+    payload_policy=UniformPayloadPolicy(),
 )
 cpus.add(Span(0, 8), payload="cpu")
 assert cpus.first_fit(2, not_before=0).data == "cpu"
 ```
 
 See [API and payload policies](docs/api.md) for join and ordered policies.
-Native backends store geometry only and reject payload requirements.
+All raw backends store geometry only.
 
 ## Backend maturity
 
@@ -71,26 +71,24 @@ semantic probes and satisfy the requested capabilities and coordinate width.
 
 | Backend ID | Runtime | Width | Maturity | Notes |
 | --- | ---: | ---: | --- | --- |
-| `py_boundary` | Python/CPU | 64-bit | Stable | Core, payloads |
-| `py_avl_earliest` | Python/CPU | 64-bit | Stable | Core, payloads |
-| `py_summary` | Python/CPU | 64-bit | Stable | Analytics, best fit, payloads |
-| `py_treap` | Python/CPU | 64-bit | Stable | Random sampling, payloads |
-| `py_boundary_summary` | Python/CPU | 64-bit | Stable | Analytics, best fit, payloads |
-| `cpp_boundary` | C++/CPU | 64-bit | Stable when built | Geometry only |
-| `cpp_boundary_optimized` | C++/CPU | 64-bit | Stable when built | Parity alias; geometry only |
-| `cpp_treap` | C++/CPU | 32-bit | Experimental | Not auto-selected |
-| `cpp_boundary_summary` | C++/CPU | 32-bit | Experimental | Not auto-selected |
-| `cpp_boundary_summary_optimized` | C++/CPU | 32-bit | Experimental | Not auto-selected |
-| `metal_boundary_summary` | Metal/GPU | 32-bit | Experimental | macOS device gate required |
-| `metal_boundary_summary_mixed` | Metal/GPU | 32-bit | Experimental | macOS device gate required |
-| `gpu_boundary_summary` | CUDA/GPU | 32-bit | Experimental/unavailable | Hardware parity and sanitizer gates required |
+| `py_boundary` | Python/CPU | 64-bit | Stable | Core geometry |
+| `py_avl_earliest` | Python/CPU | 64-bit | Stable | Core geometry |
+| `py_summary` | Python/CPU | 64-bit | Stable | Native analytics and best fit |
+| `py_treap` | Python/CPU | 64-bit | Stable | Native random sampling |
+| `py_boundary_summary` | Python/CPU | 64-bit | Stable | Native analytics and best fit |
+| `cpp_boundary` | C++/CPU | 64-bit | Stable when built | Core geometry |
+| `cpp_treap` | C++/CPU | 32-bit | Experimental | Not selectable |
+| `cpp_boundary_summary` | C++/CPU | 32-bit | Experimental | Not selectable |
+| `cpp_boundary_summary_optimized` | C++/CPU | 32-bit | Experimental | Not selectable |
+| `gpu_boundary_summary` | CUDA/GPU | 32-bit | Experimental | Not selectable |
+| `metal_boundary_summary` | Metal/GPU | 32-bit | Experimental | Not selectable |
 
 Details and probe behavior are in [Backends](docs/backends.md).
 
 ## Maintained documentation
 
 - [Getting started](docs/getting-started.md)
-- [Canonical API and migration](docs/api.md)
+- [Canonical API](docs/api.md)
 - [Backend catalog](docs/backends.md)
 - [Building optional backends](docs/building.md)
 - [Benchmark methodology](docs/benchmarking.md)

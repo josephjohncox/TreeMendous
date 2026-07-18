@@ -6,7 +6,7 @@ import importlib
 
 import pytest
 
-MODULES = ("treemendous.cpp.boundary", "treemendous.cpp.boundary_optimized")
+MODULES = ("treemendous.cpp.boundary",)
 MIN_I64 = -(2**63)
 MAX_I64 = 2**63 - 1
 

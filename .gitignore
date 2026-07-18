@@ -4,8 +4,9 @@ __pycache__/
 *$py.class
 **/.context.md
 
-# C extensions
+# C/C++ build tooling
 *.so
+compile_commands.json
 
 # Distribution / packaging
 .Python

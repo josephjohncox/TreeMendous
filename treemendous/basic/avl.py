@@ -1,13 +1,12 @@
-from collections.abc import Callable
-from typing import Any, Generic, Optional, TypeVar, cast, overload
+from typing import Generic, Optional, TypeVar, cast, overload
 
 from treemendous.basic.base import IntervalNodeBase, IntervalTreeBase
-from treemendous.domain import Span
+from treemendous.domain import IntervalResult, Span
 
 
-class IntervalNode(IntervalNodeBase["IntervalNode", Any]):
-    def __init__(self, start: int, end: int, data: Any | None = None) -> None:
-        super().__init__(start, end, data)
+class IntervalNode(IntervalNodeBase["IntervalNode"]):
+    def __init__(self, start: int, end: int) -> None:
+        super().__init__(start, end)
         self.total_length: int = self.length
         self.height: int = 1
 
@@ -28,23 +27,9 @@ class IntervalNode(IntervalNodeBase["IntervalNode", Any]):
 R = TypeVar("R", bound=IntervalNode)
 
 
-class IntervalTree(Generic[R], IntervalTreeBase[R, Any]):
-    def __init__(
-        self,
-        node_class: type[R],
-        merge_fn: Callable[[Any, Any], Any] | None = None,
-        split_fn: Callable[[Any, int, int, int, int], Any] | None = None,
-        can_merge: Callable[[Any | None, Any | None], bool] | None = None,
-        merge_idempotent: bool = False,
-        split_idempotent: bool = False,
-    ) -> None:
-        super().__init__(
-            merge_fn=merge_fn,
-            split_fn=split_fn,
-            can_merge=can_merge,
-            merge_idempotent=merge_idempotent,
-            split_idempotent=split_idempotent,
-        )
+class IntervalTree(Generic[R], IntervalTreeBase[R]):
+    def __init__(self, node_class: type[R]) -> None:
+        super().__init__()
         self.node_class = node_class
         self.root: R | None = None
 
@@ -63,20 +48,16 @@ class IntervalTree(Generic[R], IntervalTreeBase[R, Any]):
             f"{indent}{prefix}{node.start}-{node.end} (len={node.length}, total_len={node.total_length})"
         )
 
-    def release_interval(self, start: int, end: int, data: Any | None = None) -> None:
+    def release_interval(self, start: int, end: int) -> None:
         Span(start, end)
         overlapping_nodes: list[R] = []
         self.root = self._delete_overlaps(self.root, start, end, overlapping_nodes)
-        merged_data = data
-        # Merge overlapping intervals with the new interval
         for node in overlapping_nodes:
             start = min(start, node.start)
             end = max(end, node.end)
-            merged_data = self.merge_data(merged_data, node.data)
-        # Insert the merged interval using the constructor
-        self.root = self._insert(self.root, self.node_class(start, end, merged_data))
+        self.root = self._insert(self.root, self.node_class(start, end))
 
-    def reserve_interval(self, start: int, end: int, data: Any | None = None) -> None:
+    def reserve_interval(self, start: int, end: int) -> None:
         Span(start, end)
         self.root = self._delete_interval(self.root, start, end)
 
@@ -99,20 +80,10 @@ class IntervalTree(Generic[R], IntervalTreeBase[R, Any]):
             nodes_to_insert = []
 
             if node.start < start:
-                # Left part remains
-                left_data = self.split_data(
-                    node.data, node.start, node.end, node.start, start
-                )
-                left_node = self.node_class(node.start, start, left_data)
-                nodes_to_insert.append(left_node)
+                nodes_to_insert.append(self.node_class(node.start, start))
 
             if node.end > end:
-                # Right part remains
-                right_data = self.split_data(
-                    node.data, node.start, node.end, end, node.end
-                )
-                right_node = self.node_class(end, node.end, right_data)
-                nodes_to_insert.append(right_node)
+                nodes_to_insert.append(self.node_class(end, node.end))
 
             # Delete the current node and replace it with left and right parts
             node = self._merge_subtrees(
@@ -269,19 +240,14 @@ class IntervalTree(Generic[R], IntervalTreeBase[R, Any]):
         y.update_stats()
         return y
 
-    def get_intervals(self) -> list[Any]:
-        intervals: list[tuple[int, int, Any | None]] = []
+    def get_intervals(self) -> list[IntervalResult]:
+        intervals: list[IntervalResult] = []
         self._get_intervals(self.root, intervals)
         return intervals
 
-    def _get_intervals(
-        self, node: R | None, intervals: list[tuple[int, int, Any | None]]
-    ) -> None:
+    def _get_intervals(self, node: R | None, intervals: list[IntervalResult]) -> None:
         if not node:
             return
         self._get_intervals(self._typed_child(node.left), intervals)
-        intervals.append((node.start, node.end, node.data))
+        intervals.append(IntervalResult(node.start, node.end))
         self._get_intervals(self._typed_child(node.right), intervals)
-
-
-# Example usage:

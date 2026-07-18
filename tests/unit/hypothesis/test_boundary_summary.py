@@ -5,6 +5,7 @@ Tests verify that boundary-based summary managers maintain correctness
 while providing comprehensive O(1) analytics.
 """
 
+from importlib import import_module
 from typing import Any, List, Tuple
 
 from hypothesis import given
@@ -19,9 +20,9 @@ PY_BOUNDARY_SUMMARY_AVAILABLE = True
 
 # Import C++ implementation when the optional extension is built.
 try:
-    import treemendous.cpp as cpp_module
-
-    CppBoundarySummary: Any = getattr(cpp_module, "BoundarySummaryManager", None)
+    CppBoundarySummary: Any = import_module(
+        "treemendous.cpp.boundary_summary"
+    ).BoundarySummaryManager
 except ImportError:
     CppBoundarySummary = None
 CPP_BOUNDARY_SUMMARY_AVAILABLE = CppBoundarySummary is not None
@@ -64,7 +65,7 @@ def validate_boundary_summary_invariants(manager: Any) -> None:
     # Verify statistics match actual intervals
     if hasattr(manager, "get_intervals"):
         intervals = manager.get_intervals()
-        # Handle both legacy tuples and new IntervalResult objects
+        # Normalize the tuple and value-object shapes used by raw backends.
         if intervals and hasattr(intervals[0], "start"):
             # New IntervalResult format
             actual_intervals = [

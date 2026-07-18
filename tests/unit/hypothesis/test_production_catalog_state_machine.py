@@ -17,15 +17,12 @@ from hypothesis.stateful import (
 from treemendous.backends import (
     CATALOG,
     Available,
-    Capability,
     Invalid,
     Maturity,
-    Runtime,
     Unavailable,
     probe_backend,
 )
-from treemendous.backends.adapters import CppBackendAdapter, PythonBackendAdapter
-from treemendous.basic.protocols import standardize_interval_result
+from treemendous.backends.adapters import BackendAdapter
 from treemendous.domain import IntervalResult, Span
 from treemendous.rangeset import RangeSet
 
@@ -46,20 +43,14 @@ def _runs(bits: list[bool], value: bool = True) -> tuple[Span, ...]:
     return tuple(result)
 
 
-def _machine_for(spec: Any, capabilities: frozenset[Capability]):
+def _machine_for(spec: Any):
     class ProductionCatalogMachine(RuleBasedStateMachine):
         def __init__(self) -> None:
             super().__init__()
             implementation = spec.loader()(**dict(spec.constructor_args))
-            adapter_type = (
-                PythonBackendAdapter
-                if spec.runtime is Runtime.PYTHON
-                else CppBackendAdapter
-            )
             self.ranges = RangeSet(
-                adapter_type(implementation),
+                BackendAdapter(implementation),
                 domain=(0, DOMAIN_SIZE),
-                capabilities=capabilities,
                 initially_available=False,
             )
             self.model = [False] * DOMAIN_SIZE
@@ -131,9 +122,9 @@ def _machine_for(spec: Any, capabilities: frozenset[Capability]):
         def invalid_mutations_are_atomic(self) -> None:
             before = self.ranges.snapshot()
             with pytest.raises(ValueError):
-                self.ranges.release_interval(1, 1)
+                self.ranges.add(Span(1, 1))
             with pytest.raises(ValueError):
-                self.ranges.reserve_interval(2, 1)
+                self.ranges.discard(Span(2, 1))
             assert self.ranges.snapshot() == before
 
         @invariant()
@@ -151,23 +142,6 @@ def _machine_for(spec: Any, capabilities: frozenset[Capability]):
             assert stats.largest_chunk == max(
                 (span.length for span in _runs(self.model)), default=0
             )
-            for capability in Capability:
-                if capability in capabilities:
-                    self.ranges.require(capability)
-
-            raw = self.ranges.get_raw_implementation()
-            if Capability.ANALYTICS in capabilities:
-                assert raw.get_availability_stats()["total_free"] == sum(self.model)
-            if Capability.BEST_FIT in capabilities:
-                best = standardize_interval_result(raw.find_best_fit(1, False))
-                assert (best is None) == (not any(self.model))
-                if best is not None:
-                    assert all(self.model[best.start : best.end])
-            if Capability.RANDOM_SAMPLE in capabilities:
-                sampled = standardize_interval_result(raw.sample_random_interval())
-                assert (sampled is None) == (not any(self.model))
-                if sampled is not None:
-                    assert all(self.model[sampled.start : sampled.end])
 
     return ProductionCatalogMachine
 
@@ -180,6 +154,6 @@ def test_stable_production_catalog_state_machine(spec: Any) -> None:
     assert not isinstance(state, Invalid), f"{spec.id}: {state.error}"
     assert isinstance(state, Available)
     run_state_machine_as_test(
-        _machine_for(spec, state.validated_capabilities),
+        _machine_for(spec),
         settings=settings(max_examples=20, stateful_step_count=25, deadline=None),
     )

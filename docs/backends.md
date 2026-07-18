@@ -1,49 +1,84 @@
-# Backends
+# Backend support
 
-The immutable production catalog is the source of truth for IDs, maturity,
-capabilities, coordinate width, and selection. Runtime probing is separate from
-the catalog: a spec can be stable while unavailable in an installation.
+Tree-Mendous separates public interval semantics from raw geometry engines.
+`RangeSet` owns validation, payload algebra, atomic mutation, and canonical
+results. A backend adapter translates the small geometry protocol to one raw
+implementation.
 
-## Stable IDs
+## Stable backends
 
-| ID | Runtime | Capabilities |
-| --- | --- | --- |
-| `py_boundary` | Python CPU | core, atomic allocation, payloads |
-| `py_avl_earliest` | Python CPU | core, atomic allocation, payloads |
-| `py_summary` | Python CPU | core, analytics, best fit, payloads |
-| `py_treap` | Python CPU | core, random sample, payloads |
-| `py_boundary_summary` | Python CPU | core, analytics, best fit, payloads |
-| `cpp_boundary` | C++ CPU | 64-bit core geometry |
-| `cpp_boundary_optimized` | C++ CPU | 64-bit core geometry parity alias |
+Stable backends are eligible for automatic selection only after their semantic
+probe passes.
 
-The optimized boundary ID is retained for compatibility; it is not a published
-performance claim.
+| Backend ID | Runtime | Width | Native strengths |
+| --- | --- | ---: | --- |
+| `py_boundary` | Python CPU | 64-bit | Core geometry |
+| `py_avl_earliest` | Python CPU | 64-bit | Core geometry |
+| `py_summary` | Python CPU | 64-bit | Analytics and best fit |
+| `py_treap` | Python CPU | 64-bit | Random sampling |
+| `py_boundary_summary` | Python CPU | 64-bit | Analytics and best fit |
+| `cpp_boundary` | C++ CPU | 64-bit | Core geometry |
 
-## Experimental IDs
+`cpp_boundary` is present only when its compiled extension is importable and
+passes the stable semantic contract.
 
-| ID | Status |
-| --- | --- |
-| `cpp_treap` | 32-bit compatibility extension; capability-empty |
-| `cpp_boundary_summary` | 32-bit compatibility extension; capability-empty |
-| `cpp_boundary_summary_optimized` | 32-bit compatibility extension; capability-empty |
-| `metal_boundary_summary` | 32-bit, requires macOS wheel/device/resource gate |
-| `metal_boundary_summary_mixed` | 32-bit, requires the same Metal gate |
-| `gpu_boundary_summary` | CUDA; unavailable to stable selection pending hardware parity and compute-sanitizer |
+## Experimental backends
 
-Boost ICL source can be built for dedicated validation, but no ICL backend ID is
-advertised in the production catalog until that lane passes the canonical probe.
+| Backend ID | Runtime/device | Width | Status |
+| --- | --- | ---: | --- |
+| `cpp_treap` | C++ CPU | 32-bit | Cataloged, not selectable |
+| `cpp_boundary_summary` | C++ CPU | 32-bit | Cataloged, not selectable |
+| `cpp_boundary_summary_optimized` | C++ CPU | 32-bit | Cataloged, not selectable |
+| `gpu_boundary_summary` | CUDA GPU | 32-bit | Cataloged, not selectable |
+| `metal_boundary_summary` | Metal GPU | 32-bit | Cataloged, not selectable |
 
-## Probe and selection behavior
+Experimental backends are visible for development and hardware gates but are
+not accepted by the public constructor. Promotion to stable status is the only
+way an implementation enters the selection surface.
 
-A probe checks invalid-span atomicity, fragmented and containing-start first-fit,
-no-fit behavior, normalized state, totals, and declared capabilities. Probe
-states are `Available`, `Unavailable(reason)`, or `Invalid(error)`.
+## Registry and probe states
 
-Automatic selection excludes experimental specs, failed probes, insufficient
-coordinate widths, non-deterministic implementations when determinism is
-requested, and missing capabilities. Explicit acquisition of an unavailable or
-invalid backend raises `BackendUnavailableError` or `BackendInvalidError` with
-the probe reason. `BackendRequest` and `BackendDecision` expose typed selection
-requirements and rejection reasons.
+`BackendRegistry.discover()` evaluates the canonical catalog and records one
+state for each backend:
 
-Use `just test-protocols` for local diagnostics after an install or native build.
+- `Available`: imported and semantically validated.
+- `Unavailable`: could not be imported or used on this machine.
+- `Invalid`: imported but failed the semantic contract.
+
+Selection consumes these immutable states; it does not perform discovery or
+probe hardware. This makes selection deterministic and directly testable.
+
+```python
+from treemendous import BackendRegistry
+
+registry = BackendRegistry.discover()
+for spec in registry.specs:
+    print(spec.id, registry.states[spec.id])
+```
+
+## Integer widths
+
+The canonical domain and `Span` use Python integers. Each backend advertises
+its native width, and construction rejects domains outside that width before
+mutating native state. Stable C++ boundary operations use checked signed
+64-bit arithmetic.
+
+## Payloads
+
+Payload policies are backend-independent. `RangeSet` maintains payload
+segments while the selected backend maintains geometry, so switching between
+Python and native geometry engines cannot change payload semantics.
+
+## Promotion criteria
+
+An experimental backend becomes stable only when all of these are true:
+
+1. Its full operation set is implemented.
+2. It passes the stable state-machine and edge-case suites.
+3. It passes a real-hardware CI lane on every supported device family.
+4. Its wheel resources install and load from package-relative paths.
+5. It reports the same `RangeSet` results as the Python oracle.
+
+Metal currently has a real-hardware parity lane but remains experimental.
+CUDA remains quarantined until its implementation and self-hosted hardware
+lane satisfy the same contract.

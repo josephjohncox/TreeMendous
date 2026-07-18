@@ -9,25 +9,27 @@ for all operations with high probability.
 
 import math
 import random
-from collections.abc import Callable
-from typing import Any, Optional
+from typing import Optional
 
 from treemendous.basic.base import IntervalNodeBase, IntervalTreeBase
-from treemendous.basic.protocols import IntervalResult
-from treemendous.domain import Span, validate_coordinate, validate_length
+from treemendous.domain import (
+    IntervalResult,
+    Span,
+    validate_coordinate,
+    validate_length,
+)
 
 
-class TreapNode(IntervalNodeBase["TreapNode", Any]):
+class TreapNode(IntervalNodeBase["TreapNode"]):
     """Treap node combining BST ordering with heap priorities"""
 
     def __init__(
         self,
         start: int,
         end: int,
-        data: Any | None = None,
         priority: float | None = None,
-    ):
-        super().__init__(start, end, data)
+    ) -> None:
+        super().__init__(start, end)
         self.priority = priority if priority is not None else random.random()
         self.height = 1
         self.total_length = self.length
@@ -59,25 +61,11 @@ class TreapNode(IntervalNodeBase["TreapNode", Any]):
         return node.subtree_size if node else 0
 
 
-class IntervalTreap(IntervalTreeBase[TreapNode, Any]):
+class IntervalTreap(IntervalTreeBase[TreapNode]):
     """Randomized interval tree using treap structure"""
 
-    def __init__(
-        self,
-        random_seed: int | None = None,
-        merge_fn: Callable[[Any, Any], Any] | None = None,
-        split_fn: Callable[[Any, int, int, int, int], Any] | None = None,
-        can_merge: Callable[[Any | None, Any | None], bool] | None = None,
-        merge_idempotent: bool = False,
-        split_idempotent: bool = False,
-    ):
-        super().__init__(
-            merge_fn=merge_fn,
-            split_fn=split_fn,
-            can_merge=can_merge,
-            merge_idempotent=merge_idempotent,
-            split_idempotent=split_idempotent,
-        )
+    def __init__(self, random_seed: int | None = None) -> None:
+        super().__init__()
         self.root: TreapNode | None = None
         self._random_seed = random_seed
         self._rng = random.Random(random_seed)
@@ -88,32 +76,23 @@ class IntervalTreap(IntervalTreeBase[TreapNode, Any]):
             f"(h={node.height}, size={node.subtree_size})"
         )
 
-    def reserve_interval(self, start: int, end: int, data: Any | None = None) -> None:
+    def reserve_interval(self, start: int, end: int) -> None:
         """Remove interval from available space (mark as occupied)"""
         Span(start, end)
         # Delete overlapping intervals and split as needed
         self.root = self._delete_range(self.root, start, end)
 
-    def release_interval(self, start: int, end: int, data: Any | None = None) -> None:
-        """Add interval to available space (mark as free)"""
+    def release_interval(self, start: int, end: int) -> None:
+        """Add interval to available space (mark as free)."""
         Span(start, end)
-        # First remove any overlapping intervals, then insert merged interval
         overlapping_intervals = self._find_and_remove_overlapping(start, end)
-
-        # Merge with overlapping intervals
         merged_start = start
         merged_end = end
-        merged_data = data
-
-        for interval_start, interval_end, interval_data in overlapping_intervals:
+        for interval_start, interval_end in overlapping_intervals:
             merged_start = min(merged_start, interval_start)
             merged_end = max(merged_end, interval_end)
-            merged_data = self.merge_data(merged_data, interval_data)
 
-        # Insert merged interval
-        new_node = TreapNode(
-            merged_start, merged_end, merged_data, priority=self._rng.random()
-        )
+        new_node = TreapNode(merged_start, merged_end, priority=self._rng.random())
         self.root = self._insert(self.root, new_node)
 
     def find_interval(self, start: int, length: int) -> IntervalResult | None:
@@ -124,27 +103,21 @@ class IntervalTreap(IntervalTreeBase[TreapNode, Any]):
         if result:
             # If the requested start point is within the found interval, use it
             if result.start <= start and start + length <= result.end:
-                return IntervalResult(
-                    start=start, end=start + length, length=length, data=result.data
-                )
+                return IntervalResult(start=start, end=start + length, length=length)
             else:
                 # Otherwise, allocate from the beginning of the found interval
                 return IntervalResult(
                     start=result.start,
                     end=result.start + length,
                     length=length,
-                    data=result.data,
                 )
         return None
 
     def get_intervals(self) -> list[IntervalResult]:
         """Get all available intervals in sorted order"""
-        intervals: list[tuple[int, int, Any | None]] = []
+        intervals: list[tuple[int, int]] = []
         self._inorder_traversal(self.root, intervals)
-        return [
-            IntervalResult(start=start, end=end, data=data)
-            for start, end, data in intervals
-        ]
+        return [IntervalResult(start=start, end=end) for start, end in intervals]
 
     def get_total_available_length(self) -> int:
         """Get total available space"""
@@ -210,24 +183,14 @@ class IntervalTreap(IntervalTreeBase[TreapNode, Any]):
 
             # Create left remainder if needed
             if node.start < start:
-                # Use a priority lower than the original node to maintain heap property
-                left_data = self.split_data(
-                    node.data, node.start, node.end, node.start, start
-                )
                 left_remainder = TreapNode(
-                    node.start, start, left_data, priority=node.priority * 0.5
+                    node.start, start, priority=node.priority * 0.5
                 )
                 nodes_to_insert.append(left_remainder)
 
             # Create right remainder if needed
             if node.end > end:
-                # Use a priority lower than the original node to maintain heap property
-                right_data = self.split_data(
-                    node.data, node.start, node.end, end, node.end
-                )
-                right_remainder = TreapNode(
-                    end, node.end, right_data, priority=node.priority * 0.5
-                )
+                right_remainder = TreapNode(end, node.end, priority=node.priority * 0.5)
                 nodes_to_insert.append(right_remainder)
 
             # Delete current node and process subtrees
@@ -246,9 +209,9 @@ class IntervalTreap(IntervalTreeBase[TreapNode, Any]):
 
     def _find_and_remove_overlapping(
         self, start: int, end: int
-    ) -> list[tuple[int, int, Any | None]]:
-        """Find and remove all overlapping intervals, return their ranges"""
-        overlapping: list[tuple[int, int, Any | None]] = []
+    ) -> list[tuple[int, int]]:
+        """Find and remove all overlapping intervals, return their ranges."""
+        overlapping: list[tuple[int, int]] = []
         self.root = self._collect_and_remove_overlapping(
             self.root, start, end, overlapping
         )
@@ -259,7 +222,7 @@ class IntervalTreap(IntervalTreeBase[TreapNode, Any]):
         node: TreapNode | None,
         start: int,
         end: int,
-        overlapping: list[tuple[int, int, Any | None]],
+        overlapping: list[tuple[int, int]],
     ) -> TreapNode | None:
         """Helper for finding and removing overlapping intervals"""
         if not node:
@@ -275,7 +238,7 @@ class IntervalTreap(IntervalTreeBase[TreapNode, Any]):
             )
         else:
             # Overlap found
-            overlapping.append((node.start, node.end, node.data))
+            overlapping.append((node.start, node.end))
             # Remove this node and continue in subtrees
             return self._merge_subtrees(
                 self._collect_and_remove_overlapping(
@@ -359,14 +322,14 @@ class IntervalTreap(IntervalTreeBase[TreapNode, Any]):
         return new_root
 
     def _inorder_traversal(
-        self, node: TreapNode | None, result: list[tuple[int, int, Any | None]]
+        self, node: TreapNode | None, result: list[tuple[int, int]]
     ) -> None:
         """In-order traversal for sorted interval collection"""
         if not node:
             return
 
         self._inorder_traversal(node.left, result)
-        result.append((node.start, node.end, node.data))
+        result.append((node.start, node.end))
         self._inorder_traversal(node.right, result)
 
     def _verify_node(
@@ -427,14 +390,7 @@ class IntervalTreap(IntervalTreeBase[TreapNode, Any]):
 
     # Additional treap-specific operations
     def _new_related(self) -> "IntervalTreap":
-        result = IntervalTreap(
-            random_seed=self._random_seed,
-            merge_fn=self.merge_fn,
-            split_fn=self.split_fn,
-            can_merge=self.can_merge_fn,
-            merge_idempotent=self.merge_idempotent,
-            split_idempotent=self.split_idempotent,
-        )
+        result = IntervalTreap(random_seed=self._random_seed)
         result._rng.setstate(self._rng.getstate())
         return result
 
@@ -445,7 +401,7 @@ class IntervalTreap(IntervalTreeBase[TreapNode, Any]):
         right_treap = self._new_related()
         for interval in self.get_intervals():
             target = left_treap if interval.start < key else right_treap
-            target.release_interval(interval.start, interval.end, interval.data)
+            target.release_interval(interval.start, interval.end)
         return left_treap, right_treap
 
     def _split_at_key(
@@ -476,7 +432,7 @@ class IntervalTreap(IntervalTreeBase[TreapNode, Any]):
             )
         result = self._new_related()
         for interval in (*left, *right):
-            result.release_interval(interval.start, interval.end, interval.data)
+            result.release_interval(interval.start, interval.end)
         return result
 
     def sample_random_interval(self) -> IntervalResult | None:
@@ -487,11 +443,7 @@ class IntervalTreap(IntervalTreeBase[TreapNode, Any]):
         target_index = self._rng.randint(0, self.root.subtree_size - 1)
         node = self._select_kth_interval(self.root, target_index)
 
-        return (
-            IntervalResult(start=node.start, end=node.end, data=node.data)
-            if node
-            else None
-        )
+        return IntervalResult(start=node.start, end=node.end) if node else None
 
     def _select_kth_interval(self, node: TreapNode | None, k: int) -> TreapNode | None:
         """Select k-th interval in sorted order (0-indexed)"""

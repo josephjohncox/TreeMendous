@@ -18,8 +18,7 @@ def _loader(path: str, name: str) -> Callable[[], type[Any]]:
     return lambda: _load(path, name)
 
 
-CORE = frozenset({Capability.CORE, Capability.ATOMIC_ALLOCATE})
-PAYLOAD_CORE = CORE | {Capability.PAYLOADS}
+CORE = frozenset({Capability.CORE})
 
 CATALOG: tuple[BackendSpec, ...] = (
     BackendSpec(
@@ -29,7 +28,7 @@ CATALOG: tuple[BackendSpec, ...] = (
         Runtime.PYTHON,
         Device.CPU,
         Maturity.STABLE,
-        PAYLOAD_CORE,
+        CORE,
         64,
         True,
         _loader("treemendous.basic.boundary", "IntervalManager"),
@@ -42,7 +41,7 @@ CATALOG: tuple[BackendSpec, ...] = (
         Runtime.PYTHON,
         Device.CPU,
         Maturity.STABLE,
-        PAYLOAD_CORE,
+        CORE,
         64,
         True,
         _loader("treemendous.basic.avl_earliest", "EarliestIntervalTree"),
@@ -55,7 +54,7 @@ CATALOG: tuple[BackendSpec, ...] = (
         Runtime.PYTHON,
         Device.CPU,
         Maturity.STABLE,
-        PAYLOAD_CORE | {Capability.ANALYTICS, Capability.BEST_FIT},
+        CORE | {Capability.ANALYTICS, Capability.BEST_FIT},
         64,
         True,
         _loader("treemendous.basic.summary", "SummaryIntervalTree"),
@@ -68,7 +67,7 @@ CATALOG: tuple[BackendSpec, ...] = (
         Runtime.PYTHON,
         Device.CPU,
         Maturity.STABLE,
-        PAYLOAD_CORE | {Capability.RANDOM_SAMPLE},
+        CORE | {Capability.RANDOM_SAMPLE},
         64,
         True,
         _loader("treemendous.basic.treap", "IntervalTreap"),
@@ -81,7 +80,7 @@ CATALOG: tuple[BackendSpec, ...] = (
         Runtime.PYTHON,
         Device.CPU,
         Maturity.STABLE,
-        PAYLOAD_CORE | {Capability.ANALYTICS, Capability.BEST_FIT},
+        CORE | {Capability.ANALYTICS, Capability.BEST_FIT},
         64,
         True,
         _loader("treemendous.basic.boundary_summary", "BoundarySummaryManager"),
@@ -127,19 +126,6 @@ CATALOG: tuple[BackendSpec, ...] = (
         MappingProxyType({}),
     ),
     BackendSpec(
-        "cpp_boundary_optimized",
-        "C++ Boundary Parity Alias",
-        Algorithm.BOUNDARY,
-        Runtime.CPP,
-        Device.CPU,
-        Maturity.STABLE,
-        CORE,
-        64,
-        True,
-        _loader("treemendous.cpp.boundary_optimized", "IntervalManager"),
-        MappingProxyType({}),
-    ),
-    BackendSpec(
         "cpp_boundary_summary_optimized",
         "C++ Boundary Summary Optimized (experimental 32-bit)",
         Algorithm.BOUNDARY,
@@ -181,19 +167,6 @@ CATALOG: tuple[BackendSpec, ...] = (
             "treemendous.cpp.metal.boundary_summary_metal",
             "MetalBoundarySummaryManager",
         ),
-        MappingProxyType({}),
-    ),
-    BackendSpec(
-        "metal_boundary_summary_mixed",
-        "Metal Boundary Summary Mixed",
-        Algorithm.BOUNDARY,
-        Runtime.METAL,
-        Device.GPU,
-        Maturity.EXPERIMENTAL,
-        frozenset(),
-        32,
-        False,
-        _loader("treemendous.cpp.metal.mixed", "MixedBoundarySummaryManager"),
         MappingProxyType({}),
     ),
 )
