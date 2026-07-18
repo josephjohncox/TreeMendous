@@ -16,7 +16,8 @@ and quality gates.
 Tests use strict marker and configuration handling. Mark platform/toolchain-only
 coverage with one of `native`, `icl`, `metal`, or `cuda`, always with an explicit
 reason when unavailable. Use `benchmark` only for timing suites. Semantic
-mismatches must fail rather than become skips.
+mismatches must fail rather than become skips. PR CI runs `benchmark-smoke` as a
+correctness/load gate but never treats hosted-runner timing as a threshold.
 
 Before review, also run:
 
@@ -27,6 +28,7 @@ git diff --cached --name-only
 ```
 
 Do not commit generated shared libraries, bytecode, profiler output, coverage
-data, or host metallibs. Changes to native code should name the platform and
-build command tested. Benchmark changes must preserve trace/oracle validation
-and stay outside PR correctness timing gates.
+data, local benchmark artifacts, or host metallibs. Changes to native code
+should name the platform and build command tested. Benchmark changes must
+preserve trace/oracle validation, compact durable reports, and the separation
+between sampled measurements and single-run load qualification.

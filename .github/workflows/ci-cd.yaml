@@ -137,10 +137,37 @@ jobs:
           uv run pytest tests/unit/test_native_core_contract.py \
             tests/unit/test_core_contract.py -q
 
+  benchmark-smoke:
+    name: Validated workload benchmark smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # actions/checkout v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      # astral-sh/setup-uv v6
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --extra build --extra quality --extra test
+      - run: uv run python setup.py build_ext --inplace
+      - name: Run every stable backend and payload policy under realistic traces
+        run: >-
+          uv run python tests/performance/benchmark_suite.py
+          --profile smoke --require-all-stable
+          --output build/benchmarks/smoke.json
+      # actions/upload-artifact v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: validated-benchmark-smoke
+          path: build/benchmarks/
+          if-no-files-found: error
+          retention-days: 30
+
   package:
     name: Source and wheel policy / Linux
     runs-on: ubuntu-latest
-    needs: [quality, fast-python, native-cpu]
+    needs: [quality, fast-python, native-cpu, benchmark-smoke]
     steps:
       # actions/checkout v4
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5

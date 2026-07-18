@@ -105,7 +105,9 @@ just build
 ```
 
 `just check` enforces Ruff lint and formatting, mypy, branch coverage, docs
-contracts, and bytecode/artifact-policy sanity. Benchmarks are separate:
-`just benchmark`. See [Contributing](docs/contributing.md).
+contracts, and bytecode/artifact-policy sanity. `just benchmark-smoke`,
+`just benchmark-standard`, and `just benchmark-large` run validated workload
+profiles and write JSON, Markdown, and checksum artifacts. See
+[Benchmarking](docs/benchmarking.md) and [Contributing](docs/contributing.md).
 
 License: BSD-3-Clause.

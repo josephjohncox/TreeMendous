@@ -89,14 +89,17 @@ just check
 just validate
 ```
 
-For directional benchmark data:
+For correctness-checked benchmark and load artifacts:
 
 ```bash
-just test-perf
+just benchmark-smoke
+just benchmark-standard
 ```
 
-Benchmark results are correctness-checked before they are reported. They are
-local measurements, not universal performance claims.
+The smoke profile is a required build check; the standard and large profiles
+exercise progressively larger plausible workloads. Results under
+`build/benchmarks/` include JSON, Markdown, and a SHA-256 sidecar. See
+[Benchmarking and scale qualification](benchmarking.md).
 
 ## Build artifacts
 

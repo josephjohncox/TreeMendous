@@ -44,6 +44,7 @@ class BenchmarkWorkload:
     operations: tuple[Operation, ...]
     coordinate_extent: int
     dimensions: tuple[tuple[str, str], ...] = ()
+    initially_available: bool = False
 
 
 @dataclass(frozen=True)
@@ -122,7 +123,11 @@ class RangeLike(Protocol):
 
     def intervals(self): ...
 
+    def overlaps(self, span: Span): ...
+
     def snapshot(self): ...
+
+    def stats(self): ...
 
 
 _ERROR_TYPES = {
@@ -157,6 +162,45 @@ def _total(target: RangeLike | RangeOracle) -> int:
     return target.snapshot().total_free
 
 
+def _snapshot_observation(
+    target: RangeLike | RangeOracle,
+) -> tuple[int, str]:
+    if isinstance(target, RangeOracle):
+        state = target.intervals
+        total = target.total
+    else:
+        snapshot = target.snapshot()
+        state = tuple((item.start, item.end) for item in snapshot.intervals)
+        total = snapshot.total_free
+    return total, _checksum(state)
+
+
+def _stats_observation(
+    target: RangeLike | RangeOracle,
+) -> tuple[int | None, ...]:
+    if isinstance(target, RangeOracle):
+        state = target.intervals
+        largest = max((end - start for start, end in state), default=0)
+        bounds = target.domain_bounds
+        return (
+            target.total,
+            target.domain_total - target.total,
+            target.domain_total,
+            len(state),
+            largest,
+            *bounds,
+        )
+    stats = target.stats()
+    return (
+        stats.total_free,
+        stats.total_occupied,
+        stats.total_space,
+        stats.free_chunks,
+        stats.largest_chunk,
+        *stats.bounds,
+    )
+
+
 def _execute_trace(
     target: RangeLike | RangeOracle,
     operations: tuple[Operation, ...],
@@ -174,6 +218,7 @@ def _execute_trace(
         try:
             mutation: Any = None
             result: tuple[int, int] | None = None
+            query_hit = False
             if operation.kind == "add":
                 assert operation.start is not None and operation.end is not None
                 if isinstance(target, RangeOracle):
@@ -186,6 +231,21 @@ def _execute_trace(
                     mutation = target.discard(operation.start, operation.end)
                 else:
                     mutation = target.discard(Span(operation.start, operation.end))
+            elif operation.kind == "overlaps":
+                assert operation.start is not None and operation.end is not None
+                if isinstance(target, RangeOracle):
+                    query_hit = target.overlaps(operation.start, operation.end)
+                else:
+                    query_hit = bool(
+                        target.overlaps(Span(operation.start, operation.end))
+                    )
+                queries.append(("overlaps", int(query_hit), None))
+            elif operation.kind == "snapshot":
+                total, state_checksum = _snapshot_observation(target)
+                queries.append(("snapshot", total, state_checksum))
+            elif operation.kind == "stats":
+                signature = _stats_observation(target)
+                queries.append(("stats", _checksum(signature), signature[3]))
             elif operation.kind in {"first_fit", "allocate"}:
                 assert operation.length is not None and operation.not_before is not None
                 method = getattr(target, operation.kind)
@@ -257,7 +317,7 @@ def _execute_trace(
             )
             touched_length += changed_length
             touched_intervals += touched
-            changed_or_found = changed_length > 0 or result is not None
+            changed_or_found = changed_length > 0 or result is not None or query_hit
             if changed_or_found:
                 successes += 1
             else:
@@ -305,6 +365,13 @@ def _replay_public_operations(
             elif operation.kind == "discard":
                 assert operation.start is not None and operation.end is not None
                 target.discard(Span(operation.start, operation.end))
+            elif operation.kind == "overlaps":
+                assert operation.start is not None and operation.end is not None
+                target.overlaps(Span(operation.start, operation.end))
+            elif operation.kind == "snapshot":
+                target.snapshot()
+            elif operation.kind == "stats":
+                target.stats()
             elif operation.kind in {"first_fit", "allocate"}:
                 assert operation.length is not None and operation.not_before is not None
                 raw = getattr(target, operation.kind)(
@@ -334,7 +401,9 @@ def _replay_public_operations(
 
 def oracle_summary(workload: BenchmarkWorkload) -> tuple[int, ReplaySummary]:
     """Replay setup and timed traces in the independent model."""
-    oracle = RangeOracle(workload.domain)
+    oracle = RangeOracle(
+        workload.domain, initially_available=workload.initially_available
+    )
     _execute_trace(oracle, workload.setup, record_latencies=False)
     initial_count = len(oracle.intervals)
     summary, _ = _execute_trace(oracle, workload.operations, record_latencies=False)
@@ -345,7 +414,7 @@ def _new_backend(backend_id: str, workload: BenchmarkWorkload) -> RangeLike:
     return create_range_set(
         domain=workload.domain,
         backend=backend_id,
-        initially_available=False,
+        initially_available=workload.initially_available,
     )
 
 
@@ -484,6 +553,25 @@ def descriptive_timing_statistics(values: list[int]) -> DescriptiveTimingStatist
     )
 
 
+def compact_replay_summary(summary: ReplaySummary) -> dict[str, Any]:
+    """Serialize validation evidence without embedding the full large-scale state."""
+    return {
+        "requested_operations": summary.requested_operations,
+        "successful_operations": summary.successful_operations,
+        "no_op_operations": summary.no_op_operations,
+        "error_operations": summary.error_operations,
+        "actual_interval_count": summary.actual_interval_count,
+        "total_available": summary.total_available,
+        "touched_intervals": summary.touched_intervals,
+        "touched_length": summary.touched_length,
+        "query_observations": len(summary.query_results),
+        "state_checksum": summary.state_checksum,
+        "query_checksum": summary.query_checksum,
+        "scheduling_success": summary.scheduling_success,
+        "scheduling_fairness": summary.scheduling_fairness,
+    }
+
+
 def benchmark_backends(
     backend_ids: tuple[str, ...],
     workload: BenchmarkWorkload,
@@ -547,7 +635,7 @@ def benchmark_backends(
                 }
                 for kind, run_medians in sorted(operation_run_medians.items())
             },
-            "validation": asdict(expected),
+            "validation": compact_replay_summary(expected),
         }
 
     return {
@@ -577,6 +665,67 @@ def benchmark_backends(
             ),
         },
         "environment": environment_metadata(),
+        "results": results,
+    }
+
+
+def qualify_backends(
+    backend_ids: tuple[str, ...], workload: BenchmarkWorkload
+) -> dict[str, Any]:
+    """Run one fully checked load qualification per backend.
+
+    This is a scale and correctness gate, not a statistically sampled speed
+    comparison. Each reported timed replay is accepted only after a separate
+    oracle replay rejects any state, query, accounting, or checkpoint drift.
+    """
+    if not backend_ids:
+        raise ValueError("at least one backend is required")
+    initial_count, expected = oracle_summary(workload)
+    results: dict[str, Any] = {}
+    for backend_id in backend_ids:
+        sample = run_validated_sample(backend_id, workload)
+        if sample.summary != expected:
+            raise AssertionError(f"{backend_id} load qualification summary drifted")
+        results[backend_id] = {
+            "setup_ns": sample.setup_ns,
+            "execution_ns": sample.execution_ns,
+            "operations_per_second": (
+                len(workload.operations) * 1_000_000_000 / sample.execution_ns
+                if sample.execution_ns
+                else None
+            ),
+            "validation_overhead_ns": sample.validation_ns,
+            "operation_latency_descriptive": {
+                kind: asdict(descriptive_timing_statistics(list(values)))
+                for kind, values in sample.operation_latency_ns
+            },
+        }
+    return {
+        "label": (
+            "single-run correctness and load qualification; timings are local "
+            "observations, not comparative claims"
+        ),
+        "workload": workload.name,
+        "dimensions": dict(workload.dimensions),
+        "dataset": {
+            "actual_interval_count": initial_count,
+            "coordinate_extent": workload.coordinate_extent,
+            "setup_operations": len(workload.setup),
+            "timed_operations": len(workload.operations),
+        },
+        "methodology": {
+            "independent_runs": 1,
+            "purpose": "large-scale semantic qualification",
+            "execution_timing": (
+                "one declared public-operation trace after an equivalent replay "
+                "was checked completely against the independent oracle"
+            ),
+            "performance_interpretation": (
+                "do not rank backends or infer a regression threshold from one run"
+            ),
+        },
+        "environment": environment_metadata(),
+        "validation": compact_replay_summary(expected),
         "results": results,
     }
 

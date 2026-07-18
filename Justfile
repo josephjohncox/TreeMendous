@@ -56,11 +56,14 @@ test-stable-backends: install-dev
 backend-status: install-dev
     uv run python -c 'from treemendous import BackendRegistry; registry = BackendRegistry.discover(); print("\n".join(f"{spec.id}: {registry.states[spec.id]}" for spec in registry.specs))'
 
-test-perf: install-dev
-    uv run python tests/performance/protocol_benchmark.py --quick
+benchmark-smoke output="build/benchmarks/smoke.json": build-cpp
+    uv run python tests/performance/benchmark_suite.py --profile smoke --require-all-stable --output "{{output}}"
 
-test-perf-full: install-dev
-    timeout 600 uv run python tests/performance/protocol_benchmark.py --operations 5000 --output benchmark.json
+benchmark-standard output="build/benchmarks/standard.json": build-cpp
+    uv run python tests/performance/benchmark_suite.py --profile standard --require-all-stable --output "{{output}}"
+
+benchmark-large output="build/benchmarks/large.json": build-cpp
+    uv run python tests/performance/benchmark_suite.py --profile large --require-all-stable --output "{{output}}"
 
 test-gpu: install-dev
     uv run python tests/performance/gpu_benchmark.py
@@ -74,8 +77,7 @@ test-metal: install-dev
 test-metal-quick: install-dev
     uv run python tests/performance/metal_benchmark.py --operations 100 --intervals 16
 
-benchmark: install-dev
-    uv run python tests/performance/protocol_benchmark.py
+benchmark: benchmark-standard
 
 benchmark-gpu-large: install-dev
     uv run python tests/performance/gpu_benchmark.py --intervals 10000 --operations 5000

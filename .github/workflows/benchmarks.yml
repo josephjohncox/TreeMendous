@@ -1,0 +1,55 @@
+name: Validated benchmarks
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Reproducible benchmark/load profile
+        required: true
+        type: choice
+        default: standard
+        options:
+          - standard
+          - large
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validated-benchmark-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    name: ${{ inputs.profile || 'standard' }} profile / all stable CPU backends
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      BENCHMARK_PROFILE: ${{ inputs.profile || 'standard' }}
+    steps:
+      # actions/checkout v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      # astral-sh/setup-uv v6
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --extra build --extra quality --extra test
+      - run: uv run python setup.py build_ext --inplace
+      - name: Run sampled benchmarks and large-scale semantic qualification
+        shell: bash
+        run: |
+          output="build/benchmarks/${BENCHMARK_PROFILE}.json"
+          uv run python tests/performance/benchmark_suite.py \
+            --profile "$BENCHMARK_PROFILE" \
+            --require-all-stable \
+            --output "$output"
+      # actions/upload-artifact v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: benchmark-${{ env.BENCHMARK_PROFILE }}-${{ github.run_id }}
+          path: build/benchmarks/
+          if-no-files-found: error
+          retention-days: 90

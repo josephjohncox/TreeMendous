@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 
 
@@ -45,16 +46,40 @@ class OracleMutation:
 
 
 class RangeOracle:
-    """Small ordered-list model for half-open free ranges.
+    """Independent sorted-list model for half-open free ranges.
 
-    The model owns its value types and validators and does not import or call
-    Tree-Mendous production code. Benchmark traces are validated against this
-    implementation in a replay separate from measured backend execution.
+    The model owns its value types, validators, indexing, and mutation logic. It
+    does not import or call Tree-Mendous production code. Binary-search entry
+    points and a cached total keep the oracle usable for six-figure benchmark
+    datasets without changing its deliberately simple reference algorithm.
     """
 
-    def __init__(self, domain: tuple[tuple[int, int], ...]) -> None:
-        self._domain = tuple(_OracleSpan(start, end) for start, end in domain)
-        self._intervals: list[tuple[int, int]] = []
+    def __init__(
+        self,
+        domain: tuple[tuple[int, int], ...],
+        *,
+        initially_available: bool = False,
+    ) -> None:
+        parts = sorted(_OracleSpan(start, end) for start, end in domain)
+        normalized: list[_OracleSpan] = []
+        for part in parts:
+            if normalized and part.start <= normalized[-1].end:
+                previous = normalized[-1]
+                normalized[-1] = _OracleSpan(
+                    previous.start, max(previous.end, part.end)
+                )
+            else:
+                normalized.append(part)
+        self._domain = tuple(normalized)
+        self._domain_starts = [part.start for part in normalized]
+        self._domain_total = sum(part.end - part.start for part in normalized)
+        self._intervals = (
+            [(part.start, part.end) for part in normalized]
+            if initially_available
+            else []
+        )
+        self._starts = [start for start, _ in self._intervals]
+        self._total = self._domain_total if initially_available else 0
 
     @property
     def intervals(self) -> tuple[tuple[int, int], ...]:
@@ -62,17 +87,33 @@ class RangeOracle:
 
     @property
     def total(self) -> int:
-        return sum(end - start for start, end in self._intervals)
+        return self._total
+
+    @property
+    def domain_total(self) -> int:
+        return self._domain_total
+
+    @property
+    def domain_bounds(self) -> tuple[int | None, int | None]:
+        if not self._domain:
+            return None, None
+        return self._domain[0].start, self._domain[-1].end
 
     def _validate_domain(self, span: _OracleSpan) -> None:
-        if not any(part.contains(span) for part in self._domain):
+        index = bisect_right(self._domain_starts, span.start) - 1
+        if index < 0 or not self._domain[index].contains(span):
             raise ValueError("span must be contained in the managed domain")
+
+    def _first_intersection(self, start: int) -> int:
+        index = max(0, bisect_right(self._starts, start) - 1)
+        while index < len(self._intervals) and self._intervals[index][1] <= start:
+            index += 1
+        return index
 
     def _covered(self, span: _OracleSpan) -> bool:
         cursor = span.start
-        for start, end in self._intervals:
-            if end <= cursor:
-                continue
+        index = self._first_intersection(span.start)
+        for start, end in self._intervals[index:]:
             if start > cursor:
                 return False
             cursor = max(cursor, end)
@@ -83,60 +124,70 @@ class RangeOracle:
     def add(self, start: int, end: int) -> OracleMutation:
         span = _OracleSpan(start, end)
         self._validate_domain(span)
-        before_total = self.total
         fully_covered = self._covered(span)
+
+        merge_left = bisect_left(self._starts, start)
+        if merge_left and self._intervals[merge_left - 1][1] >= start:
+            merge_left -= 1
+        merge_end = end
+        merge_right = merge_left
+        while (
+            merge_right < len(self._intervals)
+            and self._intervals[merge_right][0] <= merge_end
+        ):
+            merge_end = max(merge_end, self._intervals[merge_right][1])
+            merge_right += 1
+        merge_start = (
+            min(start, self._intervals[merge_left][0])
+            if merge_left < merge_right
+            else start
+        )
+
         cursor = start
         changed_components = 0
-        for current_start, current_end in self._intervals:
-            if current_end <= cursor:
+        for current_start, current_end in self._intervals[merge_left:merge_right]:
+            if current_end <= start or current_start >= end:
                 continue
-            if current_start >= end:
-                break
             if current_start > cursor:
                 changed_components += 1
-            cursor = max(cursor, current_end)
-            if cursor >= end:
-                break
+            cursor = max(cursor, min(current_end, end))
         if cursor < end:
             changed_components += 1
-        result: list[tuple[int, int]] = []
-        merged_start, merged_end = start, end
-        inserted = False
-        for current_start, current_end in self._intervals:
-            if current_end < merged_start:
-                result.append((current_start, current_end))
-            elif merged_end < current_start:
-                if not inserted:
-                    result.append((merged_start, merged_end))
-                    inserted = True
-                result.append((current_start, current_end))
-            else:
-                merged_start = min(merged_start, current_start)
-                merged_end = max(merged_end, current_end)
-        if not inserted:
-            result.append((merged_start, merged_end))
-        self._intervals = result
-        changed_length = self.total - before_total
+
+        removed = sum(
+            current_end - current_start
+            for current_start, current_end in self._intervals[merge_left:merge_right]
+        )
+        replacement = (merge_start, merge_end)
+        self._intervals[merge_left:merge_right] = [replacement]
+        self._starts[merge_left:merge_right] = [merge_start]
+        changed_length = merge_end - merge_start - removed
+        self._total += changed_length
         return OracleMutation(changed_length, changed_components, fully_covered)
 
     def discard(self, start: int, end: int) -> OracleMutation:
         span = _OracleSpan(start, end)
         self._validate_domain(span)
-        before_total = self.total
         fully_covered = self._covered(span)
-        result: list[tuple[int, int]] = []
-        touched = 0
-        for current_start, current_end in self._intervals:
-            if current_end <= start or current_start >= end:
-                result.append((current_start, current_end))
-                continue
-            touched += 1
-            if current_start < start:
-                result.append((current_start, start))
-            if current_end > end:
-                result.append((end, current_end))
-        self._intervals = result
-        return OracleMutation(before_total - self.total, touched, fully_covered)
+        left = self._first_intersection(start)
+        right = left
+        while right < len(self._intervals) and self._intervals[right][0] < end:
+            right += 1
+
+        affected = self._intervals[left:right]
+        replacement: list[tuple[int, int]] = []
+        if affected and affected[0][0] < start:
+            replacement.append((affected[0][0], start))
+        if affected and affected[-1][1] > end:
+            replacement.append((end, affected[-1][1]))
+        changed_length = sum(
+            max(0, min(current_end, end) - max(current_start, start))
+            for current_start, current_end in affected
+        )
+        self._intervals[left:right] = replacement
+        self._starts[left:right] = [part_start for part_start, _ in replacement]
+        self._total -= changed_length
+        return OracleMutation(changed_length, len(affected), fully_covered)
 
     def first_fit(
         self, length: int, *, not_before: int, not_after: int | None = None
@@ -147,7 +198,10 @@ class RangeOracle:
             _validate_coordinate(not_after, "not_after")
             if not_after <= not_before:
                 raise ValueError("not_after must be greater than not_before")
-        for interval_start, interval_end in self._intervals:
+        index = self._first_intersection(not_before)
+        for interval_start, interval_end in self._intervals[index:]:
+            if not_after is not None and interval_start >= not_after:
+                break
             start = max(interval_start, not_before)
             end = start + length
             if end <= interval_end and (not_after is None or end <= not_after):
@@ -161,3 +215,9 @@ class RangeOracle:
         if found is None:
             return None, None
         return found, self.discard(*found)
+
+    def overlaps(self, start: int, end: int) -> bool:
+        span = _OracleSpan(start, end)
+        self._validate_domain(span)
+        index = self._first_intersection(start)
+        return index < len(self._intervals) and self._intervals[index][0] < end

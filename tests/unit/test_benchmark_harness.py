@@ -23,13 +23,18 @@ from tests.performance.harness import (
     BenchmarkWorkload,
     Operation,
     benchmark_backends,
+    compact_replay_summary,
     oracle_summary,
+    qualify_backends,
     run_validated_sample,
     timing_statistics,
     validate_target,
 )
+from tests.performance.oracle import RangeOracle
 from tests.performance.workload import (
     fragmented_workload,
+    immutable_query_workload,
+    lease_pool_workload,
     scheduling_workload,
 )
 from treemendous import IntervalResult, Span, create_range_set
@@ -105,6 +110,50 @@ def test_oracle_and_canonical_backend_validate_complete_trace():
     )
     assert len(expected.state_checksum) == 64
     assert len(expected.query_checksum) == 64
+
+
+def test_large_catalog_initialization_and_read_checkpoints_are_fully_validated():
+    workload = immutable_query_workload(interval_count=500, queries_per_snapshot=1_100)
+    sample = run_validated_sample("py_boundary", workload)
+    initial_count, expected = oracle_summary(workload)
+
+    assert initial_count == 500
+    assert sample.summary == expected
+    assert {"first_fit", "overlaps", "snapshot", "stats"} <= set(
+        dict(sample.operation_latency_ns)
+    )
+    compact = compact_replay_summary(expected)
+    assert compact["query_observations"] == 1_100
+    assert "normalized_state" not in compact
+    assert "query_results" not in compact
+
+
+def test_indexed_oracle_preserves_initial_domain_and_mutation_accounting():
+    oracle = RangeOracle(((0, 10), (20, 30)), initially_available=True)
+
+    mutation = oracle.discard(Span(2, 8).start, Span(2, 8).end)
+    assert mutation.changed_length == 6
+    assert oracle.total == 14
+    expected_fit = (20, 24)
+    assert oracle.first_fit(4, not_before=0) == expected_fit
+    assert oracle.overlaps(1, 3)
+    assert not oracle.overlaps(3, 4)
+
+
+def test_load_qualification_reports_real_lease_operations_and_checksums():
+    workload = lease_pool_workload(shards=64, operation_count=1_100)
+    report = qualify_backends(("py_boundary",), workload)
+
+    assert report["dataset"]["actual_interval_count"] == 64
+    assert report["dataset"]["timed_operations"] == 1_100
+    assert report["validation"]["query_observations"] > 0
+    assert len(report["validation"]["state_checksum"]) == 64
+    result = report["results"]["py_boundary"]
+    assert result["execution_ns"] > 0
+    assert result["operations_per_second"] > 0
+    assert {"allocate", "cancel", "overlaps", "snapshot", "stats"} <= set(
+        result["operation_latency_descriptive"]
+    )
 
 
 def test_divergent_query_is_rejected_before_timing_can_be_reported():

@@ -18,7 +18,7 @@ Tree-Mendous is a Python package with optional C++/GPU/Metal backends.
 - `just build` builds the wheel and compiles C++ extensions; `just build-cpp` forces a clean rebuild.
 - `just build-metal` (macOS) or `just build-gpu` (CUDA) for platform backends.
 - `just test` runs pytest + stable-backend validation; `just test-hypothesis` runs property-based tests.
-- `just test-perf` or `just test-perf-full` for benchmarks; `just validate` runs tests plus bytecode checks.
+- `just benchmark-smoke`, `just benchmark-standard`, or `just benchmark-large` run correctness-checked workload profiles and write durable artifacts; `just validate` runs tests plus bytecode checks.
 
 ## Coding Style & Naming Conventions
 
