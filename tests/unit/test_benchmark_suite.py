@@ -79,6 +79,20 @@ def test_application_matrix_covers_fifty_distinct_interval_tasks():
     }
     assert len(scenarios) == 50
     assert all(len(workload.operations) == 20 for _, workload in scenarios)
+    operations_by_family: dict[str, set[str]] = {}
+    for spec, workload in scenarios:
+        operations_by_family.setdefault(spec.family, set()).update(
+            operation.kind for operation in workload.operations
+        )
+    assert {"allocate", "cancel", "overlaps", "snapshot", "stats"} <= (
+        operations_by_family["partition"]
+    )
+    assert {"overlaps", "first_fit", "snapshot", "stats"} <= (
+        operations_by_family["catalog"]
+    )
+    assert {"add", "discard", "first_fit", "allocate"} <= (
+        operations_by_family["allocator"]
+    )
 
 
 def test_all_application_scenarios_match_the_oracle():
