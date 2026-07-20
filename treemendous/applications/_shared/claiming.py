@@ -273,9 +273,12 @@ class ClaimLedger:
         self._last_observed_at = observed
         return observed
 
-    def _event(self, claim: WorkClaim, occurred_at: int) -> None:
+    @staticmethod
+    def _append_event(
+        event_log: EventLog, claim: WorkClaim, occurred_at: int
+    ) -> None:
         stream = f"claim:{claim.claim_id}"
-        self._events.append(
+        event_log.append(
             stream,
             claim.state.value,
             {
@@ -296,27 +299,42 @@ class ClaimLedger:
             occurred_at=occurred_at,
         )
 
-    def _expire_due(self, now: int) -> tuple[WorkClaim, ...]:
-        expired: list[WorkClaim] = []
-        for claim_id in sorted(self._claims):
-            current = self._claims[claim_id]
-            if (
-                current.state is ClaimState.ACTIVE
-                and current.expires_at is not None
-                and current.expires_at <= now
-            ):
-                self._free.add(current.span)
-                terminal = replace(
-                    current,
-                    state=ClaimState.EXPIRED,
-                    revision=current.revision + 1,
-                )
-                self._claims[claim_id] = terminal
-                self._event(terminal, now)
-                expired.append(terminal)
-        return tuple(expired)
+    def _due_transitions(self, now: int) -> tuple[WorkClaim, ...]:
+        return tuple(
+            replace(current, state=ClaimState.EXPIRED, revision=current.revision + 1)
+            for claim_id in sorted(self._claims)
+            if (current := self._claims[claim_id]).state is ClaimState.ACTIVE
+            and current.expires_at is not None
+            and current.expires_at <= now
+        )
 
-    def _active(self, claim: WorkClaim, owner: str | None, now: int) -> WorkClaim:
+    def _stage_transitions(
+        self, transitions: tuple[WorkClaim, ...], occurred_at: int
+    ) -> tuple[dict[int, WorkClaim], RangeSet, EventLog]:
+        staged_claims = self._claims.copy()
+        for transition in transitions:
+            staged_claims[transition.claim_id] = transition
+        staged_free = _new_free(self._domain, tuple(staged_claims.values()))
+        staged_events = EventLog.from_checkpoint(
+            self._events.checkpoint(), clock=self._clock
+        )
+        for transition in transitions:
+            self._append_event(staged_events, transition, occurred_at)
+        return staged_claims, staged_free, staged_events
+
+    def _commit_transitions(
+        self, staged: tuple[dict[int, WorkClaim], RangeSet, EventLog]
+    ) -> None:
+        self._claims, self._free, self._events = staged
+
+    def _expire_due(self, now: int) -> tuple[WorkClaim, ...]:
+        expired = self._due_transitions(now)
+        if expired:
+            self._commit_transitions(self._stage_transitions(expired, now))
+        return expired
+
+    def _active_handle(self, claim: WorkClaim, owner: str | None) -> WorkClaim:
+        """Validate supplied identity and revision before any expiry mutation."""
         if not isinstance(claim, WorkClaim):
             raise TypeError("claim must be a WorkClaim")
         if claim.ledger_id != self._ledger_id:
@@ -335,9 +353,16 @@ class ClaimLedger:
             raise StaleClaimError("claim handle is an old revision")
         if current.state is not ClaimState.ACTIVE:
             raise TerminalClaimError(f"claim is already {current.state.value}")
-        if current.expires_at is not None and current.expires_at <= now:
-            raise ExpiredClaimError("claim has expired")
         return current
+
+    def _stage_lifecycle(
+        self, current: WorkClaim, transition: WorkClaim, now: int
+    ) -> tuple[dict[int, WorkClaim], RangeSet, EventLog]:
+        due = self._due_transitions(now)
+        if any(item.claim_id == current.claim_id for item in due):
+            self._commit_transitions(self._stage_transitions(due, now))
+            raise ExpiredClaimError("claim has expired")
+        return self._stage_transitions((*due, transition), now)
 
     def claim_next(
         self,
@@ -363,8 +388,6 @@ class ClaimLedger:
             request_id = _nonempty(request_id, "request_id")
 
         with self._lock:
-            now = self._now()
-            self._expire_due(now)
             if request_id is not None:
                 prior = self._requests.get(request_id)
                 if prior is not None:
@@ -387,12 +410,23 @@ class ClaimLedger:
                         )
                     return self._claims[prior.claim_id]
 
-            allocated = self._free.allocate(
+            now = self._now()
+            due = self._due_transitions(now)
+            claims_after_expiry = self._claims.copy()
+            claims_after_expiry.update(
+                (terminal.claim_id, terminal) for terminal in due
+            )
+            staged_available = _new_free(
+                self._domain, tuple(claims_after_expiry.values())
+            )
+            allocated = staged_available.allocate(
                 length,
                 not_before=start_bound,
                 not_after=not_after,
             )
             if allocated is None:
+                if due:
+                    self._commit_transitions(self._stage_transitions(due, now))
                 raise ClaimUnavailableError("no contiguous work range is available")
             claim = WorkClaim(
                 ledger_id=self._ledger_id,
@@ -404,9 +438,10 @@ class ClaimLedger:
                 expires_at=(None if validated_ttl is None else now + validated_ttl),
                 request_id=request_id,
             )
-            self._claims[claim.claim_id] = claim
-            if request_id is not None:
-                self._requests[request_id] = _ClaimRequest(
+            request = (
+                None
+                if request_id is None
+                else _ClaimRequest(
                     request_id,
                     owner,
                     length,
@@ -415,9 +450,15 @@ class ClaimLedger:
                     validated_ttl,
                     claim.claim_id,
                 )
+            )
+            staged = self._stage_transitions((*due, claim), now)
+            staged_requests = self._requests.copy()
+            if request is not None:
+                staged_requests[request.request_id] = request
+            self._commit_transitions(staged)
+            self._requests = staged_requests
             self._next_claim_id += 1
             self._next_fencing_token += 1
-            self._event(claim, now)
             return claim
 
     def renew(
@@ -426,18 +467,17 @@ class ClaimLedger:
         """Renew active ownership and issue a newer global fencing token."""
         validated_ttl = _positive(ttl, "ttl")
         with self._lock:
+            current = self._active_handle(claim, owner)
             now = self._now()
-            self._expire_due(now)
-            current = self._active(claim, owner, now)
             renewed = replace(
                 current,
                 fencing_token=self._next_fencing_token,
                 expires_at=now + validated_ttl,
                 revision=current.revision + 1,
             )
-            self._claims[current.claim_id] = renewed
+            staged = self._stage_lifecycle(current, renewed, now)
+            self._commit_transitions(staged)
             self._next_fencing_token += 1
-            self._event(renewed, now)
             return renewed
 
     def complete(
@@ -450,33 +490,30 @@ class ClaimLedger:
         """Record completion metadata without executing application work."""
         frozen_result = freeze_metadata(result)
         with self._lock:
+            current = self._active_handle(claim, owner)
             now = self._now()
-            self._expire_due(now)
-            current = self._active(claim, owner, now)
             completed = replace(
                 current,
                 state=ClaimState.COMPLETED,
                 revision=current.revision + 1,
                 result=frozen_result,
             )
-            self._claims[current.claim_id] = completed
-            self._event(completed, now)
+            staged = self._stage_lifecycle(current, completed, now)
+            self._commit_transitions(staged)
             return completed
 
     def abandon(self, claim: WorkClaim, *, owner: str | None = None) -> WorkClaim:
         """Return unfinished work to availability and retain terminal evidence."""
         with self._lock:
+            current = self._active_handle(claim, owner)
             now = self._now()
-            self._expire_due(now)
-            current = self._active(claim, owner, now)
-            self._free.add(current.span)
             abandoned = replace(
                 current,
                 state=ClaimState.ABANDONED,
                 revision=current.revision + 1,
             )
-            self._claims[current.claim_id] = abandoned
-            self._event(abandoned, now)
+            staged = self._stage_lifecycle(current, abandoned, now)
+            self._commit_transitions(staged)
             return abandoned
 
     def expire(self) -> tuple[WorkClaim, ...]:
@@ -568,13 +605,18 @@ class ClaimLedger:
                 not self._domain.contains(claim.span) for claim in self._claims.values()
             ):
                 violations.append("claim is outside the managed domain")
-            if self._next_claim_id <= max(self._claims, default=0):
-                violations.append("next_claim_id would reuse an ID")
-            max_token = max(
-                (claim.fencing_token for claim in self._claims.values()), default=0
-            )
-            if self._next_fencing_token <= max_token:
-                violations.append("next_fencing_token would reuse a token")
+            if self._next_claim_id != max(self._claims, default=0) + 1:
+                violations.append("next_claim_id is inconsistent with issued IDs")
+            fencing_tokens = [
+                claim.fencing_token for claim in self._claims.values()
+            ]
+            if len(fencing_tokens) != len(set(fencing_tokens)):
+                violations.append("claims reuse a fencing token")
+            max_token = max(fencing_tokens, default=0)
+            if self._next_fencing_token != max_token + 1:
+                violations.append(
+                    "next_fencing_token is inconsistent with issued tokens"
+                )
             for request in self._requests.values():
                 claim = self._claims.get(request.claim_id)
                 if claim is None or claim.request_id != request.request_id:
@@ -649,48 +691,246 @@ class ClaimLedger:
             raise ClaimInvariantError("claim request mappings are incomplete")
 
         restored_events = EventLog.from_checkpoint(checkpoint.events, clock=clock)
+        all_events = restored_events.events()
         events_by_stream: dict[str, list[Event]] = {}
-        for event in restored_events.events():
+        previous_occurred_at: int | None = None
+        for event in all_events:
             events_by_stream.setdefault(event.stream, []).append(event)
             if event.occurred_at > checkpoint.last_observed_at:
                 raise ClaimInvariantError("claim event occurs after checkpoint time")
+            if (
+                previous_occurred_at is not None
+                and event.occurred_at < previous_occurred_at
+            ):
+                raise ClaimInvariantError(
+                    "claim event timestamps must be globally monotonic"
+                )
+            previous_occurred_at = event.occurred_at
+
         expected_streams = {f"claim:{claim_id}" for claim_id in claims}
         if set(events_by_stream) != expected_streams:
             raise ClaimInvariantError("claim event streams do not match claims")
+
+        payload_fields = {
+            "ledger_id",
+            "claim_id",
+            "owner",
+            "start",
+            "end",
+            "fencing_token",
+            "revision",
+            "acquired_at",
+            "expires_at",
+            "request_id",
+            "result",
+        }
+        empty_result = dict(freeze_metadata({"result": {}}))["result"]
+        requests_by_sequence = {
+            request.event_sequence: request for request in checkpoint.events.requests
+        }
+        event_payloads: dict[int, dict[str, Any]] = {}
         for claim_id, claim in claims.items():
             stream_events = events_by_stream[f"claim:{claim_id}"]
             if len(stream_events) != claim.revision:
                 raise ClaimInvariantError("claim event count does not match revision")
-            first_payload = dict(stream_events[0].payload)
+
+            previous_event: Event | None = None
+            previous_payload: dict[str, Any] | None = None
+            for revision, event in enumerate(stream_events, start=1):
+                payload = dict(event.payload)
+                event_payloads[event.sequence] = payload
+                if set(payload) != payload_fields:
+                    raise ClaimInvariantError("claim event payload fields are invalid")
+                if event.idempotency_key != f"{revision}:{event.kind}":
+                    raise ClaimInvariantError("claim event idempotency key is invalid")
+                event_request = requests_by_sequence[event.sequence]
+                if (
+                    event_request.expected_version != revision - 1
+                    or event_request.occurred_at != event.occurred_at
+                ):
+                    raise ClaimInvariantError(
+                        "claim event idempotency request is inconsistent"
+                    )
+                if event.version != revision or payload["revision"] != revision:
+                    raise ClaimInvariantError("claim event revision is inconsistent")
+                if (
+                    payload["ledger_id"] != checkpoint.ledger_id
+                    or payload["claim_id"] != claim_id
+                    or payload["owner"] != claim.owner
+                    or payload["start"] != claim.span.start
+                    or payload["end"] != claim.span.end
+                    or payload["acquired_at"] != claim.acquired_at
+                    or payload["request_id"] != claim.request_id
+                ):
+                    raise ClaimInvariantError("claim event identity is inconsistent")
+                integer_fields = (
+                    "claim_id",
+                    "start",
+                    "end",
+                    "fencing_token",
+                    "revision",
+                    "acquired_at",
+                )
+                if any(type(payload[field]) is not int for field in integer_fields):
+                    raise ClaimInvariantError("claim event coordinates are invalid")
+                expires_at = payload["expires_at"]
+                if expires_at is not None and type(expires_at) is not int:
+                    raise ClaimInvariantError("claim event expiry is invalid")
+
+                if revision == 1:
+                    if event.kind != ClaimState.ACTIVE.value:
+                        raise ClaimInvariantError(
+                            "claim history must begin with acquisition"
+                        )
+                    if event.occurred_at != payload["acquired_at"]:
+                        raise ClaimInvariantError(
+                            "claim acquisition timestamp is inconsistent"
+                        )
+                    if expires_at is not None and expires_at <= event.occurred_at:
+                        raise ClaimInvariantError("claim acquisition expiry is invalid")
+                    if payload["result"] != empty_result:
+                        raise ClaimInvariantError(
+                            "active claim event cannot contain a result"
+                        )
+                else:
+                    if previous_event is None or previous_payload is None:
+                        raise RuntimeError("claim history validation lost prior event")
+                    if previous_event.kind != ClaimState.ACTIVE.value:
+                        raise ClaimInvariantError(
+                            "claim history continues after a terminal transition"
+                        )
+                    if event.occurred_at < previous_event.occurred_at:
+                        raise ClaimInvariantError(
+                            "claim event timestamps must be monotonic"
+                        )
+                    prior_expiry = previous_payload["expires_at"]
+                    if event.kind == ClaimState.ACTIVE.value:
+                        if payload["fencing_token"] == previous_payload["fencing_token"]:
+                            raise ClaimInvariantError(
+                                "claim renewal must issue a fencing token"
+                            )
+                        if expires_at is None or expires_at <= event.occurred_at:
+                            raise ClaimInvariantError("claim renewal expiry is invalid")
+                        if (
+                            prior_expiry is not None
+                            and event.occurred_at >= prior_expiry
+                        ):
+                            raise ClaimInvariantError(
+                                "claim renewal occurs after expiry"
+                            )
+                        if payload["result"] != empty_result:
+                            raise ClaimInvariantError(
+                                "active claim event cannot contain a result"
+                            )
+                    elif event.kind in {
+                        ClaimState.COMPLETED.value,
+                        ClaimState.ABANDONED.value,
+                    }:
+                        if (
+                            payload["fencing_token"]
+                            != previous_payload["fencing_token"]
+                            or expires_at != prior_expiry
+                        ):
+                            raise ClaimInvariantError(
+                                "terminal claim event changes lease evidence"
+                            )
+                        if (
+                            prior_expiry is not None
+                            and event.occurred_at >= prior_expiry
+                        ):
+                            raise ClaimInvariantError(
+                                "terminal claim transition occurs after expiry"
+                            )
+                        if (
+                            event.kind == ClaimState.ABANDONED.value
+                            and payload["result"] != empty_result
+                        ):
+                            raise ClaimInvariantError(
+                                "abandoned claim event cannot contain a result"
+                            )
+                    elif event.kind == ClaimState.EXPIRED.value:
+                        if (
+                            payload["fencing_token"]
+                            != previous_payload["fencing_token"]
+                            or expires_at != prior_expiry
+                        ):
+                            raise ClaimInvariantError(
+                                "expired claim event changes lease evidence"
+                            )
+                        if prior_expiry is None or event.occurred_at < prior_expiry:
+                            raise ClaimInvariantError(
+                                "claim expiration occurs before lease expiry"
+                            )
+                        if payload["result"] != empty_result:
+                            raise ClaimInvariantError(
+                                "expired claim event cannot contain a result"
+                            )
+                    else:
+                        raise ClaimInvariantError("claim event state is invalid")
+                previous_event = event
+                previous_payload = payload
+
+            first_payload = event_payloads[stream_events[0].sequence]
             final_event = stream_events[-1]
-            final_payload = dict(final_event.payload)
+            final_payload = event_payloads[final_event.sequence]
+            expected_result = dict(
+                freeze_metadata({"result": dict(claim.result)})
+            )["result"]
             if (
                 final_event.kind != claim.state.value
-                or final_payload.get("ledger_id") != claim.ledger_id
-                or final_payload.get("claim_id") != claim.claim_id
-                or final_payload.get("revision") != claim.revision
-                or final_payload.get("fencing_token") != claim.fencing_token
-                or final_payload.get("owner") != claim.owner
-                or final_payload.get("start") != claim.span.start
-                or final_payload.get("end") != claim.span.end
-                or final_payload.get("acquired_at") != claim.acquired_at
-                or final_payload.get("expires_at") != claim.expires_at
-                or final_payload.get("request_id") != claim.request_id
-                or final_payload.get("result") != claim.result
+                or final_payload["revision"] != claim.revision
+                or final_payload["fencing_token"] != claim.fencing_token
+                or final_payload["expires_at"] != claim.expires_at
+                or final_payload["result"] != expected_result
             ):
                 raise ClaimInvariantError("final claim event does not match claim")
+            if (
+                claim.state is ClaimState.ACTIVE
+                and claim.expires_at is not None
+                and claim.expires_at <= checkpoint.last_observed_at
+            ):
+                raise ClaimInvariantError("checkpoint retains an expired active claim")
             if claim.request_id is not None:
                 request = requests[claim.request_id]
-                initial_expiry = first_payload.get("expires_at")
-                initial_ttl = (
+                expected_initial_expiry = (
                     None
-                    if initial_expiry is None
-                    else initial_expiry - claim.acquired_at
+                    if request.ttl is None
+                    else claim.acquired_at + request.ttl
                 )
-                if request.ttl != initial_ttl:
+                if first_payload["expires_at"] != expected_initial_expiry:
                     raise ClaimInvariantError(
                         "claim request TTL does not match acquisition event"
                     )
+
+        next_claim_id = 1
+        next_fencing_token = 1
+        current_tokens: dict[str, int] = {}
+        for event in all_events:
+            payload = event_payloads[event.sequence]
+            if event.version == 1:
+                if payload["claim_id"] != next_claim_id:
+                    raise ClaimInvariantError("claim IDs are issued out of order")
+                next_claim_id += 1
+            issues_token = event.version == 1 or event.kind == ClaimState.ACTIVE.value
+            if issues_token:
+                if payload["fencing_token"] != next_fencing_token:
+                    raise ClaimInvariantError(
+                        "fencing tokens are duplicate or issued out of order"
+                    )
+                current_tokens[event.stream] = next_fencing_token
+                next_fencing_token += 1
+            elif payload["fencing_token"] != current_tokens.get(event.stream):
+                raise ClaimInvariantError(
+                    "terminal event has an inconsistent fencing token"
+                )
+        if checkpoint.next_claim_id != next_claim_id:
+            raise ClaimInvariantError(
+                "next_claim_id would reuse or skip claim IDs"
+            )
+        if checkpoint.next_fencing_token != next_fencing_token:
+            raise ClaimInvariantError(
+                "next_fencing_token would reuse or skip fencing tokens"
+            )
 
         candidate = cls(checkpoint.domain, clock=clock)
         candidate._ledger_id = checkpoint.ledger_id

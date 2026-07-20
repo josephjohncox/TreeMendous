@@ -16,6 +16,7 @@ from treemendous.applications._shared.events import (
     EventLog,
     ExpectedVersionError,
     InvalidEventCheckpointError,
+    freeze_metadata,
 )
 
 
@@ -93,10 +94,61 @@ def test_payload_is_recursively_immutable_and_detached() -> None:
     event = EventLog(clock=LogicalClock()).append("stream", "kind", source)
     source["values"].append(3)
 
-    expected_payload = (("values", (1, (("key", "value"),))),)
+    expected_payload = freeze_metadata({"values": [1, {"key": "value"}]})
     assert event.payload == expected_payload
     with pytest.raises(Exception):
         event.payload[0] = ("changed", ())  # type: ignore[index]
+
+
+def test_metadata_freezing_distinguishes_mappings_from_sequences() -> None:
+    log = EventLog(clock=LogicalClock())
+    original = log.append(
+        "stream",
+        "kind",
+        {"nested": {"a": 1}},
+        idempotency_key="request",
+    )
+
+    with pytest.raises(EventIdempotencyConflictError):
+        log.append(
+            "stream",
+            "kind",
+            {"nested": [["a", 1]]},
+            idempotency_key="request",
+        )
+
+    assert original.payload != freeze_metadata({"nested": [["a", 1]]})
+    assert freeze_metadata({"value": True}) != freeze_metadata({"value": 1})
+    assert freeze_metadata({"value": 1.0}) != freeze_metadata({"value": 1})
+    assert len(log.events()) == 1
+
+
+def test_explicit_occurred_at_is_part_of_idempotency_identity() -> None:
+    log = EventLog(clock=LogicalClock(50))
+    original = log.append(
+        "stream",
+        "kind",
+        idempotency_key="request",
+        occurred_at=1,
+    )
+
+    assert (
+        log.append(
+            "stream",
+            "kind",
+            idempotency_key="request",
+            occurred_at=1,
+        )
+        is original
+    )
+    with pytest.raises(EventIdempotencyConflictError):
+        log.append(
+            "stream",
+            "kind",
+            idempotency_key="request",
+            occurred_at=999,
+        )
+    assert len(log.events()) == 1
 
 
 def test_concurrent_expected_version_has_one_winner() -> None:
@@ -269,5 +321,5 @@ def test_direct_event_validation_rejects_invalid_coordinates() -> None:
     mutable = [1]
     event = Event(1, "stream", 1, "kind", 0, (("values", mutable),))
     mutable.append(2)
-    expected_payload = (("values", (1,)),)
+    expected_payload = freeze_metadata({"values": [1]})
     assert event.payload == expected_payload

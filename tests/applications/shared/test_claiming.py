@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from typing import Any
 
 import pytest
 
@@ -21,7 +22,45 @@ from treemendous.applications._shared.claiming import (
     WorkClaim,
 )
 from treemendous.applications._shared.clock import LogicalClock
+from treemendous.applications._shared.events import EventLog, freeze_metadata
 from treemendous.domain import ManagedDomain, Span
+
+
+def _corrupt_claim_event(
+    checkpoint: Any,
+    sequence: int,
+    *,
+    payload_changes: dict[str, Any] | None = None,
+    **event_changes: Any,
+) -> Any:
+    events = list(checkpoint.events.events)
+    event = events[sequence - 1]
+    if payload_changes is not None:
+        payload = dict(event.payload)
+        payload.update(payload_changes)
+        event_changes["payload"] = tuple(payload.items())
+    altered_event = replace(event, **event_changes)
+    events[sequence - 1] = altered_event
+
+    requests = list(checkpoint.events.requests)
+    request_index = next(
+        index
+        for index, request in enumerate(requests)
+        if request.event_sequence == sequence
+    )
+    requests[request_index] = replace(
+        requests[request_index],
+        key=altered_event.idempotency_key,
+        kind=altered_event.kind,
+        payload=altered_event.payload,
+        occurred_at=altered_event.occurred_at,
+    )
+    event_checkpoint = replace(
+        checkpoint.events,
+        events=tuple(events),
+        requests=tuple(requests),
+    )
+    return replace(checkpoint, events=event_checkpoint)
 
 
 def test_claims_are_earliest_and_completion_records_only_metadata() -> None:
@@ -39,7 +78,7 @@ def test_claims_are_earliest_and_completion_records_only_metadata() -> None:
     assert first.fencing_token == 1
     assert second.fencing_token == 2
     assert completed.state is ClaimState.COMPLETED
-    expected_result = (("matches", (7, 9)),)
+    expected_result = freeze_metadata({"matches": [7, 9]})
     expected_available = (Span(7, 12),)
     assert completed.result == expected_result
     assert ledger.snapshot().available == expected_available
@@ -87,18 +126,25 @@ def test_request_id_is_idempotent_and_conflicting_reuse_is_atomic() -> None:
     original = ledger.claim_next(
         "worker", 2, ttl=5, not_before=1, request_id="request-1"
     )
-    before = ledger.snapshot()
 
     assert (
         ledger.claim_next("worker", 2, ttl=5, not_before=1, request_id="request-1")
         == original
     )
+    before_claims = ledger._claims.copy()
+    before_available = ledger._free.snapshot()
+    before_events = ledger.events()
+    clock.advance(5)
     with pytest.raises(ClaimRequestConflictError):
         ledger.claim_next("worker", 3, ttl=5, not_before=1, request_id="request-1")
-    after = ledger.snapshot()
-    assert after.claims == before.claims
-    assert after.available == before.available
-    assert after.diagnostics.next_claim_id == before.diagnostics.next_claim_id
+
+    assert ledger._claims == before_claims
+    assert ledger._free.snapshot() == before_available
+    assert ledger.events() == before_events
+    assert (
+        ledger.claim_next("worker", 2, ttl=5, not_before=1, request_id="request-1")
+        == original
+    )
 
 
 def test_foreign_owner_ledger_and_terminal_handles_are_rejected() -> None:
@@ -114,6 +160,29 @@ def test_foreign_owner_ledger_and_terminal_handles_are_rejected() -> None:
     completed = ledger.complete(claim)
     with pytest.raises(TerminalClaimError):
         ledger.complete(completed)
+
+
+def test_rejected_handles_do_not_expire_unrelated_claims() -> None:
+    clock = LogicalClock()
+    ledger = ClaimLedger((0, 4), clock=clock)
+    ledger.claim_next("expiring", 1, ttl=1)
+    old_handle = ledger.claim_next("owner", 1)
+    current = ledger.renew(old_handle, ttl=10)
+    before_claims = ledger._claims.copy()
+    before_available = ledger._free.snapshot()
+    before_events = ledger.events()
+    clock.advance()
+
+    with pytest.raises(InvalidClaimError, match="unknown"):
+        ledger.complete(replace(current, claim_id=99))
+    with pytest.raises(ForeignClaimError, match="owner"):
+        ledger.complete(current, owner="intruder")
+    with pytest.raises(StaleClaimError, match="old revision"):
+        ledger.complete(old_handle)
+
+    assert ledger._claims == before_claims
+    assert ledger._free.snapshot() == before_available
+    assert ledger.events() == before_events
 
 
 def test_claim_value_and_transition_validation_is_atomic() -> None:
@@ -150,6 +219,44 @@ def test_claim_value_and_transition_validation_is_atomic() -> None:
     with pytest.raises(TypeError, match="payload values"):
         ledger.complete(claim, result={"bad": object()})
     assert ledger.snapshot() == before
+
+
+def test_expiration_and_lifecycle_event_failures_are_atomic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expiry_clock = LogicalClock()
+    expiry_ledger = ClaimLedger((0, 2), clock=expiry_clock)
+    expiry_ledger.claim_next("expiring", 1, ttl=1)
+    lifecycle_ledger = ClaimLedger((0, 2), clock=LogicalClock())
+    lifecycle_claim = lifecycle_ledger.claim_next("owner", 1)
+
+    expiry_before = (
+        expiry_ledger._claims.copy(),
+        expiry_ledger._free.snapshot(),
+        expiry_ledger.events(),
+    )
+    lifecycle_before = (
+        lifecycle_ledger._claims.copy(),
+        lifecycle_ledger._free.snapshot(),
+        lifecycle_ledger.events(),
+    )
+    expiry_clock.advance()
+
+    def fail_append(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("injected append failure")
+
+    monkeypatch.setattr(EventLog, "append", fail_append)
+    with pytest.raises(RuntimeError, match="injected"):
+        expiry_ledger.expire()
+    with pytest.raises(RuntimeError, match="injected"):
+        lifecycle_ledger.abandon(lifecycle_claim)
+
+    assert expiry_ledger._claims == expiry_before[0]
+    assert expiry_ledger._free.snapshot() == expiry_before[1]
+    assert expiry_ledger.events() == expiry_before[2]
+    assert lifecycle_ledger._claims == lifecycle_before[0]
+    assert lifecycle_ledger._free.snapshot() == lifecycle_before[1]
+    assert lifecycle_ledger.events() == lifecycle_before[2]
 
 
 def test_checkpoint_restores_retry_counters_events_and_availability() -> None:
@@ -197,6 +304,83 @@ def test_checkpoint_validation_rejects_overlap_and_counter_reuse() -> None:
             replace(checkpoint, requests=(altered_request,)),
             clock=clock,
         )
+
+
+def test_checkpoint_rejects_duplicate_restored_fencing_tokens() -> None:
+    clock = LogicalClock()
+    ledger = ClaimLedger((0, 1), clock=clock)
+    original = ledger.claim_next("first", 1)
+    ledger.abandon(original)
+    ledger.claim_next("replacement", 1)
+    checkpoint = ledger.checkpoint()
+
+    duplicate = replace(
+        checkpoint.claims[1],
+        fencing_token=checkpoint.claims[0].fencing_token,
+    )
+    corrupted = replace(
+        checkpoint,
+        claims=(checkpoint.claims[0], duplicate),
+    )
+    corrupted = _corrupt_claim_event(
+        corrupted,
+        3,
+        payload_changes={"fencing_token": original.fencing_token},
+    )
+
+    with pytest.raises(ClaimInvariantError, match="fencing tokens"):
+        ClaimLedger.from_checkpoint(corrupted, clock=clock)
+
+
+def test_checkpoint_rejects_future_transition_idempotency_key() -> None:
+    clock = LogicalClock()
+    ledger = ClaimLedger((0, 1), clock=clock)
+    claim = ledger.claim_next("owner", 1, ttl=1)
+    ledger.renew(claim, ttl=2)
+    checkpoint = ledger.checkpoint()
+    corrupted = _corrupt_claim_event(
+        checkpoint,
+        1,
+        idempotency_key="3:expired",
+    )
+
+    with pytest.raises(ClaimInvariantError, match="idempotency key"):
+        ClaimLedger.from_checkpoint(corrupted, clock=clock)
+
+    requests = list(checkpoint.events.requests)
+    requests[0] = replace(requests[0], expected_version=None)
+    missing_expected_version = replace(
+        checkpoint,
+        events=replace(checkpoint.events, requests=tuple(requests)),
+    )
+    with pytest.raises(ClaimInvariantError, match="idempotency request"):
+        ClaimLedger.from_checkpoint(missing_expected_version, clock=clock)
+
+
+def test_checkpoint_rejects_terminal_transition_after_expiry() -> None:
+    clock = LogicalClock()
+    ledger = ClaimLedger((0, 1), clock=clock)
+    claim = ledger.claim_next("owner", 1, ttl=1)
+    ledger.complete(claim)
+    checkpoint = ledger.checkpoint()
+    corrupted = _corrupt_claim_event(checkpoint, 2, occurred_at=2)
+    corrupted = replace(corrupted, last_observed_at=2)
+
+    with pytest.raises(ClaimInvariantError, match="after expiry"):
+        ClaimLedger.from_checkpoint(corrupted, clock=LogicalClock(2))
+
+
+def test_checkpoint_rejects_nonmonotonic_global_event_timestamps() -> None:
+    clock = LogicalClock(2)
+    ledger = ClaimLedger((0, 2), clock=clock)
+    ledger.claim_next("first", 1)
+    clock.advance()
+    ledger.claim_next("second", 1)
+    checkpoint = ledger.checkpoint()
+    corrupted = _corrupt_claim_event(checkpoint, 2, occurred_at=1)
+
+    with pytest.raises(ClaimInvariantError, match="globally monotonic"):
+        ClaimLedger.from_checkpoint(corrupted, clock=clock)
 
 
 def test_checkpoint_rejects_foreign_types_clock_and_request_corruption() -> None:

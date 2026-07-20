@@ -41,22 +41,59 @@ def _nonempty(value: str, name: str) -> str:
     return value
 
 
+@dataclass(frozen=True)
+class _FrozenBoolean:
+    """Tagged boolean that cannot compare equal to integer metadata."""
+
+    value: bool
+
+
+@dataclass(frozen=True)
+class _FrozenFloat:
+    """Tagged float that cannot compare equal to integer metadata."""
+
+    value: float
+
+
+@dataclass(frozen=True)
+class _FrozenMapping:
+    """Tagged immutable representation that cannot alias a sequence."""
+
+    items: tuple[tuple[str, Any], ...]
+
+
+@dataclass(frozen=True)
+class _FrozenSequence:
+    """Tagged immutable representation that cannot alias a mapping."""
+
+    items: tuple[Any, ...]
+
+
 def _freeze_value(value: Any) -> Any:
-    if value is None or isinstance(value, (bool, int, str, bytes)):
+    if isinstance(
+        value,
+        (_FrozenBoolean, _FrozenFloat, _FrozenMapping, _FrozenSequence),
+    ):
         return value
+    if value is None or isinstance(value, (int, str, bytes)) and not isinstance(
+        value, bool
+    ):
+        return value
+    if isinstance(value, bool):
+        return _FrozenBoolean(value)
     if isinstance(value, float):
         if not isfinite(value):
             raise ValueError("event payload floats must be finite")
-        return value
+        return _FrozenFloat(value)
     if isinstance(value, Mapping):
         frozen: list[tuple[str, Any]] = []
         for key, item in value.items():
             if not isinstance(key, str):
                 raise TypeError("event payload mapping keys must be strings")
             frozen.append((key, _freeze_value(item)))
-        return tuple(sorted(frozen))
+        return _FrozenMapping(tuple(sorted(frozen)))
     if isinstance(value, (list, tuple)):
-        return tuple(_freeze_value(item) for item in value)
+        return _FrozenSequence(tuple(_freeze_value(item) for item in value))
     raise TypeError(
         "event payload values must be immutable primitives, mappings, or sequences"
     )
@@ -68,10 +105,12 @@ def freeze_metadata(
     """Return deterministic recursively immutable application metadata."""
     if value is None:
         return ()
-    frozen = _freeze_value(value)
-    if not isinstance(frozen, tuple):
+    if not isinstance(value, Mapping):
         raise TypeError("event metadata must be a mapping")
-    return frozen
+    frozen = _freeze_value(value)
+    if not isinstance(frozen, _FrozenMapping):
+        raise RuntimeError("event metadata freezing produced an invalid value")
+    return frozen.items
 
 
 @dataclass(frozen=True)
@@ -119,6 +158,7 @@ class _EventRequest:
     kind: str
     payload: tuple[tuple[str, Any], ...]
     event_sequence: int
+    occurred_at: int | None = None
 
     def __post_init__(self) -> None:
         _nonempty(self.stream, "stream")
@@ -131,6 +171,8 @@ class _EventRequest:
         validate_coordinate(self.event_sequence, "event_sequence")
         if self.event_sequence <= 0:
             raise ValueError("event_sequence must be positive")
+        if self.occurred_at is not None:
+            validate_coordinate(self.occurred_at, "occurred_at")
         if not isinstance(self.payload, tuple):
             raise TypeError("event request payload must contain key/value pairs")
         payload_mapping: dict[str, Any] = {}
@@ -197,16 +239,24 @@ class EventLog:
                 raise ValueError("expected_version must be non-negative")
         if idempotency_key is not None:
             idempotency_key = _nonempty(idempotency_key, "idempotency_key")
+        if occurred_at is not None:
+            validate_coordinate(occurred_at, "occurred_at")
         with self._lock:
             request_key = None if idempotency_key is None else (stream, idempotency_key)
             if request_key is not None:
                 prior = self._requests.get(request_key)
                 if prior is not None:
-                    signature = (expected_version, kind, frozen_payload)
+                    signature = (
+                        expected_version,
+                        kind,
+                        frozen_payload,
+                        occurred_at,
+                    )
                     if signature != (
                         prior.expected_version,
                         prior.kind,
                         prior.payload,
+                        prior.occurred_at,
                     ):
                         raise EventIdempotencyConflictError(
                             "idempotency key was reused for a different append"
@@ -239,6 +289,7 @@ class EventLog:
                     kind,
                     frozen_payload,
                     event.sequence,
+                    occurred_at,
                 )
             self._events.append(event)
             self._versions[stream] = event.version
@@ -336,6 +387,10 @@ class EventLog:
                 or event.kind != request.kind
                 or event.payload != request.payload
                 or event.idempotency_key != request.key
+                or (
+                    request.occurred_at is not None
+                    and event.occurred_at != request.occurred_at
+                )
             ):
                 raise InvalidEventCheckpointError(
                     "event request does not match its event"
