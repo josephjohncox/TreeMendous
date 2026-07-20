@@ -82,8 +82,9 @@ The current algorithm stores entries in insertion order and scans all `n`
 entries for an overlap query:
 
 - storage: `O(n)` entries plus payloads;
-- insert and handle lookup: expected `O(1)` dictionary work plus payload copy;
-- update and removal: expected `O(1)` dictionary work plus payload copy;
+- handle lookup: expected `O(1)` dictionary work plus payload copy;
+- insert, update, and removal: `O(n)` to prepare the shared atomic entry-map
+  replacement, plus payload copy;
 - overlap query: `O(n + k)` geometric work plus copies for `k` results;
 - snapshot and `entries`: `O(n)` plus payload-copy cost.
 
@@ -91,10 +92,12 @@ entries for an overlap query:
 entry count, distinct box count, and duplicate entry count. It deliberately has
 no mutable query counters.
 
-The linear implementation is the executable semantic oracle for later 2D and
-fixed-dimensional optimized indexes. R-tree, projection, or native backends
-must refine these observations and pass the independent finite point-set and
-state-machine suites before selection or speed claims are allowed.
+The linear implementation remains the executable semantic reference for the
+fixed axis-projection and bounded sparse-grid classes. Their algorithms,
+complexity, guardrails, and diagnostics are specified in the
+[optimized index design](optimized_box_indexes.md). All optimized classes refine
+these observations and pass independent finite point-set and state-machine
+suites; that evidence does not imply a universal speed ranking.
 
 ## Example
 

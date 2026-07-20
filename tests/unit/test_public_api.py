@@ -58,10 +58,14 @@ def test_multidimensional_exports_are_explicitly_experimental() -> None:
     import treemendous.multidimensional as multidimensional
 
     expected = {
+        "BoundedBoxIndex",
         "Box",
         "BoxEntry",
         "BoxHandle",
         "BoxIndex",
+        "BoxIndex2D",
+        "BoxIndex3D",
+        "BoxIndex4D",
         "BoxIndexDiagnostics",
         "BoxIndexProtocol",
         "BoxIndexSnapshot",

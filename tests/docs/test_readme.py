@@ -23,6 +23,20 @@ RUNNABLE_EXAMPLES = (
         ROOT / "examples/multidimensional/core/linear_box_index.py",
         ("matches=2 handles=1,2 updated=primary-updated removed=secondary remaining=1"),
     ),
+    (
+        ROOT / "examples/multidimensional/core/fixed_box_indexes.py",
+        "\n".join(
+            (
+                "BoxIndex2D: matches=2 handles=1,2 algorithm=axis_projection",
+                "BoxIndex3D: matches=2 handles=1,2 algorithm=axis_projection",
+                "BoxIndex4D: matches=2 handles=1,2 algorithm=axis_projection",
+            )
+        ),
+    ),
+    (
+        ROOT / "examples/multidimensional/core/bounded_box_index.py",
+        "matches=2 handles=1,2 grid=(4, 4, 4) postings=9",
+    ),
 )
 
 

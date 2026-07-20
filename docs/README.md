@@ -27,6 +27,7 @@ evidence from generic stable-backend evidence.
 ## Project guides
 
 - [Experimental multidimensional `BoxIndex` semantics](theory/box_index_denotation.md)
+- [Experimental optimized multidimensional indexes](theory/optimized_box_indexes.md)
 - [Contributing and quality gates](contributing.md)
 - [Release process](releasing.md)
 
