@@ -91,20 +91,21 @@ class AxisProjectionStrategy:
     def __init__(self, dimensions: int) -> None:
         empty = _CartesianProjection.build(())
         self._dimensions = dimensions
-        self._state = _ProjectionState(
+        self.initial_state = _ProjectionState(
             tuple(() for _ in range(dimensions)),
             tuple(empty for _ in range(dimensions)),
         )
 
     def _with_change(
         self,
+        state: _ProjectionState,
         *,
         add: tuple[BoxHandle, Box] | None = None,
         remove: tuple[BoxHandle, Box] | None = None,
     ) -> _ProjectionState:
         replacement: list[tuple[_ProjectionRecord, ...]] = []
         sequence_replacement: list[_CartesianProjection] = []
-        for axis, current in enumerate(self._state.projections):
+        for axis, current in enumerate(state.projections):
             projection = list(current)
             if remove is not None:
                 old_handle, old_box = remove
@@ -132,35 +133,37 @@ class AxisProjectionStrategy:
             tuple(sequence_replacement),
         )
 
-    def prepare_insert(self, handle: BoxHandle, box: Box) -> _ProjectionState:
-        return self._with_change(add=(handle, box))
+    def prepare_insert(
+        self, state: _ProjectionState, handle: BoxHandle, box: Box
+    ) -> _ProjectionState:
+        return self._with_change(state, add=(handle, box))
 
     def prepare_update(
         self,
+        state: _ProjectionState,
         handle: BoxHandle,
         old_box: Box,
         new_box: Box,
     ) -> _ProjectionState:
         if old_box == new_box:
-            return self._state
-        return self._with_change(add=(handle, new_box), remove=(handle, old_box))
+            return state
+        return self._with_change(state, add=(handle, new_box), remove=(handle, old_box))
 
-    def prepare_remove(self, handle: BoxHandle, box: Box) -> _ProjectionState:
-        return self._with_change(remove=(handle, box))
-
-    def commit(self, prepared: _ProjectionState) -> None:
-        """Publish an already-built state; this hook performs only assignment."""
-        self._state = prepared
+    def prepare_remove(
+        self, state: _ProjectionState, handle: BoxHandle, box: Box
+    ) -> _ProjectionState:
+        return self._with_change(state, remove=(handle, box))
 
     def candidate_handles(
         self,
+        state: _ProjectionState,
         query: Box,
         entries: Mapping[BoxHandle, BoxEntry],
     ) -> tuple[BoxHandle, ...]:
         del entries
         selected_axis = 0
         selected_size: int | None = None
-        for axis, projection in enumerate(self._state.projections):
+        for axis, projection in enumerate(state.projections):
             prefix_size = bisect_left(
                 projection,
                 (query.upper[axis], -1),
@@ -171,13 +174,13 @@ class AxisProjectionStrategy:
                 selected_size = prefix_size
         if selected_size == 0:
             return ()
-        return self._state.sequence_projections[selected_axis].prefix_handles(
+        return state.sequence_projections[selected_axis].prefix_handles(
             query.upper[selected_axis]
         )
 
-    def diagnostics(self) -> dict[str, object]:
+    def diagnostics(self, state: _ProjectionState) -> dict[str, object]:
         return {
             "projection_sizes": tuple(
-                len(projection) for projection in self._state.projections
+                len(projection) for projection in state.projections
             )
         }

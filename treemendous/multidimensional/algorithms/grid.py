@@ -16,6 +16,14 @@ if TYPE_CHECKING:
 
 _Cell = tuple[int, ...]
 
+# Conservative accounting units for guardrails, not CPython heap measurements.
+# They intentionally include container and reference overhead so checks happen
+# before potentially combinatorial tuples, dictionaries, or sets are built.
+_STATE_BYTES = 512
+_CELL_BYTES = 192
+_POSTING_BYTES = 64
+_HANDLE_BYTES = 128
+
 
 @dataclass(frozen=True)
 class _GridState:
@@ -38,6 +46,7 @@ class SparseGridStrategy:
         max_cells_per_entry: int,
         max_cells_per_query: int,
         max_total_postings: int,
+        max_estimated_bytes: int,
     ) -> None:
         self.bounds = bounds
         self.cell_size = cell_size
@@ -55,13 +64,55 @@ class SparseGridStrategy:
         self.max_cells_per_entry = max_cells_per_entry
         self.max_cells_per_query = max_cells_per_query
         self.max_total_postings = max_total_postings
+        self.max_estimated_bytes = max_estimated_bytes
         if self.total_possible_cells > max_total_cells:
             raise ValueError(
                 "grid has "
                 f"{self.total_possible_cells} possible cells, exceeding "
                 f"max_total_cells={max_total_cells}"
             )
-        self._state = _GridState({}, {}, 0)
+        self.initial_state = _GridState({}, {}, 0)
+        self._check_memory(_STATE_BYTES, "empty grid")
+
+    def _check_memory(self, estimate: int, operation: str) -> None:
+        if estimate > self.max_estimated_bytes:
+            raise ValueError(
+                f"{operation} requires an estimated {estimate} bytes, exceeding "
+                f"max_estimated_bytes={self.max_estimated_bytes}"
+            )
+
+    @staticmethod
+    def _retained_bytes(
+        posting_count: int, occupied_cells: int, handle_count: int
+    ) -> int:
+        return (
+            _STATE_BYTES
+            + occupied_cells * _CELL_BYTES
+            + posting_count * _POSTING_BYTES
+            + handle_count * _HANDLE_BYTES
+        )
+
+    def _preflight_replacement_memory(
+        self,
+        state: _GridState,
+        *,
+        posting_count: int,
+        added_cell_count: int,
+        handle_count: int,
+    ) -> None:
+        current = self._retained_bytes(
+            state.posting_count,
+            len(state.postings),
+            len(state.handle_cells),
+        )
+        prospective_occupied = min(
+            self.total_possible_cells,
+            len(state.postings) + added_cell_count,
+        )
+        prospective = self._retained_bytes(
+            posting_count, prospective_occupied, handle_count
+        )
+        self._check_memory(current + prospective, "copy-on-write mutation")
 
     def _cell_ranges(self, box: Box) -> tuple[tuple[range, ...], int]:
         ranges = tuple(
@@ -79,30 +130,37 @@ class SparseGridStrategy:
         )
         return ranges, prod(axis_range.stop - axis_range.start for axis_range in ranges)
 
-    def _query_cells(self, box: Box) -> tuple[_Cell, ...]:
+    def _query_cells(self, state: _GridState, box: Box) -> tuple[_Cell, ...]:
         ranges, cell_count = self._cell_ranges(box)
         if cell_count > self.max_cells_per_query:
             raise ValueError(
                 f"query touches {cell_count} cells, exceeding "
                 f"max_cells_per_query={self.max_cells_per_query}"
             )
+        query_estimate = (
+            _STATE_BYTES
+            + cell_count * _CELL_BYTES
+            + len(state.handle_cells) * _HANDLE_BYTES * 2
+        )
+        self._check_memory(query_estimate, "query")
         return tuple(product(*ranges))
 
     def _replacement(
         self,
+        state: _GridState,
         handle: BoxHandle,
         *,
         old_cells: tuple[_Cell, ...] = (),
         new_cells: tuple[_Cell, ...] = (),
     ) -> _GridState:
-        new_posting_count = self._state.posting_count - len(old_cells) + len(new_cells)
+        new_posting_count = state.posting_count - len(old_cells) + len(new_cells)
         if new_posting_count > self.max_total_postings:
             raise ValueError(
                 f"operation would create {new_posting_count} total postings, "
                 f"exceeding max_total_postings={self.max_total_postings}"
             )
 
-        postings = self._state.postings.copy()
+        postings = state.postings.copy()
         for cell in old_cells:
             remaining = tuple(
                 candidate for candidate in postings[cell] if candidate != handle
@@ -114,90 +172,120 @@ class SparseGridStrategy:
         for cell in new_cells:
             postings[cell] = (*postings.get(cell, ()), handle)
 
-        handle_cells = self._state.handle_cells.copy()
+        handle_cells = state.handle_cells.copy()
         if new_cells:
             handle_cells[handle] = new_cells
         else:
             handle_cells.pop(handle, None)
         return _GridState(postings, handle_cells, new_posting_count)
 
-    def prepare_insert(self, handle: BoxHandle, box: Box) -> _GridState:
+    def prepare_insert(
+        self, state: _GridState, handle: BoxHandle, box: Box
+    ) -> _GridState:
         ranges, cell_count = self._cell_ranges(box)
         if cell_count > self.max_cells_per_entry:
             raise ValueError(
                 f"box touches {cell_count} cells, exceeding "
                 f"max_cells_per_entry={self.max_cells_per_entry}"
             )
-        new_posting_count = self._state.posting_count + cell_count
+        new_posting_count = state.posting_count + cell_count
         if new_posting_count > self.max_total_postings:
             raise ValueError(
                 f"operation would create {new_posting_count} total postings, "
                 f"exceeding max_total_postings={self.max_total_postings}"
             )
+        self._preflight_replacement_memory(
+            state,
+            posting_count=new_posting_count,
+            added_cell_count=cell_count,
+            handle_count=len(state.handle_cells) + 1,
+        )
         cells = tuple(product(*ranges))
-        return self._replacement(handle, new_cells=cells)
+        return self._replacement(state, handle, new_cells=cells)
 
     def prepare_update(
         self,
+        state: _GridState,
         handle: BoxHandle,
         old_box: Box,
         new_box: Box,
     ) -> _GridState:
         if old_box == new_box:
-            return self._state
-        old_cells = self._state.handle_cells[handle]
+            return state
+        old_cells = state.handle_cells[handle]
         ranges, cell_count = self._cell_ranges(new_box)
         if cell_count > self.max_cells_per_entry:
             raise ValueError(
                 f"box touches {cell_count} cells, exceeding "
                 f"max_cells_per_entry={self.max_cells_per_entry}"
             )
-        new_posting_count = self._state.posting_count - len(old_cells) + cell_count
+        new_posting_count = state.posting_count - len(old_cells) + cell_count
         if new_posting_count > self.max_total_postings:
             raise ValueError(
                 f"operation would create {new_posting_count} total postings, "
                 f"exceeding max_total_postings={self.max_total_postings}"
             )
+        self._preflight_replacement_memory(
+            state,
+            posting_count=new_posting_count,
+            added_cell_count=cell_count,
+            handle_count=len(state.handle_cells),
+        )
         new_cells = tuple(product(*ranges))
         return self._replacement(
+            state,
             handle,
             old_cells=old_cells,
             new_cells=new_cells,
         )
 
-    def prepare_remove(self, handle: BoxHandle, box: Box) -> _GridState:
+    def prepare_remove(
+        self, state: _GridState, handle: BoxHandle, box: Box
+    ) -> _GridState:
         del box
-        return self._replacement(
-            handle,
-            old_cells=self._state.handle_cells[handle],
+        old_cells = state.handle_cells[handle]
+        new_posting_count = state.posting_count - len(old_cells)
+        self._preflight_replacement_memory(
+            state,
+            posting_count=new_posting_count,
+            added_cell_count=0,
+            handle_count=len(state.handle_cells) - 1,
         )
-
-    def commit(self, prepared: _GridState) -> None:
-        """Publish an already-built state; this hook performs only assignment."""
-        self._state = prepared
+        return self._replacement(
+            state,
+            handle,
+            old_cells=old_cells,
+        )
 
     def candidate_handles(
         self,
+        state: _GridState,
         query: Box,
         entries: Mapping[BoxHandle, BoxEntry],
     ) -> tuple[BoxHandle, ...]:
         del entries
         candidates: set[BoxHandle] = set()
-        for cell in self._query_cells(query):
-            candidates.update(self._state.postings.get(cell, ()))
+        for cell in self._query_cells(state, query):
+            candidates.update(state.postings.get(cell, ()))
         return tuple(sorted(candidates, key=lambda handle: handle.sequence))
 
-    def diagnostics(self) -> dict[str, object]:
+    def diagnostics(self, state: _GridState) -> dict[str, object]:
         return {
             "bounds_lower": self.bounds.lower,
             "bounds_upper": self.bounds.upper,
             "cell_size": self.cell_size,
             "grid_shape": self.grid_shape,
             "total_possible_cells": self.total_possible_cells,
-            "occupied_cell_count": len(self._state.postings),
-            "posting_count": self._state.posting_count,
+            "occupied_cell_count": len(state.postings),
+            "posting_count": state.posting_count,
             "max_total_cells": self.max_total_cells,
             "max_cells_per_entry": self.max_cells_per_entry,
             "max_cells_per_query": self.max_cells_per_query,
             "max_total_postings": self.max_total_postings,
+            "estimated_memory_bytes": self._retained_bytes(
+                state.posting_count,
+                len(state.postings),
+                len(state.handle_cells),
+            ),
+            "max_estimated_bytes": self.max_estimated_bytes,
         }

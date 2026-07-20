@@ -108,34 +108,43 @@ def test_update_second_copy_failure_does_not_commit_candidate() -> None:
     assert index.get(handle).data.value == "stored"
 
 
-def test_cross_thread_mutation_from_payload_cloner_is_rejected() -> None:
-    index: BoxIndex
+def test_cross_thread_writer_waits_for_payload_cloner() -> None:
+    entered = Event()
+    proceed = Event()
+    nested_done = Event()
     errors: list[BaseException] = []
+    handles: list[int] = []
 
     def cloner(data: Any) -> Any:
         if data == "trigger":
-
-            def mutate() -> None:
-                try:
-                    index.insert(Box((5, 5), (6, 6)), "nested")
-                except BaseException as exc:  # capture worker evidence
-                    errors.append(exc)
-
-            worker = Thread(target=mutate)
-            worker.start()
-            worker.join(timeout=1)
-            if worker.is_alive():
-                raise RuntimeError("cross-thread payload mutation deadlocked")
+            entered.set()
+            if not proceed.wait(timeout=2):
+                raise RuntimeError("copy pause timed out")
         return deepcopy(data)
 
     index = BoxIndex(2, payload_cloner=cloner)
-    handle = index.insert(Box((0, 0), (1, 1)), "trigger")
 
-    assert handle.sequence == 1
-    assert len(errors) == 1
-    assert isinstance(errors[0], RuntimeError)
-    assert "payload copying" in str(errors[0])
-    assert len(index) == 1
+    def insert(box: Box, data: str) -> None:
+        try:
+            handles.append(index.insert(box, data).sequence)
+            if data == "nested":
+                nested_done.set()
+        except BaseException as exc:  # capture worker evidence
+            errors.append(exc)
+
+    first = Thread(target=insert, args=(Box((0, 0), (1, 1)), "trigger"))
+    nested = Thread(target=insert, args=(Box((5, 5), (6, 6)), "nested"))
+    first.start()
+    assert entered.wait(timeout=2)
+    nested.start()
+    assert not nested_done.wait(timeout=0.05)
+    proceed.set()
+    first.join(timeout=2)
+    nested.join(timeout=2)
+
+    assert not errors
+    assert handles == [1, 2]
+    assert len(index) == 2
 
 
 def test_snapshot_cloner_cannot_mutate_the_live_index() -> None:

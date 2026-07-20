@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from copy import deepcopy
-from threading import Lock, RLock
+from dataclasses import dataclass
+from threading import RLock, local
 from typing import Any, Literal, cast
 from uuid import uuid4
 
@@ -30,34 +31,45 @@ _MISSING = object()
 
 class _LinearStrategy:
     algorithm = "linear"
+    initial_state = None
 
-    def prepare_insert(self, handle: BoxHandle, box: Box) -> None:
-        del handle, box
+    def prepare_insert(self, state: None, handle: BoxHandle, box: Box) -> None:
+        del state, handle, box
 
     def prepare_update(
         self,
+        state: None,
         handle: BoxHandle,
         old_box: Box,
         new_box: Box,
     ) -> None:
-        del handle, old_box, new_box
+        del state, handle, old_box, new_box
 
-    def prepare_remove(self, handle: BoxHandle, box: Box) -> None:
-        del handle, box
-
-    def commit(self, prepared: None) -> None:
-        del prepared
+    def prepare_remove(self, state: None, handle: BoxHandle, box: Box) -> None:
+        del state, handle, box
 
     def candidate_handles(
         self,
+        state: None,
         query: Box,
         entries: Mapping[BoxHandle, BoxEntry],
     ) -> tuple[BoxHandle, ...]:
-        del query
+        del state, query
         return tuple(entries)
 
-    def diagnostics(self) -> dict[str, object]:
+    def diagnostics(self, state: None) -> dict[str, object]:
+        del state
         return {}
+
+
+@dataclass(frozen=True)
+class _PublishedState:
+    """Authoritative entries and acceleration state published atomically."""
+
+    entries: dict[BoxHandle, BoxEntry]
+    strategy_state: Any
+    next_sequence: int
+    version: int
 
 
 class _BaseBoxIndex:
@@ -73,12 +85,11 @@ class _BaseBoxIndex:
         self._dimensions = dimensions
         self._strategy = strategy
         self._owner = uuid4()
-        self._next_sequence = 1
-        self._version = 0
-        self._entries: dict[BoxHandle, BoxEntry] = {}
+        self._state = _PublishedState({}, strategy.initial_state, 1, 0)
         self._lock = RLock()
-        self._payload_activity_lock = Lock()
-        self._payload_activity = 0
+        self._payload_context = local()
+        if not callable(payload_cloner):
+            raise TypeError("payload_cloner must be callable")
         self._payload_cloner = payload_cloner
 
     @property
@@ -87,21 +98,19 @@ class _BaseBoxIndex:
 
     def __len__(self) -> int:
         with self._lock:
-            return len(self._entries)
+            return len(self._state.entries)
 
     @contextmanager
     def _payload_copying(self) -> Iterator[None]:
-        with self._payload_activity_lock:
-            self._payload_activity += 1
+        depth = getattr(self._payload_context, "depth", 0)
+        self._payload_context.depth = depth + 1
         try:
             yield
         finally:
-            with self._payload_activity_lock:
-                self._payload_activity -= 1
+            self._payload_context.depth = depth
 
     def _payload_is_active(self) -> bool:
-        with self._payload_activity_lock:
-            return self._payload_activity > 0
+        return getattr(self._payload_context, "depth", 0) > 0
 
     @contextmanager
     def _mutation(self) -> Iterator[None]:
@@ -142,27 +151,26 @@ class _BaseBoxIndex:
         if not isinstance(handle, BoxHandle) or handle._owner != self._owner:
             raise KeyError(handle)
         try:
-            return self._entries[handle]
+            return self._state.entries[handle]
         except KeyError:
             raise KeyError(handle) from None
 
     def insert(self, box: Box, data: Any = None) -> BoxHandle:
         self._validate_box(box)
         with self._mutation():
-            handle = BoxHandle(self._next_sequence, self._owner)
-            prepared = self._strategy.prepare_insert(handle, box)
+            state = self._state
+            handle = BoxHandle(state.next_sequence, self._owner)
+            prepared = self._strategy.prepare_insert(state.strategy_state, handle, box)
             with self._payload_copying():
                 owned_data = self._clone_payload(data)
-            entry = BoxEntry(handle, box, owned_data)
-            replacement_entries = self._entries.copy()
-            replacement_entries[handle] = entry
-
-            # Both publication operations are assignment-only and cannot invoke
-            # user code. Validation and allocation have already completed.
-            self._strategy.commit(prepared)
-            self._entries = replacement_entries
-            self._next_sequence += 1
-            self._version += 1
+            replacement_entries = state.entries.copy()
+            replacement_entries[handle] = BoxEntry(handle, box, owned_data)
+            self._state = _PublishedState(
+                replacement_entries,
+                prepared,
+                state.next_sequence + 1,
+                state.version + 1,
+            )
             return handle
 
     def get(self, handle: BoxHandle) -> BoxEntry:
@@ -179,6 +187,7 @@ class _BaseBoxIndex:
         data: Any = _MISSING,
     ) -> BoxEntry:
         with self._mutation():
+            state = self._state
             entry = self._entry_for(handle)
             if box is None and data is _MISSING:
                 raise ValueError("update requires a box or data replacement")
@@ -186,6 +195,7 @@ class _BaseBoxIndex:
                 self._validate_box(box)
             replacement_box = entry.box if box is None else box
             prepared = self._strategy.prepare_update(
+                state.strategy_state,
                 handle,
                 entry.box,
                 replacement_box,
@@ -198,61 +208,75 @@ class _BaseBoxIndex:
                 )
                 candidate = BoxEntry(handle, replacement_box, replacement_data)
                 detached = self._detach(candidate)
-            replacement_entries = self._entries.copy()
+            replacement_entries = state.entries.copy()
             replacement_entries[handle] = candidate
-
-            self._strategy.commit(prepared)
-            self._entries = replacement_entries
-            self._version += 1
+            self._state = _PublishedState(
+                replacement_entries,
+                prepared,
+                state.next_sequence,
+                state.version + 1,
+            )
             return detached
 
     def remove(self, handle: BoxHandle) -> BoxEntry:
         with self._mutation():
+            state = self._state
             entry = self._entry_for(handle)
-            prepared = self._strategy.prepare_remove(handle, entry.box)
+            prepared = self._strategy.prepare_remove(
+                state.strategy_state, handle, entry.box
+            )
             with self._payload_copying():
                 detached = self._detach(entry)
-            replacement_entries = self._entries.copy()
+            replacement_entries = state.entries.copy()
             del replacement_entries[handle]
-
-            self._strategy.commit(prepared)
-            self._entries = replacement_entries
-            self._version += 1
+            self._state = _PublishedState(
+                replacement_entries,
+                prepared,
+                state.next_sequence,
+                state.version + 1,
+            )
             return detached
 
     def entries(self) -> tuple[BoxEntry, ...]:
         with self._lock:
             with self._payload_copying():
-                return tuple(self._detach(entry) for entry in self._entries.values())
+                return tuple(
+                    self._detach(entry) for entry in self._state.entries.values()
+                )
 
     def overlaps(self, box: Box) -> tuple[BoxEntry, ...]:
         self._validate_box(box)
         with self._lock:
-            handles = self._strategy.candidate_handles(box, self._entries)
+            state = self._state
+            handles = self._strategy.candidate_handles(
+                state.strategy_state, box, state.entries
+            )
             matches = [
-                self._entries[handle]
+                state.entries[handle]
                 for handle in handles
-                if self._entries[handle].box.overlaps(box)
+                if state.entries[handle].box.overlaps(box)
             ]
             with self._payload_copying():
                 return tuple(self._detach(entry) for entry in matches)
 
     def snapshot(self) -> BoxIndexSnapshot:
         with self._lock:
+            state = self._state
             with self._payload_copying():
-                entries = tuple(self._detach(entry) for entry in self._entries.values())
+                entries = tuple(self._detach(entry) for entry in state.entries.values())
             return BoxIndexSnapshot(
                 self._dimensions,
-                self._version,
+                state.version,
                 entries,
                 self._clone_snapshot_payload,
             )
 
     def diagnostics(self) -> BoxIndexDiagnostics:
         with self._lock:
-            entries = tuple(self._entries.values())
+            state = self._state
+            entries = tuple(state.entries.values())
             if self._strategy.algorithm == "linear":
-                return linear_diagnostics(self._dimensions, self._version, entries)
+                return linear_diagnostics(self._dimensions, state.version, entries)
             algorithm = cast(
                 Literal["axis_projection", "sparse_grid"],
                 self._strategy.algorithm,
@@ -260,9 +284,9 @@ class _BaseBoxIndex:
             return strategy_diagnostics(
                 algorithm,
                 self._dimensions,
-                self._version,
+                state.version,
                 entries,
-                self._strategy.diagnostics(),
+                self._strategy.diagnostics(state.strategy_state),
             )
 
 
@@ -332,6 +356,7 @@ class BoundedBoxIndex(_BaseBoxIndex):
         max_cells_per_entry: int = 100_000,
         max_cells_per_query: int = 100_000,
         max_total_postings: int = 1_000_000,
+        max_estimated_bytes: int = 256 * 1024 * 1024,
         payload_cloner: Callable[[Any], Any] = deepcopy,
     ) -> None:
         if not isinstance(bounds, Box):
@@ -351,6 +376,7 @@ class BoundedBoxIndex(_BaseBoxIndex):
             "max_cells_per_entry": max_cells_per_entry,
             "max_cells_per_query": max_cells_per_query,
             "max_total_postings": max_total_postings,
+            "max_estimated_bytes": max_estimated_bytes,
         }
         for name, value in limits.items():
             validate_coordinate(value, name)
@@ -363,6 +389,7 @@ class BoundedBoxIndex(_BaseBoxIndex):
             max_cells_per_entry=max_cells_per_entry,
             max_cells_per_query=max_cells_per_query,
             max_total_postings=max_total_postings,
+            max_estimated_bytes=max_estimated_bytes,
         )
         self._bounds = bounds
         self._cell_size = cell_size

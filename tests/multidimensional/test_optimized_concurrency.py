@@ -129,6 +129,49 @@ def test_optimized_reads_wait_for_complete_update(
     assert observed == ["pause"]
 
 
+def test_optimized_concurrent_writers_wait_instead_of_failing(
+    cloner_factory: ClonerFactory,
+) -> None:
+    entered = Event()
+    proceed = Event()
+    second_done = Event()
+    errors: list[BaseException] = []
+    handles: list[int] = []
+
+    def cloner(value: Any) -> Any:
+        if value == "pause":
+            entered.set()
+            if not proceed.wait(timeout=2):
+                raise RuntimeError("copy pause timed out")
+        return deepcopy(value)
+
+    index = cloner_factory(cloner)
+
+    def insert(value: str) -> None:
+        try:
+            handles.append(index.insert(_box(index, 0, 1), value).sequence)
+            if value == "second":
+                second_done.set()
+        except BaseException as exc:  # capture worker evidence
+            errors.append(exc)
+
+    first = Thread(target=insert, args=("pause",))
+    second = Thread(target=insert, args=("second",))
+    first.start()
+    assert entered.wait(timeout=2)
+    second.start()
+    assert not second_done.wait(timeout=0.05)
+    proceed.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert not errors
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert handles == [1, 2]
+    assert [entry.data for entry in index.entries()] == ["pause", "second"]
+
+
 def test_optimized_reentrant_mutation_is_rejected_without_sequence_drift(
     cloner_factory: ClonerFactory,
 ) -> None:

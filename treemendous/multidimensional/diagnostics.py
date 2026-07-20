@@ -30,6 +30,8 @@ class BoxIndexDiagnostics:
     max_cells_per_entry: int | None = None
     max_cells_per_query: int | None = None
     max_total_postings: int | None = None
+    estimated_memory_bytes: int | None = None
+    max_estimated_bytes: int | None = None
 
 
 def _geometry_counts(entries: tuple[BoxEntry, ...]) -> tuple[int, int]:
@@ -82,4 +84,6 @@ def strategy_diagnostics(
         max_cells_per_entry=cast(int | None, values.get("max_cells_per_entry")),
         max_cells_per_query=cast(int | None, values.get("max_cells_per_query")),
         max_total_postings=cast(int | None, values.get("max_total_postings")),
+        estimated_memory_bytes=cast(int | None, values.get("estimated_memory_bytes")),
+        max_estimated_bytes=cast(int | None, values.get("max_estimated_bytes")),
     )

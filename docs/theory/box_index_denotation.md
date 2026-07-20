@@ -68,7 +68,10 @@ mutable values is required to return a semantically detached graph; Python
 cannot enforce that contract when a custom cloner or `__deepcopy__` deliberately
 returns aliases. Under that precondition, mutating an input or returned payload
 does not mutate live index state. Clone cost is part of API cost. Mutation
-attempts made from a cloner, including through another thread, are rejected.
+attempts made reentrantly from a cloner on the same thread are rejected;
+unrelated writer threads wait for the active mutation to finish. A cloner must
+not synchronously wait for another thread that mutates the same index, because
+the outer mutation intentionally retains its lock while cloning.
 
 A `BoxIndexSnapshot` captures dimensions, version, ordered entries, and a
 payload graph under one lock. Later live mutations cannot alter it, and

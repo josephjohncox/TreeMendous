@@ -77,13 +77,18 @@ state mutation. There is no linear fallback.
 | `max_cells_per_entry` | 100,000 | inserting or replacing geometry |
 | `max_cells_per_query` | 100,000 | enumerating query cells |
 | `max_total_postings` | 1,000,000 | publishing insert/update postings |
+| `max_estimated_bytes` | 256 MiB | allocating query or copy-on-write grid structures |
 
 All limits must be positive integers (not `bool`). Total possible cells are the
 product of the ceiling-divided grid shape; computing that integer does not
 materialize the grid. Entry and query cell counts are computed from per-axis
-ranges before `itertools.product` is consumed. A rejected insert does not
-consume a handle sequence, and a rejected update leaves its old entry and
-postings unchanged.
+ranges before `itertools.product` is consumed. The memory guard uses a
+deliberately conservative, implementation-defined estimate for grid cells,
+postings, handles, and transient copy-on-write state; diagnostics expose both
+the retained estimate and configured limit. It is not a measurement of payload
+objects or the Python allocator, so applications needing a whole-process memory
+limit must enforce one externally. A rejected insert does not consume a handle
+sequence, and a rejected update leaves its old entry and postings unchanged.
 
 ## Atomicity and diagnostics
 
@@ -93,8 +98,9 @@ Every mutation runs under the existing mutation/reentrancy lock in this order:
 2. prepare a complete replacement strategy state (which may raise);
 3. clone all ingress and returned payloads (which may raise);
 4. prepare the replacement authoritative entry dictionary;
-5. publish strategy and entries through assignment-only, no-user-code hooks;
-6. advance version and, for insert, the next sequence.
+5. build one immutable published state containing strategy state, entries,
+   version, and next sequence;
+6. replace the single published-state reference.
 
 Readers therefore observe the old complete state or the new complete state.
 Cloner failure, grid-limit failure, or strategy-prepare failure cannot leave
@@ -104,7 +110,10 @@ postings and authoritative entries inconsistent.
 diagnostics report algorithm, dimension, version, entry/duplicate counts, and
 projection sizes. Sparse-grid diagnostics additionally report containing bounds,
 cell size, grid shape, total possible and occupied cells, posting count, and all
-configured limits. Queries do not mutate diagnostics.
+configured limits, retained memory estimate, and memory limit. Queries do not
+mutate diagnostics. Same-thread cloner reentrancy is rejected before reacquiring
+the mutation lock; unrelated writer threads wait for the current mutation and
+then proceed normally.
 
 See the executable [fixed-dimensional example](../../examples/multidimensional/core/fixed_box_indexes.py)
 and [bounded example](../../examples/multidimensional/core/bounded_box_index.py).

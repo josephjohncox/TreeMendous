@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from itertools import pairwise
-from threading import Lock, RLock
+from threading import RLock, local
 from typing import Any
 
 from treemendous.backends.adapters import BackendAdapter
@@ -96,8 +96,7 @@ class RangeSet:
             else (ManagedDomain(domain) if domain is not None else None)
         )
         self._lock = RLock()
-        self._payload_activity_lock = Lock()
-        self._payload_activity = 0
+        self._payload_context = local()
         self._payload_policy = payload_policy
         if not callable(payload_cloner):
             raise TypeError("payload_cloner must be callable")
@@ -116,9 +115,9 @@ class RangeSet:
             # All user-controlled cloning, keying, and folding succeeds before
             # the caller-supplied backend is touched.
             with self._payload_processing():
-                self._owned_payload_identity = self._clone_payload(
-                    self._policy_identity()
-                )
+                policy_identity = self._policy_identity()
+                if policy_identity is not _MISSING:
+                    self._owned_payload_identity = self._clone_payload(policy_identity)
                 if initially_available and self._domain is not None:
                     initial_data = self._payload_identity()
                     if staged_events is not None:
@@ -152,18 +151,16 @@ class RangeSet:
 
     @contextmanager
     def _payload_processing(self) -> Iterator[None]:
-        """Expose arbitrary payload activity to mutators on every thread."""
-        with self._payload_activity_lock:
-            self._payload_activity += 1
+        """Mark payload activity on this thread for reentrancy detection."""
+        depth = getattr(self._payload_context, "depth", 0)
+        self._payload_context.depth = depth + 1
         try:
             yield
         finally:
-            with self._payload_activity_lock:
-                self._payload_activity -= 1
+            self._payload_context.depth = depth
 
     def _payload_is_active(self) -> bool:
-        with self._payload_activity_lock:
-            return self._payload_activity > 0
+        return getattr(self._payload_context, "depth", 0) > 0
 
     @contextmanager
     def _mutation(self) -> Iterator[None]:
@@ -189,7 +186,7 @@ class RangeSet:
             return self._payload_policy.bottom
         if isinstance(self._payload_policy, OrderedPayloadPolicy):
             return self._payload_policy.identity
-        return None
+        return _MISSING
 
     def _clone_payload(self, data: Any) -> Any:
         if self._payload_policy is None:

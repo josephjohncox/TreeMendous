@@ -15,6 +15,7 @@ def _bounded(
     max_cells_per_entry: int = 100_000,
     max_cells_per_query: int = 100_000,
     max_total_postings: int = 1_000_000,
+    max_estimated_bytes: int = 256 * 1024 * 1024,
 ) -> BoundedBoxIndex:
     return BoundedBoxIndex(
         Box((0, 0), (8, 8)),
@@ -23,6 +24,7 @@ def _bounded(
         max_cells_per_entry=max_cells_per_entry,
         max_cells_per_query=max_cells_per_query,
         max_total_postings=max_total_postings,
+        max_estimated_bytes=max_estimated_bytes,
     )
 
 
@@ -49,6 +51,7 @@ def test_bounded_constructor_validates_dimensions_cells_and_all_limits() -> None
         lambda: _bounded(max_cells_per_entry=0),
         lambda: _bounded(max_cells_per_query=0),
         lambda: _bounded(max_total_postings=0),
+        lambda: _bounded(max_estimated_bytes=0),
     )
     for make_invalid in invalid_limit_factories:
         with pytest.raises((TypeError, ValueError)):
@@ -87,6 +90,26 @@ def test_huge_cell_ranges_are_counted_without_combinatorial_allocation() -> None
     with pytest.raises(ValueError, match="max_cells_per_query"):
         index.overlaps(enormous)
     assert len(index) == 0
+
+
+def test_memory_limit_rejects_before_enumeration_or_mutation() -> None:
+    index = _bounded(
+        max_cells_per_entry=16,
+        max_cells_per_query=16,
+        max_estimated_bytes=2_000,
+    )
+    before = index.snapshot()
+
+    with pytest.raises(ValueError, match="max_estimated_bytes"):
+        index.insert(Box((0, 0), (4, 4)), "too large")
+    assert index.snapshot() == before
+    assert index.diagnostics().estimated_memory_bytes == 512
+    assert index.diagnostics().max_estimated_bytes == 2_000
+
+    handle = index.insert(Box((0, 0), (2, 2)), "safe")
+    with pytest.raises(ValueError, match="max_estimated_bytes"):
+        index.overlaps(Box((0, 0), (8, 8)))
+    assert index.get(handle).data == "safe"
 
 
 def test_total_posting_limit_rejects_insert_and_update_before_commit() -> None:
@@ -131,6 +154,8 @@ def test_projection_and_grid_diagnostics_track_committed_strategy_state() -> Non
     assert diagnostics.posting_count == 6
     assert diagnostics.occupied_cell_count == 6
     assert diagnostics.max_total_cells == 1_000_000
+    assert diagnostics.estimated_memory_bytes is not None
+    assert diagnostics.max_estimated_bytes == 256 * 1024 * 1024
     grid.remove(handle)
     assert grid.diagnostics().posting_count == 0
 
@@ -147,8 +172,8 @@ def test_strategy_prepare_failure_precedes_payload_copy_and_commit(
 
     index = BoxIndex2D(payload_cloner=cloner)
 
-    def fail_prepare(handle: object, box: object) -> object:
-        del handle, box
+    def fail_prepare(state: object, handle: object, box: object) -> object:
+        del state, handle, box
         raise RuntimeError("prepare failed")
 
     monkeypatch.setattr(index._strategy, "prepare_insert", fail_prepare)
@@ -158,6 +183,7 @@ def test_strategy_prepare_failure_precedes_payload_copy_and_commit(
     assert clone_calls == 0
     assert len(index) == 0
     assert index.diagnostics().version == 0
+    assert not hasattr(index._strategy, "commit")
 
 
 def test_query_does_not_change_diagnostics() -> None:
