@@ -20,7 +20,14 @@ probe passes.
 | `cpp_boundary` | C++ CPU | 64-bit | Core geometry |
 
 `cpp_boundary` is present only when its compiled extension is importable and
-passes the stable semantic contract. The [one-dimensional algorithm guide](theory/one_dimensional_interval_algorithms.md)
+passes the stable semantic contract. `cpp_boundary`, `py_boundary`, and
+`py_boundary_summary` expose an internal authoritative-geometry capability:
+exact mutation deltas, fit and overlap queries, atomic allocation, and structural
+statistics. The private capability requires an explicit concrete-class opt-in
+and semantic probe; subclasses do not inherit the fast path accidentally.
+`RangeSet` uses it only without payload policies; payload-bearing sets retain
+the common Python algebra and geometry-publication path. The
+[one-dimensional algorithm guide](theory/one_dimensional_interval_algorithms.md)
 explains the boundary maps, augmented trees, operation bounds, fragmentation
 costs, and native-versus-Python performance mechanisms.
 

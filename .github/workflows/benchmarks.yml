@@ -3,16 +3,6 @@ name: Validated benchmarks
 on:
   schedule:
     - cron: "17 4 * * 1"
-  workflow_dispatch:
-    inputs:
-      profile:
-        description: Reproducible benchmark/load profile
-        required: true
-        type: choice
-        default: standard
-        options:
-          - standard
-          - large
 
 permissions:
   contents: read
@@ -23,8 +13,8 @@ concurrency:
 
 jobs:
   benchmark:
-    name: ${{ inputs.profile || 'standard' }} / ${{ matrix.section }}
-    runs-on: ubuntu-latest
+    name: standard / ${{ matrix.section }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -37,57 +27,85 @@ jobs:
           - applications
           - payload
     env:
-      BENCHMARK_PROFILE: ${{ inputs.profile || 'standard' }}
+      BENCHMARK_PROFILE: standard
       BENCHMARK_SECTION: ${{ matrix.section }}
     steps:
       # actions/checkout v4
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       # astral-sh/setup-uv v6
       - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
         with:
+          version: "0.8.7"
           python-version: "3.12"
           enable-cache: true
-      - run: uv sync --extra build --extra quality --extra test
-      - run: uv run python setup.py build_ext --inplace
+      - run: uv sync --frozen --extra build --extra quality --extra test
+      - run: uv run --no-sync python setup.py build_ext --inplace --force
       - name: Run sampled benchmarks and large-scale semantic qualification
         shell: bash
         run: |
           output="build/benchmarks/${BENCHMARK_PROFILE}-${BENCHMARK_SECTION}.json"
-          uv run python -m tests.performance.benchmark_suite \
+          uv run --no-sync python -m tests.performance.benchmark_suite \
             --profile "$BENCHMARK_PROFILE" \
             --section "$BENCHMARK_SECTION" \
             --require-all-stable \
             --output "$output"
+      - name: Verify benchmark artifact bundle
+        shell: bash
+        run: |
+          output="build/benchmarks/${BENCHMARK_PROFILE}-${BENCHMARK_SECTION}.json"
+          required=()
+          if [[ "$BENCHMARK_SECTION" == "sampled" ]]; then
+            required+=(
+              --require-workload canonical-local-mutation-throughput
+              --require-workload observed-fragmented-mutations
+            )
+          fi
+          uv run --no-sync python scripts/verify_benchmark_artifact.py \
+            "$output" \
+            --expected-profile "$BENCHMARK_PROFILE" \
+            --expected-section "$BENCHMARK_SECTION" \
+            --expected-commit "$GITHUB_SHA" \
+            --require-all-stable \
+            "${required[@]}"
       # actions/upload-artifact v4
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: benchmark-${{ matrix.section }}-${{ github.run_id }}
+          name: part-${{ matrix.section }}-${{ github.run_attempt }}
           path: build/benchmarks/
           if-no-files-found: error
           retention-days: 90
 
   concrete-applications:
     name: concrete applications / standard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       # actions/checkout v4
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       # astral-sh/setup-uv v6
       - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
         with:
+          version: "0.8.7"
           python-version: "3.12"
           enable-cache: true
-      - run: uv sync --extra quality --extra test
+      - run: uv sync --frozen --extra quality --extra test
       - name: Run all correctness-attested application benchmarks
         run: |
-          uv run python -m tests.performance.application_benchmark_suite \
+          uv run --no-sync python \
+            -m tests.performance.application_benchmark_suite \
             --profile standard \
             --output build/benchmarks/applications-standard.json
+      - name: Verify application benchmark checksum
+        working-directory: build/benchmarks
+        run: sha256sum --check applications-standard.json.sha256
       # actions/upload-artifact v4
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: benchmark-concrete-applications-${{ github.run_id }}
+          name: applications-${{ github.run_attempt }}
           path: build/benchmarks/
           if-no-files-found: error
           retention-days: 90

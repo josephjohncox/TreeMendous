@@ -26,6 +26,24 @@ just benchmark-applications-standard
 application examples plus the basic and multidimensional examples from an
 unrelated working directory.
 
+A manually dispatched GitHub Actions run publishes verified generic benchmark
+artifacts for 90 days:
+
+```bash
+gh workflow run benchmarks-adhoc.yml \
+  --ref <pushed-branch-or-sha> \
+  -f profile=standard \
+  -f section=sampled
+```
+
+The default sampled run includes both `canonical-local-mutation-throughput` and
+`observed-fragmented-mutations`. Before upload, the workflow independently
+checks the JSON digest, schema, profile, section, commit, stable backend set,
+required workloads, and Markdown digest reference. The artifact contains the
+canonical JSON, Markdown, and SHA-256 sidecar and is linked from the Actions job
+summary. GitHub-hosted runner timings remain directional rather than a stable
+cross-run performance baseline.
+
 ## Performance layers are not interchangeable
 
 Tree-Mendous has three distinct timing boundaries:
@@ -69,10 +87,13 @@ just benchmark-applications-smoke \
 `tests.performance.benchmark_suite` exercises the public `RangeSet` API. The
 `just benchmark-smoke`, `just benchmark-standard`, and `just benchmark-large`
 recipes build the native CPU extension and require all six stable CPU backends.
-The suite covers four core workload shapes:
+The suite covers six core workload shapes:
 
+- exact local reserve/release mutation throughput over fragmented geometry;
 - fragmented allocator churn with reserve, release, lookup, allocation, and
   impossible-fit cases;
+- fragmented local mutations followed by exact canonical snapshots, so lazy
+  publication costs are measured rather than hidden in write-only traces;
 - immutable read-heavy catalogs with fit, overlap, snapshot, and statistics
   checkpoints;
 - bounded scheduling traces with release coordinates, deadlines, cancellation,
@@ -155,7 +176,8 @@ native CPU extension. Those JSON, Markdown, and checksum artifacts are retained
 for 30 days.
 
 The weekly benchmark workflow runs the generic standard sections and the
-concrete application standard suite. Generic sections are sampled,
+concrete application standard suite. Each generated bundle is checksum-checked
+before its 90-day GitHub Actions artifact is published. Generic sections are sampled,
 qualification catalog, qualification lease, qualification scheduling, legacy
 applications, and payload. The concrete job writes
 `applications-standard.json` and its companion files. Weekly artifacts are

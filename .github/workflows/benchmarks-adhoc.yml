@@ -1,0 +1,157 @@
+name: Ad hoc canonical benchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Reproducible benchmark/load profile
+        required: true
+        type: choice
+        default: standard
+        options:
+          - smoke
+          - standard
+          - large
+      section:
+        description: Independently publishable benchmark section
+        required: true
+        type: choice
+        default: sampled
+        options:
+          - sampled
+          - all
+          - qualification
+          - qualification-catalog
+          - qualification-lease
+          - qualification-scheduling
+          - applications
+          - payload
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: ${{ inputs.profile }} / ${{ inputs.section }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      BENCHMARK_PROFILE: ${{ inputs.profile }}
+      BENCHMARK_SECTION: ${{ inputs.section }}
+      OUTPUT_DIR: build/benchmarks/published
+      OUTPUT_JSON: build/benchmarks/published/result.json
+    steps:
+      # actions/checkout v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+
+      # astral-sh/setup-uv v6
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+        with:
+          version: "0.8.7"
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Verify immutable source and locked dependencies
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          if [[ "$BENCHMARK_PROFILE" == "smoke" && \
+                "$BENCHMARK_SECTION" == "qualification-scheduling" ]]; then
+            echo "smoke has no scheduling qualification workload" >&2
+            exit 2
+          fi
+          uv lock --check
+          uv sync --frozen --extra build --extra quality --extra test
+
+      - name: Build native CPU backends
+        run: uv run --no-sync python setup.py build_ext --inplace --force
+
+      - name: Run correctness-attested canonical benchmarks
+        shell: bash
+        run: |
+          rm -rf "$OUTPUT_DIR"
+          mkdir -p "$OUTPUT_DIR"
+          uv run --no-sync python -m tests.performance.benchmark_suite \
+            --profile "$BENCHMARK_PROFILE" \
+            --section "$BENCHMARK_SECTION" \
+            --require-all-stable \
+            --output "$OUTPUT_JSON"
+
+      - name: Verify benchmark artifact bundle
+        id: verify
+        shell: bash
+        run: |
+          required=()
+          if [[ "$BENCHMARK_SECTION" == "sampled" || \
+                "$BENCHMARK_SECTION" == "all" ]]; then
+            required+=(
+              --require-workload canonical-local-mutation-throughput
+              --require-workload observed-fragmented-mutations
+            )
+          fi
+          uv run --no-sync python scripts/verify_benchmark_artifact.py \
+            "$OUTPUT_JSON" \
+            --expected-profile "$BENCHMARK_PROFILE" \
+            --expected-section "$BENCHMARK_SECTION" \
+            --expected-commit "$GITHUB_SHA" \
+            --require-all-stable \
+            "${required[@]}"
+          test "$(find "$OUTPUT_DIR" -maxdepth 1 -type f | wc -l)" -eq 3
+          digest=$(cut -d ' ' -f 1 "$OUTPUT_JSON.sha256")
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      # actions/upload-artifact v4
+      - name: Publish verified benchmark artifact
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: benchmark-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/benchmarks/published/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
+
+      - name: Publish benchmark summary
+        shell: bash
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          JSON_DIGEST: ${{ steps.verify.outputs.digest }}
+        run: |
+          {
+            echo "## Verified canonical benchmark"
+            echo
+            echo "- Profile: \`$BENCHMARK_PROFILE\`"
+            echo "- Section: \`$BENCHMARK_SECTION\`"
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- JSON SHA-256: \`$JSON_DIGEST\`"
+            echo "- GitHub artifact digest: \`$ARTIFACT_DIGEST\`"
+            echo "- Retention: 90 days"
+            echo "- [Download published artifact]($ARTIFACT_URL)"
+            echo
+            echo "> Hosted-runner timings are directional; semantic validation"
+            echo "> and artifact integrity are canonical."
+          } >> "$GITHUB_STEP_SUMMARY"
+          uv run --no-sync python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads(Path(os.environ["OUTPUT_JSON"]).read_text())
+          sampled = report["sampled_reports"]
+          if sampled:
+              print("\n### Sampled medians\n")
+              print("| Workload | Backend | Median |")
+              print("|---|---|---:|")
+              for workload in sampled:
+                  for backend, result in workload["results"].items():
+                      median_ms = result["execution"]["median_ns"] / 1_000_000
+                      row = (
+                          f"| {workload['workload']} | {backend} | "
+                          f"{median_ms:.3f} ms |"
+                      )
+                      print(row)
+          PY

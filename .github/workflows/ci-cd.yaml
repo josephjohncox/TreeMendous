@@ -156,6 +156,16 @@ jobs:
           uv run python -m tests.performance.benchmark_suite
           --profile smoke --require-all-stable
           --output build/benchmarks/smoke.json
+      - name: Verify benchmark artifact and optimized mutation workloads
+        run: >-
+          uv run python scripts/verify_benchmark_artifact.py
+          build/benchmarks/smoke.json
+          --expected-profile smoke
+          --expected-section all
+          --expected-commit "$GITHUB_SHA"
+          --require-all-stable
+          --require-workload canonical-local-mutation-throughput
+          --require-workload observed-fragmented-mutations
       # actions/upload-artifact v4
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
