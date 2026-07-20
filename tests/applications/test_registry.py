@@ -8,11 +8,13 @@ import sys
 from collections import Counter
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 import treemendous
+import treemendous.applications.registry as registry
 from scripts import generate_scenario_catalog
 from tests.performance import application_workloads
 from treemendous.applications import (
@@ -20,6 +22,7 @@ from treemendous.applications import (
     SCENARIO_SPECS,
     SCENARIOS_BY_ID,
     ScenarioNotFoundError,
+    ScenarioNotImplementedError,
     ScenarioSpec,
     ScenarioStatus,
     create_application,
@@ -97,6 +100,16 @@ def _complete_options() -> dict[str, Any]:
     }
 
 
+def _evidence() -> dict[str, str]:
+    return {
+        "engine": "builtins:dict",
+        "example": "examples/applications/example.py",
+        "oracle": "tests/oracles/applications/oracle.py",
+        "benchmark": "tests/performance/applications/benchmark.py",
+        "docs": "docs/scenarios/example.md",
+    }
+
+
 def _synthetic(**overrides: Any) -> ScenarioSpec:
     values: dict[str, Any] = {
         "id": "synthetic-scenario",
@@ -140,7 +153,11 @@ print(json.dumps(sorted(engine_modules.intersection(sys.modules))))
         text=True,
     )
     assert completed.returncode == 0, completed.stderr
-    assert json.loads(completed.stdout) == []
+    try:
+        loaded_engines: list[str] = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        pytest.fail(f"subprocess returned invalid JSON: {exc}: {completed.stdout!r}")
+    assert not loaded_engines
 
 
 def test_all_scenarios_have_complete_validated_evidence() -> None:
@@ -232,6 +249,183 @@ def test_planned_entries_cannot_expose_a_factory_or_use_invalid_ids() -> None:
         _synthetic(family="unknown")
     with pytest.raises(TypeError, match="ScenarioStatus"):
         _synthetic(status="complete")
+
+
+def test_evidence_loader_tolerates_only_genuinely_absent_manifests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module_name = "missing.family.manifest"
+    monkeypatch.setattr(
+        registry, "_FAMILY_EVIDENCE_MODULES", {"partition": module_name}
+    )
+
+    for missing_name in (module_name, "missing"):
+
+        def missing_manifest(
+            _module_name: str, *, missing: str = missing_name
+        ) -> SimpleNamespace:
+            raise ModuleNotFoundError(
+                f"No module named {missing!r}",
+                name=missing,
+            )
+
+        monkeypatch.setattr(registry.importlib, "import_module", missing_manifest)
+        assert not registry._load_implementation_evidence()
+
+    def missing_dependency(_module_name: str) -> SimpleNamespace:
+        raise ModuleNotFoundError(
+            "No module named 'optional_dependency'",
+            name="optional_dependency",
+        )
+
+    monkeypatch.setattr(registry.importlib, "import_module", missing_dependency)
+    with pytest.raises(ModuleNotFoundError, match="optional_dependency"):
+        registry._load_implementation_evidence()
+
+
+@pytest.mark.parametrize(
+    ("family", "evidence", "error", "message"),
+    [
+        ("partition", None, TypeError, "EVIDENCE must be a mapping"),
+        (
+            "partition",
+            {1: _evidence()},
+            ValueError,
+            "unknown scenario evidence id",
+        ),
+        (
+            "partition",
+            {"missing-scenario": _evidence()},
+            ValueError,
+            "unknown scenario evidence id",
+        ),
+        (
+            "catalog",
+            {"distributed-document-search": _evidence()},
+            ValueError,
+            "wrong family",
+        ),
+        (
+            "partition",
+            {"distributed-document-search": "not-a-mapping"},
+            TypeError,
+            "scenario evidence must be a mapping",
+        ),
+        (
+            "partition",
+            {"distributed-document-search": {"engine": "builtins:dict"}},
+            ValueError,
+            "evidence fields differ",
+        ),
+        (
+            "partition",
+            {
+                "distributed-document-search": {
+                    **_evidence(),
+                    "docs": "",
+                }
+            },
+            ValueError,
+            "references must be nonempty strings",
+        ),
+    ],
+)
+def test_evidence_loader_rejects_malformed_family_manifests(
+    family: str,
+    evidence: object,
+    error: type[Exception],
+    message: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module_name = "synthetic.manifest"
+    monkeypatch.setattr(registry, "_FAMILY_EVIDENCE_MODULES", {family: module_name})
+    module = SimpleNamespace(EVIDENCE=evidence)
+    monkeypatch.setattr(registry.importlib, "import_module", lambda _name: module)
+
+    with pytest.raises(error, match=message):
+        registry._load_implementation_evidence()
+
+
+def test_evidence_loader_rejects_duplicate_rows_across_manifests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario_id = "distributed-document-search"
+    modules = {
+        "first.manifest": SimpleNamespace(EVIDENCE={scenario_id: _evidence()}),
+        "second.manifest": SimpleNamespace(EVIDENCE={scenario_id: _evidence()}),
+    }
+
+    class RepeatedFamilyModules:
+        @staticmethod
+        def items() -> tuple[tuple[str, str], ...]:
+            return (
+                ("partition", "first.manifest"),
+                ("partition", "second.manifest"),
+            )
+
+    monkeypatch.setattr(registry, "_FAMILY_EVIDENCE_MODULES", RepeatedFamilyModules())
+    monkeypatch.setattr(
+        registry.importlib, "import_module", lambda module_name: modules[module_name]
+    )
+
+    with pytest.raises(ValueError, match="duplicate scenario evidence"):
+        registry._load_implementation_evidence()
+
+
+def test_catalog_validator_reports_duplicate_ids_and_family_count_drift() -> None:
+    spec = SCENARIO_SPECS[0]
+    with pytest.raises(ValueError, match="scenario ids must be unique"):
+        registry._validate_catalog((spec, spec))
+    with pytest.raises(ValueError, match="family counts differ"):
+        registry._validate_catalog((spec,))
+
+
+@pytest.mark.parametrize("field", ["title", "category", "description"])
+def test_scenario_spec_requires_descriptive_text(field: str) -> None:
+    with pytest.raises(ValueError, match="title, category, and description"):
+        _synthetic(**{field: ""})
+
+
+def test_planned_and_corrupted_complete_evidence_fail_at_lazy_runtime_gates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    planned = ScenarioSpec(
+        id="planned-scenario",
+        title="Planned scenario",
+        category="synthetic_category",
+        family="partition",
+        description="no implementation evidence yet",
+    )
+    validate_completion_evidence(planned, root=tmp_path)
+    monkeypatch.setattr(registry, "SCENARIOS_BY_ID", {planned.id: planned})
+    with pytest.raises(ScenarioNotImplementedError, match="planned"):
+        registry.create_application(planned.id)
+
+    corrupted = _synthetic()
+    object.__setattr__(corrupted, "engine", None)
+    with pytest.raises(ValueError, match="engine reference is required"):
+        validate_completion_evidence(corrupted, root=tmp_path)
+
+
+def test_evidence_paths_reject_traversal_and_resolved_escape(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="stay within the repository"):
+        validate_completion_evidence(
+            _synthetic(example="examples/../escape.py"), root=tmp_path
+        )
+
+    root = tmp_path / "repository"
+    examples = root / "examples" / "applications"
+    examples.mkdir(parents=True)
+    outside = tmp_path / "outside.py"
+    outside.write_text("outside", encoding="utf-8")
+    (examples / "example.py").symlink_to(outside)
+    with pytest.raises(ValueError, match="artifact does not exist"):
+        validate_completion_evidence(_synthetic(), root=root)
+
+
+def test_catalog_evidence_defaults_to_canonical_specs() -> None:
+    validate_catalog_evidence(root=PROJECT_ROOT)
 
 
 def test_benchmark_catalog_aliases_real_application_evidence() -> None:
