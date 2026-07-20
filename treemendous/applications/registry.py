@@ -562,8 +562,12 @@ def _load_implementation_evidence() -> dict[str, dict[str, str]]:
                     f"scenario evidence fields differ for {scenario_id}: "
                     f"{set(references)!r}"
                 )
-            if not all(isinstance(value, str) and value for value in references.values()):
-                raise ValueError("scenario evidence references must be nonempty strings")
+            if not all(
+                isinstance(value, str) and value for value in references.values()
+            ):
+                raise ValueError(
+                    "scenario evidence references must be nonempty strings"
+                )
             collected[scenario_id] = dict(references)
     return collected
 
