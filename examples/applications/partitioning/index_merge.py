@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 """Run term-band posting-list merge from any working directory."""
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
-
 from treemendous.applications.partitioning.index_merge import IndexMergeEngine
 
 

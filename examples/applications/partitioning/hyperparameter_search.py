@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
 """Run Cartesian hyperparameter search from any working directory."""
 
-import sys
 from collections.abc import Mapping
-from pathlib import Path
 from typing import Any
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from treemendous.applications.partitioning.hyperparameter_search import (
     HyperparameterSearchEngine,

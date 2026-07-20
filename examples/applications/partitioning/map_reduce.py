@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 """Run record-split map/reduce from any working directory."""
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
-
 from treemendous.applications.partitioning.map_reduce import MapReduceEngine
 
 

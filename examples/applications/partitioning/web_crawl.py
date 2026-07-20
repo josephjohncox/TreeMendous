@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 """Run an offline injected-fetcher crawl from any working directory."""
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
-
 from treemendous.applications.partitioning.web_crawl import CrawlPage, WebCrawlEngine
 
 

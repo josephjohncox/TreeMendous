@@ -89,6 +89,128 @@ print(json.dumps({'backend': 'cpp_boundary', 'free': ranges.snapshot().total_fre
         pytest.fail(f"wheel smoke produced invalid JSON: {result.stdout!r}: {exc}")
     assert smoke_output["free"] == 90
 
+    application_code = """
+import importlib
+import json
+import treemendous
+from treemendous.applications import (
+    SCENARIO_SPECS,
+    ScenarioStatus,
+    create_application,
+)
+
+expected_root_all = [
+    'AvailabilityStats',
+    'BackendDecision',
+    'BackendInvalidError',
+    'BackendRegistry',
+    'BackendRequest',
+    'BackendSpec',
+    'BackendUnavailableError',
+    'Capability',
+    'DomainInput',
+    'IntervalResult',
+    'JoinPayloadPolicy',
+    'ManagedDomain',
+    'ManagedDomainRequiredError',
+    'MutationResult',
+    'OrderedPayloadPolicy',
+    'PayloadPolicy',
+    'RangeSet',
+    'RangeSetProtocol',
+    'RangeSnapshot',
+    'Span',
+    'UniformPayloadPolicy',
+    'create_range_set',
+]
+assert treemendous.__all__ == expected_root_all
+assert len(SCENARIO_SPECS) == 50
+assert all(spec.status is ScenarioStatus.COMPLETE for spec in SCENARIO_SPECS)
+
+resolved = []
+for spec in SCENARIO_SPECS:
+    assert spec.engine is not None
+    module_name, separator, attribute_name = spec.engine.partition(':')
+    assert separator == ':'
+    factory = getattr(importlib.import_module(module_name), attribute_name)
+    assert callable(factory)
+    resolved.append(spec.id)
+
+representatives = {
+    'partition': create_application('distributed-document-search'),
+    'scheduling': create_application('distributed-cluster-scheduling'),
+    'catalog': create_application('genomic-annotation-overlap'),
+    'allocator': create_application('heap-free-space', capacity=128),
+    'lease': create_application('tcp-udp-port-leases'),
+}
+expected_module_families = {
+    'partition': '.partitioning.',
+    'scheduling': '.scheduling.',
+    'catalog': '.catalogs.',
+    'allocator': '.allocation.',
+    'lease': '.leasing.',
+}
+for family, application in representatives.items():
+    assert expected_module_families[family] in type(application).__module__
+
+print(json.dumps({
+    'complete': len(SCENARIO_SPECS),
+    'families_constructed': sorted(representatives),
+    'resolved': len(resolved),
+    'root_all': treemendous.__all__,
+}))
+"""
+    application_result = subprocess.run(
+        [str(python), "-c", application_code],
+        cwd=unrelated,
+        env=clean_environment,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    try:
+        application_output = json.loads(application_result.stdout)
+    except json.JSONDecodeError as exc:
+        pytest.fail(
+            "wheel application smoke produced invalid JSON: "
+            f"{application_result.stdout!r}: {exc}"
+        )
+    assert application_output == {
+        "complete": 50,
+        "families_constructed": [
+            "allocator",
+            "catalog",
+            "lease",
+            "partition",
+            "scheduling",
+        ],
+        "resolved": 50,
+        "root_all": [
+            "AvailabilityStats",
+            "BackendDecision",
+            "BackendInvalidError",
+            "BackendRegistry",
+            "BackendRequest",
+            "BackendSpec",
+            "BackendUnavailableError",
+            "Capability",
+            "DomainInput",
+            "IntervalResult",
+            "JoinPayloadPolicy",
+            "ManagedDomain",
+            "ManagedDomainRequiredError",
+            "MutationResult",
+            "OrderedPayloadPolicy",
+            "PayloadPolicy",
+            "RangeSet",
+            "RangeSetProtocol",
+            "RangeSnapshot",
+            "Span",
+            "UniformPayloadPolicy",
+            "create_range_set",
+        ],
+    }
+
     readme = Path(__file__).resolve().parents[2] / "README.md"
     blocks = re.findall(r"```python\n(.*?)```", readme.read_text(), flags=re.DOTALL)
     if not blocks:
@@ -118,6 +240,21 @@ print(json.dumps({'backend': 'cpp_boundary', 'free': ranges.snapshot().total_fre
     )
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout.strip() == "allocated [9, 11)"
+
+    application_example = (
+        readme.parent
+        / "examples/applications/partitioning/document_search.py"
+    )
+    completed = subprocess.run(
+        [str(python), str(application_example)],
+        cwd=unrelated,
+        env=clean_environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "document-search: 1 hit"
 
 
 def test_metal_wheel_resource_and_device_from_arbitrary_cwd(tmp_path: Path) -> None:

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from collections import Counter
 from dataclasses import FrozenInstanceError
 from pathlib import Path
@@ -114,6 +117,30 @@ def test_catalog_has_exact_ids_order_and_family_counts() -> None:
         EXPECTED_FAMILY_COUNTS
     )
     assert tuple(SCENARIOS_BY_ID) == EXPECTED_IDS
+
+
+def test_fresh_registry_import_does_not_load_scenario_engines() -> None:
+    code = """
+import json
+import sys
+from treemendous.applications.registry import SCENARIO_SPECS
+
+engine_modules = {
+    spec.engine.partition(":")[0]
+    for spec in SCENARIO_SPECS
+    if spec.engine is not None
+}
+print(json.dumps(sorted(engine_modules.intersection(sys.modules))))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=PROJECT_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout) == []
 
 
 def test_all_scenarios_have_complete_validated_evidence() -> None:
