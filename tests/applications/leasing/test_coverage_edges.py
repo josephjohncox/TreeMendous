@@ -500,6 +500,22 @@ def test_region_restore_rejects_shard_request_and_handoff_corruption() -> None:
             ),
             clock=clock,
         )
+    with pytest.raises(ValueError, match="anchor conflicts"):
+        GameRegionPool.from_checkpoint(
+            replace(
+                checkpoint,
+                requests=(
+                    replace(
+                        adjacent,
+                        anchor=replace(
+                            adjacent.anchor,
+                            pool_id="foreign-lineage",
+                        ),
+                    ),
+                ),
+            ),
+            clock=clock,
+        )
     with pytest.raises(ValueError, match="count conflicts"):
         GameRegionPool.from_checkpoint(
             replace(checkpoint, requests=(replace(exact, count=2),)), clock=clock
@@ -524,6 +540,39 @@ def test_region_restore_rejects_shard_request_and_handoff_corruption() -> None:
     with pytest.raises(ValueError, match="handoff record"):
         GameRegionPool.from_checkpoint(
             replace(checkpoint, handoffs=(replace(handoff, result_token=999),)),
+            clock=clock,
+        )
+    with pytest.raises(ValueError, match="handoff result identity"):
+        GameRegionPool.from_checkpoint(
+            replace(
+                checkpoint,
+                handoffs=(
+                    replace(
+                        handoff,
+                        result_identity=replace(
+                            handoff.result_identity,
+                            pool_id="foreign-lineage",
+                        ),
+                    ),
+                ),
+            ),
+            clock=clock,
+        )
+
+
+def test_region_restore_rejects_handoff_rebound_to_later_matching_lease() -> None:
+    clock = LogicalClock()
+    engine = GameRegionPool({"west": (1, 1)}, clock=clock)
+    source = engine.acquire("west", "source", ttl=10)
+    result = engine.handoff(source, "target", ttl=10, request_id="handoff")
+    engine.release(result)
+    later = engine.acquire("west", "target", ttl=10, start_region=1)
+    checkpoint = engine.checkpoint()
+    forged_handoff = replace(checkpoint.handoffs[0], result_token=later.token)
+
+    with pytest.raises(ValueError, match="handoff result identity"):
+        GameRegionPool.from_checkpoint(
+            replace(checkpoint, handoffs=(forged_handoff,)),
             clock=clock,
         )
 

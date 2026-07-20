@@ -251,11 +251,18 @@ class PoolGroup:
         renewed = self.pool(handle.scope).renew(handle.lease, ttl=ttl)
         return NumericLease(handle.scope, renewed)
 
+    def release_with_timestamp(self, handle: NumericLease) -> tuple[NumericLease, int]:
+        """Atomically release a current handle and return its observed time."""
+        self._require_handle(handle)
+        released, observed_at = self.pool(handle.scope).release_with_timestamp(
+            handle.lease
+        )
+        return NumericLease(handle.scope, released), observed_at
+
     def release(self, handle: NumericLease) -> NumericLease:
         """Release a current handle and preserve its stable scope."""
-        self._require_handle(handle)
-        released = self.pool(handle.scope).release(handle.lease)
-        return NumericLease(handle.scope, released)
+        released, _ = self.release_with_timestamp(handle)
+        return released
 
     def transfer(
         self, handle: NumericLease, new_owner: str, *, ttl: int

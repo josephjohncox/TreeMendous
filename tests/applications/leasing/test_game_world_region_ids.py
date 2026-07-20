@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from tests.oracles.applications.leasing.game_world_region_ids import NaiveRegionOracle
@@ -10,6 +12,7 @@ from treemendous.applications._shared.leasing import (
     LeaseRequestConflictError,
     LeaseState,
 )
+from treemendous.applications.leasing._common import NumericLease
 from treemendous.applications.leasing.game_regions import (
     GameRegionPool,
     RegionAdjacencyError,
@@ -164,6 +167,32 @@ def test_region_request_fingerprints_mode_start_and_stable_anchor_identity() -> 
         )
 
 
+def test_adjacent_request_replay_rejects_foreign_anchor_lineage() -> None:
+    clock = LogicalClock()
+    engine = GameRegionPool({"west": (1, 4)}, clock=clock)
+    anchor = engine.acquire("west", "server", ttl=5)
+    engine.acquire(
+        "west",
+        "server",
+        ttl=5,
+        adjacent_to=anchor,
+        request_id="adjacent",
+    )
+    foreign_anchor = NumericLease(
+        "west",
+        replace(anchor.lease, pool_id="foreign-lineage"),
+    )
+
+    with pytest.raises(LeaseRequestConflictError):
+        engine.acquire(
+            "west",
+            "server",
+            ttl=5,
+            adjacent_to=foreign_anchor,
+            request_id="adjacent",
+        )
+
+
 def test_region_handoff_uses_one_clock_observation_and_is_failure_atomic() -> None:
     clock = _SequenceClock([0, 1, 2, 2])
     engine = GameRegionPool({"west": (1, 2)}, clock=clock)
@@ -200,6 +229,7 @@ def test_region_handoff_uses_one_clock_observation_and_is_failure_atomic() -> No
             request_id="failed-handoff",
         )
     snapshot = failed.snapshot().pools[0][1]
-    assert snapshot.leases == (still_active.lease,)
+    assert len(snapshot.leases) == 1
+    assert snapshot.leases[0] == still_active.lease
     assert snapshot.leases[0].state is LeaseState.ACTIVE
     assert snapshot.diagnostics.next_fencing_token == 2

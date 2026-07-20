@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from treemendous.applications._shared.clock import Clock
@@ -43,6 +43,7 @@ class RegionHandoffError(RuntimeError):
 @dataclass(frozen=True)
 class _AnchorIdentity:
     shard: str
+    pool_id: str
     owner: str
     token: int
     resource: Span
@@ -64,6 +65,16 @@ class _RegionRequest:
 
 
 @dataclass(frozen=True)
+class _LeaseIdentity:
+    pool_id: str
+    token: int
+    owner: str
+    resource: Span
+    acquired_at: int
+    request_id: str | None
+
+
+@dataclass(frozen=True)
 class _HandoffRecord:
     request_id: str
     shard: str
@@ -77,6 +88,7 @@ class _HandoffRecord:
     new_owner: str
     ttl: int
     result_token: int
+    result_identity: _LeaseIdentity
 
 
 @dataclass(frozen=True)
@@ -149,6 +161,14 @@ class GameRegionPool:
         engine._group.require_domains(domains)
 
         engine._requests = {}
+        source_lineages = {
+            entry.scope: entry.source_pool_id for entry in checkpoint.group.pools
+        }
+        source_history = {
+            (entry.scope, lease.token): lease
+            for entry in checkpoint.group.pools
+            for lease in entry.pool.leases
+        }
         history = {
             (scope, lease.token): lease
             for scope, snapshot in engine._group.snapshot().pools
@@ -180,10 +200,12 @@ class GameRegionPool:
             if record.anchor is not None:
                 if not isinstance(record.anchor, _AnchorIdentity):
                     raise TypeError("region request contains an invalid anchor")
-                anchor = history.get((record.anchor.shard, record.anchor.token))
+                anchor = source_history.get((record.anchor.shard, record.anchor.token))
                 if (
                     anchor is None
                     or record.anchor.shard != record.shard
+                    or record.anchor.pool_id != source_lineages.get(record.shard)
+                    or anchor.pool_id != record.anchor.pool_id
                     or anchor.owner != record.anchor.owner
                     or anchor.resource != record.anchor.resource
                     or anchor.acquired_at != record.anchor.acquired_at
@@ -218,11 +240,16 @@ class GameRegionPool:
             require_positive(item.ttl, "handoff ttl")
             if item.request_id in engine._handoffs:
                 raise ValueError("handoff request IDs must be unique")
-            source = history.get((item.shard, item.source_token))
-            result = history.get((item.shard, item.result_token))
+            if not isinstance(item.result_identity, _LeaseIdentity):
+                raise TypeError("handoff record contains an invalid result identity")
+            require_string(
+                item.result_identity.pool_id,
+                "handoff result pool_id",
+            )
+            source = source_history.get((item.shard, item.source_token))
+            result = source_history.get((item.shard, item.result_token))
             if (
                 source is None
-                or result is None
                 or source.state is not LeaseState.RELEASED
                 or source.owner != item.source_owner
                 or source.resource != item.source_resource
@@ -230,12 +257,35 @@ class GameRegionPool:
                 or source.expires_at != item.source_expires_at
                 or source.revision != item.source_revision
                 or source.request_id != item.source_request_id
-                or result.owner != item.new_owner
-                or result.resource != source.resource
-                or result.token <= source.token
             ):
                 raise ValueError("handoff record conflicts with lease history")
-            engine._handoffs[item.request_id] = item
+            if result is None:
+                raise ValueError("handoff record conflicts with lease history")
+            identity = item.result_identity
+            if (
+                identity.pool_id != source_lineages.get(item.shard)
+                or result.pool_id != identity.pool_id
+                or result.token != item.result_token
+                or result.token != identity.token
+                or result.owner != identity.owner
+                or result.resource != identity.resource
+                or result.acquired_at != identity.acquired_at
+                or result.request_id != identity.request_id
+                or identity.owner != item.new_owner
+                or identity.resource != source.resource
+                or result.token <= source.token
+            ):
+                raise ValueError(
+                    "handoff record has conflicting handoff result identity"
+                )
+            restored_result = history[(item.shard, item.result_token)]
+            engine._handoffs[item.request_id] = replace(
+                item,
+                result_identity=replace(
+                    identity,
+                    pool_id=restored_result.pool_id,
+                ),
+            )
         return engine
 
     def _active_anchor(
@@ -289,6 +339,7 @@ class GameRegionPool:
                 raise TypeError("adjacent_to must be a RegionLease")
             anchor_identity = _AnchorIdentity(
                 adjacent_to.scope,
+                adjacent_to.pool_id,
                 adjacent_to.owner,
                 adjacent_to.token,
                 adjacent_to.resource,
@@ -462,6 +513,19 @@ class GameRegionPool:
                     raise RegionHandoffError(
                         "handoff result is absent from pool history"
                     )
+                identity = existing.result_identity
+                if (
+                    result.pool_id != identity.pool_id
+                    or result.token != existing.result_token
+                    or result.token != identity.token
+                    or result.owner != identity.owner
+                    or result.resource != identity.resource
+                    or result.acquired_at != identity.acquired_at
+                    or result.request_id != identity.request_id
+                ):
+                    raise RegionHandoffError(
+                        "handoff result identity differs from pool history"
+                    )
                 return NumericLease(existing.shard, result)
             try:
                 transferred = self._group.transfer(handle, new_owner, ttl=ttl)
@@ -480,6 +544,14 @@ class GameRegionPool:
                 new_owner,
                 ttl,
                 transferred.token,
+                _LeaseIdentity(
+                    transferred.pool_id,
+                    transferred.token,
+                    transferred.owner,
+                    transferred.resource,
+                    transferred.lease.acquired_at,
+                    transferred.lease.request_id,
+                ),
             )
             return transferred
 
@@ -509,12 +581,39 @@ class GameRegionPool:
 
     def checkpoint(self) -> RegionPoolCheckpoint:
         """Return shard/handoff state without downstream fence high-water marks."""
-        return RegionPoolCheckpoint(
-            tuple(sorted(self.shards.items())),
-            tuple(self._requests[key] for key in sorted(self._requests)),
-            tuple(self._handoffs[key] for key in sorted(self._handoffs)),
-            self._group.checkpoint(),
-        )
+        with self._group.lock:
+            group = self._group.checkpoint()
+            lineages = {entry.scope: entry.source_pool_id for entry in group.pools}
+            requests = tuple(
+                replace(
+                    record,
+                    anchor=(
+                        None
+                        if record.anchor is None
+                        else replace(
+                            record.anchor,
+                            pool_id=lineages[record.anchor.shard],
+                        )
+                    ),
+                )
+                for record in (self._requests[key] for key in sorted(self._requests))
+            )
+            handoffs = tuple(
+                replace(
+                    record,
+                    result_identity=replace(
+                        record.result_identity,
+                        pool_id=lineages[record.shard],
+                    ),
+                )
+                for record in (self._handoffs[key] for key in sorted(self._handoffs))
+            )
+            return RegionPoolCheckpoint(
+                tuple(sorted(self.shards.items())),
+                requests,
+                handoffs,
+                group,
+            )
 
     def diagnostics(self) -> GroupDiagnostics:
         """Return lifecycle and capacity counters by shard."""

@@ -471,8 +471,10 @@ class LeasePool:
             self._commit(committed, staged_free, now)
             return renewed
 
-    def release(self, handle: Lease, *, owner: str | None = None) -> Lease:
-        """Release an active current handle and return its terminal record."""
+    def release_with_timestamp(
+        self, handle: Lease, *, owner: str | None = None
+    ) -> tuple[Lease, int]:
+        """Atomically release a current handle and return its observed time."""
         with self._lock:
             now = self._observe_time()
             staged, _, _ = self._stage_expirations(now)
@@ -482,7 +484,12 @@ class LeasePool:
             committed[current.token] = released
             free = self._build_free(committed)
             self._commit(committed, free, now)
-            return released
+            return released, now
+
+    def release(self, handle: Lease, *, owner: str | None = None) -> Lease:
+        """Release an active current handle and return its terminal record."""
+        released, _ = self.release_with_timestamp(handle, owner=owner)
+        return released
 
     def transfer(
         self,

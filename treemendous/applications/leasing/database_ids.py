@@ -196,23 +196,21 @@ class DatabaseIdPool:
                 raise ValueError(
                     "committed source evidence must be the active revision"
                 )
-            validate_coordinate(committed.committed_at, "committed_at")
-            if committed.committed_at < committed.source.lease.acquired_at:
-                raise ValueError("committed_at cannot precede acquisition")
-            restored_lease = leases_by_token.get(committed.token)
-            if restored_lease is None:
-                raise ValueError("committed batch source is absent from checkpoint")
             source = committed.source.lease
-            if (
-                restored_lease.state is not LeaseState.RELEASED
-                or restored_lease.owner != source.owner
-                or restored_lease.resource != source.resource
-                or restored_lease.token != source.token
-                or restored_lease.acquired_at != source.acquired_at
-                or restored_lease.expires_at != source.expires_at
-                or restored_lease.revision != source.revision
-                or restored_lease.request_id != source.request_id
-            ):
+            if source.pool_id != scoped_checkpoint.source_pool_id:
+                raise ValueError(
+                    "committed source lineage does not match scoped checkpoint"
+                )
+            validate_coordinate(committed.committed_at, "committed_at")
+            if committed.committed_at < source.acquired_at:
+                raise ValueError("committed_at cannot precede acquisition")
+            if committed.committed_at >= source.expires_at:
+                raise ValueError("committed_at must be before lease expiry")
+            checkpoint_lease = checkpoint_leases.get(committed.token)
+            restored_lease = leases_by_token.get(committed.token)
+            if checkpoint_lease is None or restored_lease is None:
+                raise ValueError("committed batch source is absent from checkpoint")
+            if checkpoint_lease != replace(source, state=LeaseState.RELEASED):
                 raise ValueError("committed source must match released pool history")
             if any(span.overlaps(source.resource) for span in committed_spans):
                 raise ValueError("committed ID batches must not overlap")
@@ -413,8 +411,7 @@ class DatabaseIdPool:
                 if existing.source != handle:
                     raise CommittedIdError("commit retry used altered lease evidence")
                 return existing
-            committed_at = self._group.clock.now()
-            self._group.release(handle)
+            _, committed_at = self._group.release_with_timestamp(handle)
             committed = CommittedIdBatch(self.namespace, handle, committed_at)
             self._committed[handle.token] = committed
             return committed

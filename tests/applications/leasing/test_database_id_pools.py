@@ -10,12 +10,23 @@ from tests.oracles.applications.leasing.database_id_pools import (
     NaiveDatabaseIdOracle,
 )
 from treemendous.applications._shared.clock import LogicalClock
+from treemendous.applications._shared.leasing import ExpiredLeaseError, LeaseState
 from treemendous.applications.leasing.database_ids import (
     CommittedIdError,
     DatabaseIdPool,
     DatabaseIdUnavailableError,
 )
 from treemendous.domain import Span
+
+
+class _SequenceClock:
+    def __init__(self, values: list[int]) -> None:
+        self._values = iter(values)
+        self.calls = 0
+
+    def now(self) -> int:
+        self.calls += 1
+        return next(self._values)
 
 
 def test_monotonic_commit_and_explicit_reuse_match_naive_model() -> None:
@@ -122,5 +133,78 @@ def test_restore_cross_validates_reusable_committed_and_request_history() -> Non
     with pytest.raises(ValueError, match="conflicts with lease history"):
         DatabaseIdPool.from_checkpoint(
             replace(checkpoint, requests=(altered_request,)),
+            clock=clock,
+        )
+
+
+def test_commit_returns_its_single_guarded_transition_timestamp() -> None:
+    clock = _SequenceClock([0, 0, 0, 1])
+    engine = DatabaseIdPool("events", maximum_id=5, clock=clock)
+    lease = engine.acquire("writer", ttl=5)
+    calls_before = clock.calls
+
+    committed = engine.commit(lease)
+
+    assert clock.calls == calls_before + 1
+    assert committed.committed_at == 1
+    assert committed.source == lease
+
+
+def test_commit_uses_one_guarded_observation_and_never_commits_expired_state() -> None:
+    clock = _SequenceClock([0, 0, 0, 2, 0])
+    engine = DatabaseIdPool("events", maximum_id=5, clock=clock)
+    lease = engine.acquire("writer", ttl=1)
+    calls_before = clock.calls
+
+    with pytest.raises(ExpiredLeaseError):
+        engine.commit(lease)
+
+    assert clock.calls == calls_before + 1
+    assert engine._committed == {}
+    assert engine._group.pool("events")._leases == {lease.token: lease.lease}
+    assert engine._group.pool("events")._leases[lease.token].state is LeaseState.ACTIVE
+
+
+def test_commit_clock_regression_is_failure_atomic() -> None:
+    clock = _SequenceClock([5, 5, 5, 4])
+    engine = DatabaseIdPool("events", maximum_id=5, clock=clock)
+    lease = engine.acquire("writer", ttl=5)
+    calls_before = clock.calls
+
+    with pytest.raises(RuntimeError, match="backwards"):
+        engine.commit(lease)
+
+    assert clock.calls == calls_before + 1
+    assert engine._committed == {}
+    assert engine._group.pool("events")._leases == {lease.token: lease.lease}
+
+
+def test_restore_rejects_commits_from_foreign_lineage_or_at_expiry() -> None:
+    clock = LogicalClock(5)
+    engine = DatabaseIdPool("events", maximum_id=5, clock=clock)
+    committed = engine.commit(engine.acquire("writer", ttl=5))
+    checkpoint = engine.checkpoint()
+
+    foreign_source = replace(
+        committed.source,
+        lease=replace(committed.source.lease, pool_id="foreign-lineage"),
+    )
+    with pytest.raises(ValueError, match="source lineage"):
+        DatabaseIdPool.from_checkpoint(
+            replace(
+                checkpoint,
+                committed=(replace(committed, source=foreign_source),),
+            ),
+            clock=clock,
+        )
+
+    with pytest.raises(ValueError, match="before lease expiry"):
+        DatabaseIdPool.from_checkpoint(
+            replace(
+                checkpoint,
+                committed=(
+                    replace(committed, committed_at=committed.source.expires_at),
+                ),
+            ),
             clock=clock,
         )
