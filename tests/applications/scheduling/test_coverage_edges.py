@@ -67,7 +67,11 @@ def test_cluster_public_validation_and_no_eligible_resource_edges() -> None:
         scheduler.schedule("job", 2, CapacityVector(cpu=1), latest_end=1)
     with pytest.raises(SchedulingUnavailableError) as wrong_labels:
         scheduler.schedule(
-            "job", 1, CapacityVector(cpu=1), required_labels=frozenset({"gpu"}), latest_end=1
+            "job",
+            1,
+            CapacityVector(cpu=1),
+            required_labels=frozenset({"gpu"}),
+            latest_end=1,
         )
     assert wrong_labels.value.considered == ("node",)
     with pytest.raises(SchedulingUnavailableError):
@@ -111,14 +115,17 @@ def test_cluster_idempotency_conflict_diagnostics_and_cancel_replay() -> None:
 
     cancelled = scheduler.cancel("job", first.id)
     assert cancelled.reservation.status is ReservationStatus.CANCELLED
-    assert scheduler.schedule(
-        "job",
-        2,
-        CapacityVector(slots=1),
-        required_labels=frozenset({"linux"}),
-        latest_end=2,
-        request_id="once",
-    ) is cancelled
+    assert (
+        scheduler.schedule(
+            "job",
+            2,
+            CapacityVector(slots=1),
+            required_labels=frozenset({"linux"}),
+            latest_end=2,
+            request_id="once",
+        )
+        is cancelled
+    )
 
 
 def test_lab_constructor_validation_and_factory() -> None:
@@ -259,15 +266,18 @@ def test_operating_room_idempotency_atomic_conflicts_and_cancel() -> None:
         ("nurse",),
         ("monitor",),
     )
-    assert scheduler.schedule(
-        "first",
-        2,
-        staff=("nurse",),
-        equipment=("monitor",),
-        earliest_start=0,
-        latest_end=2,
-        request_id="once",
-    ) is first
+    assert (
+        scheduler.schedule(
+            "first",
+            2,
+            staff=("nurse",),
+            equipment=("monitor",),
+            earliest_start=0,
+            latest_end=2,
+            request_id="once",
+        )
+        is first
+    )
     before = scheduler.snapshot()
     with pytest.raises(ValueError, match="idempotency key"):
         scheduler.schedule(
@@ -352,9 +362,12 @@ def test_fleet_completion_order_conflicts_idempotency_and_cancel() -> None:
     actual_session = (session.charger, session.duration, session.id)
     expected_session = ("slow", 2, "van:1")
     assert actual_session == expected_session
-    assert scheduler.schedule(
-        "van", 4, connector="ccs", arrival=0, departure=4, request_id="once"
-    ) is session
+    assert (
+        scheduler.schedule(
+            "van", 4, connector="ccs", arrival=0, departure=4, request_id="once"
+        )
+        is session
+    )
     before = scheduler.snapshot()
     with pytest.raises(ValueError, match="idempotency key"):
         scheduler.schedule(
@@ -456,9 +469,7 @@ def test_gpu_pair_filtering_bounded_conflict_cancel_and_factory() -> None:
         "kernel", 2, demand, compatibility="compute", latest_end=2, request_id="once"
     )
     with pytest.raises(SchedulingUnavailableError) as bounded:
-        available.schedule(
-            "blocked", 2, demand, compatibility="compute", latest_end=2
-        )
+        available.schedule("blocked", 2, demand, compatibility="compute", latest_end=2)
     assert bounded.value.conflicts
     with pytest.raises(KeyError):
         available.cancel("kernel", "missing:1")
@@ -514,9 +525,12 @@ def test_maintenance_windows_conflicts_idempotency_and_cancellation() -> None:
     actual_booking = (first.id, first.reservation.start)
     expected_booking = (first.reservation.id, 7)
     assert actual_booking == expected_booking
-    assert scheduler.schedule(
-        "first", "api", 2, earliest_start=0, latest_end=12, request_id="once"
-    ) is first
+    assert (
+        scheduler.schedule(
+            "first", "api", 2, earliest_start=0, latest_end=12, request_id="once"
+        )
+        is first
+    )
     before = scheduler.snapshot()
     with pytest.raises(ValueError, match="idempotency key"):
         scheduler.schedule(
@@ -580,9 +594,10 @@ def test_radio_idempotency_cancellation_snapshot_and_factory() -> None:
     reservation = scheduler.reserve(
         "owner", 1, 2, 0, 2, request_id="once", guard_channels=1
     )
-    assert scheduler.reserve(
-        "owner", 1, 2, 0, 2, request_id="once", guard_channels=1
-    ) is reservation
+    assert (
+        scheduler.reserve("owner", 1, 2, 0, 2, request_id="once", guard_channels=1)
+        is reservation
+    )
     before = scheduler.snapshot()
     with pytest.raises(ValueError, match="idempotency key"):
         scheduler.reserve("owner", 2, 2, 0, 2, request_id="once")
@@ -596,9 +611,10 @@ def test_radio_idempotency_cancellation_snapshot_and_factory() -> None:
     assert cancelled.status is SpectrumStatus.CANCELLED
     assert not cancelled.active
     assert scheduler.cancel("owner", reservation.id) is cancelled
-    assert scheduler.reserve(
-        "owner", 1, 2, 0, 2, request_id="once", guard_channels=1
-    ) is cancelled
+    assert (
+        scheduler.reserve("owner", 1, 2, 0, 2, request_id="once", guard_channels=1)
+        is cancelled
+    )
     assert scheduler.conflicts_for(1, 2, 0, 2, guard_channels=1) is None
     default_reservations = create_radio_spectrum_scheduler().snapshot().reservations
     assert not default_reservations
@@ -615,9 +631,7 @@ def test_render_public_validation_and_owned_assignment_edges() -> None:
 
     scheduler = RenderFarmScheduler((worker,))
     with pytest.raises(ValueError, match="frame_count"):
-        scheduler.assign_chunk(
-            "film", 0, 0, 1, earliest_start=0, latest_end=1
-        )
+        scheduler.assign_chunk("film", 0, 0, 1, earliest_start=0, latest_end=1)
     assignment = scheduler.assign_chunk(
         "film", 0, 5, 1, earliest_start=0, latest_end=2, request_id="assignment"
     )
@@ -648,9 +662,7 @@ def test_render_public_validation_and_owned_assignment_edges() -> None:
 
 def test_render_retry_input_validation_is_failure_atomic() -> None:
     scheduler = RenderFarmScheduler((RenderWorker("worker"),))
-    assignment = scheduler.assign_chunk(
-        "film", 0, 5, 1, earliest_start=0, latest_end=2
-    )
+    assignment = scheduler.assign_chunk("film", 0, 5, 1, earliest_start=0, latest_end=2)
     before = scheduler.snapshot()
     invalid_calls = (
         (0, 0, 2, "retry"),
@@ -672,9 +684,19 @@ def test_render_retry_input_validation_is_failure_atomic() -> None:
 
     with pytest.raises(KeyError):
         scheduler.retry(
-            "film", "missing:1", duration=1, earliest_start=0, latest_end=2, request_id="r"
+            "film",
+            "missing:1",
+            duration=1,
+            earliest_start=0,
+            latest_end=2,
+            request_id="r",
         )
     with pytest.raises(PermissionError):
         scheduler.retry(
-            "other", assignment.id, duration=1, earliest_start=0, latest_end=2, request_id="r"
+            "other",
+            assignment.id,
+            duration=1,
+            earliest_start=0,
+            latest_end=2,
+            request_id="r",
         )

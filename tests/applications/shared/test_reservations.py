@@ -449,9 +449,7 @@ def test_public_ledger_request_validation_and_alias() -> None:
     with pytest.raises(ValueError, match="buffer_after must be non-negative"):
         ledger.reserve_exact("owner", 0, 1, demand, buffer_after=-1)
 
-    reservation = ledger.reserve(
-        "owner", 0, 1, demand, buffer_before=1, buffer_after=2
-    )
+    reservation = ledger.reserve("owner", 0, 1, demand, buffer_before=1, buffer_after=2)
     assert reservation.occupied_span == Span(-1, 3)
     with pytest.raises(KeyError):
         ledger.get("missing:1")
@@ -470,15 +468,11 @@ def test_earliest_validation_disjoint_history_and_idempotency() -> None:
     )
     demand_a = {"a": CapacityVector(units=1)}
     with pytest.raises(ValueError, match="search window"):
-        ledger.reserve_earliest(
-            "owner", 2, demand_a, earliest_start=2, latest_end=3
-        )
+        ledger.reserve_earliest("owner", 2, demand_a, earliest_start=2, latest_end=3)
     with pytest.raises(ValueError, match="buffer_before must be non-negative"):
         ledger.reserve_earliest("owner", 1, demand_a, buffer_before=-1)
 
-    irrelevant = ledger.reserve_exact(
-        "other", 0, 2, {"b": CapacityVector(units=1)}
-    )
+    irrelevant = ledger.reserve_exact("other", 0, 2, {"b": CapacityVector(units=1)})
     cancelled = ledger.reserve_exact("old", 0, 2, demand_a)
     ledger.cancel("old", cancelled.id)
     reservation = ledger.reserve_earliest(
@@ -616,7 +610,9 @@ def test_checkpoint_rejects_idempotency_reference_corruption() -> None:
     invalid_type = replace(
         checkpoint,
         idempotency=(
-            IdempotencyEntry(entry.owner, entry.request_id, object(), entry.reservation_id),  # type: ignore[arg-type]
+            IdempotencyEntry(
+                entry.owner, entry.request_id, object(), entry.reservation_id
+            ),  # type: ignore[arg-type]
         ),
     )
     with pytest.raises(TypeError, match="fingerprint has an invalid type"):
