@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from threading import Event, Thread
-
 import pytest
 
 from treemendous import create_range_set
@@ -75,54 +73,6 @@ def test_payload_cloning_is_an_explicit_rangeset_concern() -> None:
             payload_policy=ExistingPayloadPolicy(),
             payload_cloner=None,  # type: ignore[arg-type]
         )
-
-
-def test_payload_copying_blocks_other_writers_without_rejecting_them() -> None:
-    entered = Event()
-    proceed = Event()
-    second_done = Event()
-    errors: list[BaseException] = []
-
-    def cloner(value: list[str]) -> list[str]:
-        if value == ["pause"]:
-            entered.set()
-            if not proceed.wait(timeout=2):
-                raise RuntimeError("copy pause timed out")
-        return value.copy()
-
-    ranges = create_range_set(
-        (0, 4),
-        backend="py_boundary",
-        initially_available=False,
-        payload_policy=ExistingPayloadPolicy(),
-        payload_cloner=cloner,
-    )
-
-    def add(span: Span, value: list[str]) -> None:
-        try:
-            ranges.add(span, value)
-            if value == ["second"]:
-                second_done.set()
-        except BaseException as exc:  # capture worker evidence
-            errors.append(exc)
-
-    first = Thread(target=add, args=(Span(0, 1), ["pause"]))
-    second = Thread(target=add, args=(Span(2, 3), ["second"]))
-    first.start()
-    assert entered.wait(timeout=2)
-    second.start()
-    assert not second_done.wait(timeout=0.05)
-    proceed.set()
-    first.join(timeout=2)
-    second.join(timeout=2)
-
-    assert not errors
-    assert not first.is_alive()
-    assert not second.is_alive()
-    assert [interval.data for interval in ranges.intervals()] == [
-        ["pause"],
-        ["second"],
-    ]
 
 
 def test_uniform_policy_copies_splits_and_rejects_conflicts() -> None:

@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from itertools import pairwise
-from threading import RLock, local
+from threading import Lock, RLock
 from typing import Any
 
 from treemendous.backends.adapters import BackendAdapter
@@ -96,7 +96,8 @@ class RangeSet:
             else (ManagedDomain(domain) if domain is not None else None)
         )
         self._lock = RLock()
-        self._payload_context = local()
+        self._payload_activity_lock = Lock()
+        self._payload_activity = 0
         self._payload_policy = payload_policy
         if not callable(payload_cloner):
             raise TypeError("payload_cloner must be callable")
@@ -151,16 +152,18 @@ class RangeSet:
 
     @contextmanager
     def _payload_processing(self) -> Iterator[None]:
-        """Mark payload activity on this thread for reentrancy detection."""
-        depth = getattr(self._payload_context, "depth", 0)
-        self._payload_context.depth = depth + 1
+        """Expose arbitrary payload activity to mutators on every thread."""
+        with self._payload_activity_lock:
+            self._payload_activity += 1
         try:
             yield
         finally:
-            self._payload_context.depth = depth
+            with self._payload_activity_lock:
+                self._payload_activity -= 1
 
     def _payload_is_active(self) -> bool:
-        return getattr(self._payload_context, "depth", 0) > 0
+        with self._payload_activity_lock:
+            return self._payload_activity > 0
 
     @contextmanager
     def _mutation(self) -> Iterator[None]:

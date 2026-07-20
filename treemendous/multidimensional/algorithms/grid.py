@@ -71,8 +71,8 @@ class SparseGridStrategy:
                 f"{self.total_possible_cells} possible cells, exceeding "
                 f"max_total_cells={max_total_cells}"
             )
-        self.initial_state = _GridState({}, {}, 0)
         self._check_memory(_STATE_BYTES, "empty grid")
+        self.initial_state = _GridState({}, {}, 0)
 
     def _check_memory(self, estimate: int, operation: str) -> None:
         if estimate > self.max_estimated_bytes:
