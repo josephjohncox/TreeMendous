@@ -20,6 +20,7 @@ from scripts.verify_artifact_contents import (
     verify_sdist,
     verify_wheel,
 )
+from setup import PortableBuildPy
 
 pytestmark = pytest.mark.packaging
 
@@ -157,6 +158,29 @@ def test_directory_inputs_filter_hidden_non_artifacts(tmp_path: Path) -> None:
     _sdist(artifact, REQUIRED_SDIST)
     (tmp_path / ".gitignore").write_text("*\n", encoding="utf-8")
     assert artifact_paths([tmp_path]) == [artifact]
+
+
+def test_portable_wheel_build_removes_native_sources_cross_platform(
+    tmp_path: Path,
+) -> None:
+    package_root = tmp_path / "treemendous"
+    native_root = package_root / "cpp" / "metal"
+    native_root.mkdir(parents=True)
+    source_names = {
+        "binding.cpp",
+        "header.h",
+        "kernel.cu",
+        "backend.mm",
+        "shader.metal",
+    }
+    retained_names = {"module.py", "extension.pyd", "shader.metallib"}
+    for name in source_names | retained_names:
+        (native_root / name).write_text("input", encoding="utf-8")
+
+    PortableBuildPy.remove_native_sources(package_root)
+
+    assert not any((native_root / name).exists() for name in source_names)
+    assert all((native_root / name).is_file() for name in retained_names)
 
 
 def _run_cuda_setup(cuda_home: Path) -> subprocess.CompletedProcess[str]:
