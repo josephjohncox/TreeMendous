@@ -1,7 +1,9 @@
 """Private deterministic numeric leases with local fencing tokens.
 
 The kernel serializes in-process state transitions and can be checkpointed, but
-it is not a consensus system.  A fencing token only becomes effective when the
+it is not a consensus system.  Restoring a checkpoint creates a fresh local
+pool lineage; coordinating exclusive durable takeover from the old lineage is
+an external responsibility.  A fencing token only becomes effective when the
 downstream resource durably rejects older tokens; expiry cannot stop an old
 holder from continuing to run.
 """
@@ -181,7 +183,7 @@ class LeasePoolSnapshot:
 
 @dataclass(frozen=True)
 class LeasePoolCheckpoint:
-    """Complete durable state needed to restore a pool without token reuse."""
+    """Complete state used to seed a fresh in-memory pool lineage."""
 
     pool_id: str
     allowed_spans: tuple[Span, ...]
@@ -201,10 +203,13 @@ class LeasePoolCheckpoint:
 class LeasePool:
     """Thread-safe deterministic allocator for fenced integer-span leases.
 
-    Tokens increase across every resource in a pool and are preserved across
-    :meth:`checkpoint` / :meth:`from_checkpoint`.  Request IDs are retained for
-    the checkpoint's lifetime, so retrying an expired or released request
-    returns that terminal lease rather than allocating a new token.
+    Tokens increase across every resource in one pool lineage.  Restoring a
+    checkpoint preserves its counter and history but assigns a new ``pool_id``
+    to that history, so handles from the source pool are foreign to the restored
+    pool.  Exclusive durable takeover between processes remains the caller's
+    responsibility.  Request IDs are retained for the checkpoint's lifetime,
+    so retrying an expired or released request returns that terminal lease
+    rather than allocating a new token.
     """
 
     def __init__(self, allowed_spans: DomainInput, *, clock: Clock) -> None:
@@ -536,7 +541,7 @@ class LeasePool:
             return result
 
     def checkpoint(self) -> LeasePoolCheckpoint:
-        """Return complete immutable state suitable for exact restoration."""
+        """Return immutable state suitable for seeding a fresh pool lineage."""
         with self._lock:
             now = self._observe_time()
             staged, free, _ = self._stage_expirations(now)
@@ -557,7 +562,12 @@ class LeasePool:
     def from_checkpoint(
         cls, checkpoint: LeasePoolCheckpoint, *, clock: Clock
     ) -> LeasePool:
-        """Restore validated state while preserving the next fencing token."""
+        """Restore validated state into a new local pool lineage.
+
+        This makes every handle issued by the checkpoint's source pool foreign
+        to the restored instance.  The token counter is retained, but durable
+        coordination that retires the source writer is deliberately external.
+        """
         if not isinstance(checkpoint, LeasePoolCheckpoint):
             raise TypeError("checkpoint must be a LeasePoolCheckpoint")
         if not hasattr(clock, "now") or not callable(clock.now):
@@ -607,19 +617,27 @@ class LeasePool:
             if lease.request_id is not None and lease.request_id not in requests:
                 raise ValueError("checkpoint lease is missing its request record")
 
+        restored_pool_id = checkpoint.pool_id
+        while restored_pool_id == checkpoint.pool_id:
+            restored_pool_id = secrets.token_hex(16)
+
         pool = cls.__new__(cls)
         pool._clock = clock
         pool._domain = domain
-        pool._pool_id = checkpoint.pool_id
+        pool._pool_id = restored_pool_id
         pool._requests = requests
         pool._next_fencing_token = checkpoint.next_fencing_token
         pool._last_observed_at = now
         pool._lock = RLock()
         transitioned = {
-            token: (
-                replace(lease, state=LeaseState.EXPIRED)
-                if lease.state is LeaseState.ACTIVE and lease.expires_at <= now
-                else lease
+            token: replace(
+                lease,
+                pool_id=restored_pool_id,
+                state=(
+                    LeaseState.EXPIRED
+                    if lease.state is LeaseState.ACTIVE and lease.expires_at <= now
+                    else lease.state
+                ),
             )
             for token, lease in leases.items()
         }
@@ -631,36 +649,93 @@ class LeasePool:
 class FenceValidator:
     """Thread-safe downstream high-water-mark check for fencing tokens.
 
-    ``validate_fence`` accepts equal tokens for idempotent retries, advances the
-    resource's high-water mark for newer tokens, and rejects older tokens.  It
-    is only local process state: it provides neither consensus nor revocation,
-    and it does not make an expired holder stop.  A real resource must persist
-    and enforce the high-water mark at the write it protects.
+    :class:`Span` keys use the greatest token accepted for any overlapping
+    extent.  Other keys use exact-key semantics and therefore must be stable at
+    the downstream write granularity; changing such a key bypasses its prior
+    high-water mark.  Equal tokens are accepted only when the caller supplies
+    the same non-``None`` ``lease_identity`` as the accepted write, providing
+    explicit retry evidence rather than admitting a distinct holder.  For a
+    :class:`Lease`, ``(lease.pool_id, lease.token)`` is a suitable identity.
+
+    This validator is only local process state: it provides neither consensus
+    nor revocation, and it does not make an expired holder stop.  A real
+    resource must durably persist and enforce the high-water mark atomically at
+    the write it protects.
     """
 
     def __init__(self) -> None:
-        self._highest: dict[Hashable, int] = {}
+        self._highest: dict[Hashable, tuple[int, Hashable | None]] = {}
+        self._span_high_water: list[tuple[Span, int, Hashable | None]] = []
         self._lock = RLock()
 
-    def validate_fence(self, resource: Hashable, token: int) -> bool:
-        """Return whether ``token`` is at least the resource's accepted maximum."""
-        token = _validate_positive(token, "token")
+    @staticmethod
+    def _require_hashable(value: Hashable, name: str) -> None:
         try:
-            hash(resource)
+            hash(value)
         except TypeError as exc:
-            raise TypeError("resource must be hashable") from exc
+            raise TypeError(f"{name} must be hashable") from exc
+
+    def validate_fence(
+        self,
+        resource: Hashable,
+        token: int,
+        *,
+        lease_identity: Hashable | None = None,
+    ) -> bool:
+        """Return whether ``token`` and its retry evidence pass the high-water."""
+        token = _validate_positive(token, "token")
+        self._require_hashable(resource, "resource")
+        if lease_identity is not None:
+            self._require_hashable(lease_identity, "lease_identity")
+
         with self._lock:
-            highest = self._highest.get(resource)
-            if highest is not None and token < highest:
-                return False
-            self._highest[resource] = token
+            if isinstance(resource, Span):
+                overlapping = tuple(
+                    record
+                    for record in self._span_high_water
+                    if record[0].overlaps(resource)
+                )
+                if overlapping:
+                    highest = max(record[1] for record in overlapping)
+                    if token < highest:
+                        return False
+                    if token == highest:
+                        highest_identities = (
+                            record[2] for record in overlapping if record[1] == highest
+                        )
+                        if lease_identity is None or any(
+                            identity != lease_identity
+                            for identity in highest_identities
+                        ):
+                            return False
+                record = (resource, token, lease_identity)
+                if record not in self._span_high_water:
+                    self._span_high_water.append(record)
+                return True
+
+            accepted = self._highest.get(resource)
+            if accepted is not None:
+                highest, accepted_identity = accepted
+                if token < highest:
+                    return False
+                if token == highest:
+                    return (
+                        lease_identity is not None
+                        and lease_identity == accepted_identity
+                    )
+            self._highest[resource] = (token, lease_identity)
             return True
 
     def highest_token(self, resource: Hashable) -> int | None:
-        """Return the accepted high-water mark for one downstream resource."""
-        try:
-            hash(resource)
-        except TypeError as exc:
-            raise TypeError("resource must be hashable") from exc
+        """Return the exact-key or overlapping-span accepted high-water mark."""
+        self._require_hashable(resource, "resource")
         with self._lock:
-            return self._highest.get(resource)
+            if isinstance(resource, Span):
+                overlapping_tokens = (
+                    token
+                    for span, token, _ in self._span_high_water
+                    if span.overlaps(resource)
+                )
+                return max(overlapping_tokens, default=None)
+            accepted = self._highest.get(resource)
+            return None if accepted is None else accepted[0]

@@ -158,10 +158,11 @@ def test_snapshot_diagnostics_and_checkpoint_restore_preserve_state() -> None:
     retry = restored.acquire("a", ttl=10, size=2, request_id="a-1")
     assert retry.state is LeaseState.RELEASED
     assert retry.token == first.token
+    assert retry.pool_id == restored.pool_id
     replacement = restored.acquire("c", ttl=3, size=3)
     assert replacement.resource == Span(0, 3)
     assert replacement.token == 3
-    assert restored.pool_id == pool.pool_id
+    assert restored.pool_id != pool.pool_id
 
 
 def test_restore_expires_elapsed_active_lease_without_reusing_token() -> None:
@@ -174,8 +175,47 @@ def test_restore_expires_elapsed_active_lease_without_reusing_token() -> None:
     restored = LeasePool.from_checkpoint(checkpoint, clock=clock)
     restored_leases = restored.snapshot().leases
     assert len(restored_leases) == 1
-    assert restored_leases[0] == replace(original, state=LeaseState.EXPIRED)
+    assert restored_leases[0] == replace(
+        original,
+        pool_id=restored.pool_id,
+        state=LeaseState.EXPIRED,
+    )
     assert restored.acquire("next", ttl=1, size=2).token == 2
+
+
+def test_checkpoint_restore_starts_new_lineage_and_rejects_source_handles() -> None:
+    clock = LogicalClock()
+    source_pool = LeasePool((0, 2), clock=clock)
+    original = source_pool.acquire("original", ttl=10, exact_span=(0, 1))
+    checkpoint = source_pool.checkpoint()
+
+    source_branch = source_pool.acquire("source", ttl=10, exact_span=(1, 2))
+    restored_pool = LeasePool.from_checkpoint(checkpoint, clock=clock)
+    restored_branch = restored_pool.acquire("restored", ttl=10, exact_span=(1, 2))
+
+    assert source_branch.token == restored_branch.token == 2
+    assert source_branch.pool_id == source_pool.pool_id
+    assert restored_branch.pool_id == restored_pool.pool_id
+    assert restored_pool.pool_id != source_pool.pool_id
+    assert restored_pool.snapshot().leases[0].pool_id == restored_pool.pool_id
+
+    validator = FenceValidator()
+    source_identity = (source_branch.pool_id, source_branch.token)
+    restored_identity = (restored_branch.pool_id, restored_branch.token)
+    assert validator.validate_fence(
+        source_branch.resource,
+        source_branch.token,
+        lease_identity=source_identity,
+    )
+    assert not validator.validate_fence(
+        restored_branch.resource,
+        restored_branch.token,
+        lease_identity=restored_identity,
+    )
+    with pytest.raises(ForeignLeaseError, match="another pool"):
+        restored_pool.renew(original, ttl=10)
+    with pytest.raises(ForeignLeaseError, match="another pool"):
+        source_pool.release(restored_branch)
 
 
 def test_checkpoint_validation_rejects_token_regression_and_clock_regression() -> None:
@@ -215,13 +255,44 @@ def test_concurrent_acquisitions_are_serialized_without_overlap() -> None:
 def test_downstream_fence_validator_tracks_a_local_high_water_mark() -> None:
     validator = FenceValidator()
 
-    assert validator.validate_fence("resource-a", 4)
-    assert validator.validate_fence("resource-a", 4)  # idempotent retry
-    assert not validator.validate_fence("resource-a", 3)
-    assert validator.validate_fence("resource-a", 8)
+    assert validator.validate_fence("resource-a", 4, lease_identity="lease-a")
+    assert validator.validate_fence(
+        "resource-a", 4, lease_identity="lease-a"
+    )  # evidenced idempotent retry
+    assert not validator.validate_fence(
+        "resource-a", 4, lease_identity="different-holder"
+    )
+    assert not validator.validate_fence("resource-a", 4)
+    assert not validator.validate_fence("resource-a", 3, lease_identity="lease-a")
+    assert validator.validate_fence("resource-a", 8, lease_identity="lease-b")
     assert validator.validate_fence("resource-b", 1)
+    assert not validator.validate_fence("resource-b", 1)
     assert validator.highest_token("resource-a") == 8
     with pytest.raises(ValueError, match="greater than zero"):
         validator.validate_fence("resource-a", 0)
     with pytest.raises(TypeError, match="hashable"):
         validator.validate_fence([], 1)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="lease_identity must be hashable"):
+        validator.validate_fence(
+            "resource-a",
+            9,
+            lease_identity=[],  # type: ignore[arg-type]
+        )
+
+
+def test_span_fence_validator_rejects_stale_tokens_on_overlapping_extents() -> None:
+    validator = FenceValidator()
+    old_identity = ("pool", 1)
+    new_identity = ("pool", 2)
+    forked_identity = ("forked-pool", 2)
+    independent_identity = ("independent", 1)
+
+    assert validator.validate_fence(Span(0, 2), 1, lease_identity=old_identity)
+    assert validator.validate_fence(Span(0, 1), 2, lease_identity=new_identity)
+
+    assert validator.highest_token(Span(0, 2)) == 2
+    assert validator.highest_token(Span(1, 2)) == 1
+    assert not validator.validate_fence(Span(0, 2), 1, lease_identity=old_identity)
+    assert not validator.validate_fence(Span(0, 1), 2, lease_identity=forked_identity)
+    assert validator.validate_fence(Span(0, 1), 2, lease_identity=new_identity)
+    assert validator.validate_fence(Span(2, 3), 1, lease_identity=independent_identity)
