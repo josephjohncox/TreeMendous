@@ -14,7 +14,8 @@ build: install-dev
     uv run python scripts/verify_artifact_contents.py dist
 
 clean-cpp:
-    rm -rf build/ treemendous/cpp/*.so treemendous/__pycache__ treemendous/basic/__pycache__ treemendous/cpp/__pycache__
+    find build -mindepth 1 -maxdepth 1 ! -name benchmarks -exec rm -rf {} + 2>/dev/null || true
+    rm -rf treemendous/cpp/*.so treemendous/__pycache__ treemendous/basic/__pycache__ treemendous/cpp/__pycache__
 
 build-cpp: install-dev clean-cpp
     uv run python setup.py build_ext --inplace
