@@ -7,7 +7,7 @@ that insertion order, including after an interval is updated.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Hashable
+from collections.abc import Callable, Hashable, Sequence
 from dataclasses import dataclass
 from threading import RLock
 from typing import Generic, TypeVar, cast
@@ -217,6 +217,69 @@ class IntervalRecordIndex(Generic[OwnerT, PayloadT]):
                 self._records[handle] = candidate
                 self._version += 1
                 return result
+
+    def replace_batch(
+        self,
+        *,
+        updates: Sequence[tuple[RecordHandle[OwnerT], OwnerT, int, int, PayloadT]] = (),
+        removals: Sequence[tuple[RecordHandle[OwnerT], OwnerT]] = (),
+    ) -> tuple[IntervalRecord[OwnerT, PayloadT], ...]:
+        """Atomically replace and remove a validated batch of records.
+
+        Every span, owner assertion, payload clone, and detached return value is
+        prepared before the single commit. A preparation failure leaves every
+        record unchanged. If a target changes concurrently during preparation,
+        the whole batch is rejected rather than partially applied.
+        """
+        update_items = tuple(updates)
+        removal_items = tuple(removals)
+        handles = [item[0] for item in update_items]
+        handles.extend(item[0] for item in removal_items)
+        if len(set(handles)) != len(handles):
+            raise ValueError("a record can appear only once in a batch")
+        if not handles:
+            return ()
+
+        with self._lock:
+            captured: dict[RecordHandle[OwnerT], IntervalRecord[OwnerT, PayloadT]] = {}
+            for handle, owner, *_rest in update_items:
+                current = self._record_for_unlocked(handle)
+                self._require_owner(handle, owner)
+                captured[handle] = current
+            for handle, owner in removal_items:
+                current = self._record_for_unlocked(handle)
+                self._require_owner(handle, owner)
+                captured[handle] = current
+
+        candidates: list[IntervalRecord[OwnerT, PayloadT]] = []
+        results: list[IntervalRecord[OwnerT, PayloadT]] = []
+        for handle, _owner, start, end, payload in update_items:
+            current = captured[handle]
+            span = Span(start, end)
+            candidate = IntervalRecord(
+                handle,
+                span.start,
+                span.end,
+                self._cloner(payload),
+                current.insertion_order,
+            )
+            candidates.append(candidate)
+            results.append(self._detach(candidate))
+        for handle, _owner in removal_items:
+            results.append(self._detach(captured[handle]))
+
+        with self._lock:
+            if any(
+                self._records.get(handle) is not current
+                for handle, current in captured.items()
+            ):
+                raise RuntimeError("a batch target changed during preparation")
+            for candidate in candidates:
+                self._records[candidate.handle] = candidate
+            for handle, _owner in removal_items:
+                del self._records[handle]
+            self._version += 1
+        return tuple(results)
 
     def remove(
         self, handle: RecordHandle[OwnerT], *, owner: OwnerT

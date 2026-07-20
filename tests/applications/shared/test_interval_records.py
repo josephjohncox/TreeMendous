@@ -166,6 +166,40 @@ def test_update_second_clone_failure_does_not_commit() -> None:
     assert index.get(handle).payload == {"value": 1}
 
 
+def test_batch_replacement_stages_every_result_before_atomic_commit() -> None:
+    fail = False
+
+    def cloner(payload: dict[str, int]) -> dict[str, int]:
+        if fail and payload["value"] == 20:
+            raise RuntimeError("second candidate failed")
+        return deepcopy(payload)
+
+    index = IntervalRecordIndex[str, dict[str, int]](cloner)
+    first = index.insert("first", 0, 2, {"value": 1})
+    second = index.insert("second", 2, 4, {"value": 2})
+    before = index.snapshot()
+    fail = True
+
+    with pytest.raises(RuntimeError, match="second candidate failed"):
+        index.replace_batch(
+            updates=(
+                (first, "first", 10, 12, {"value": 10}),
+                (second, "second", 12, 14, {"value": 20}),
+            )
+        )
+
+    fail = False
+    assert index.snapshot() == before
+    results = index.replace_batch(
+        updates=((first, "first", 10, 12, {"value": 10}),),
+        removals=((second, "second"),),
+    )
+    assert [record.handle for record in results] == [first, second]
+    assert index.get(first).payload == {"value": 10}
+    with pytest.raises(KeyError):
+        index.get(second)
+
+
 def test_reentrant_cloner_mutation_linearizes_before_pending_update() -> None:
     armed = False
     index: IntervalRecordIndex[str, dict[str, int]]
