@@ -9,11 +9,17 @@ import pytest
 
 from treemendous.applications._shared.capacity import CapacityVector
 from treemendous.applications._shared.reservations import (
+    IdempotencyEntry,
+    Reservation,
     ReservationCheckpoint,
+    ReservationConflict,
     ReservationConflictError,
     ReservationLedger,
     ReservationStatus,
+    ResourceCapacity,
+    ResourceRequirement,
 )
+from treemendous.domain import Span
 
 
 def test_exact_reservations_use_half_open_cumulative_capacity() -> None:
@@ -373,3 +379,310 @@ def test_checkpoint_type_is_part_of_exact_restore_contract() -> None:
     ledger = ReservationLedger({"resource": CapacityVector(units=1)})
     checkpoint = ledger.checkpoint()
     assert isinstance(checkpoint, ReservationCheckpoint)
+
+
+def test_public_reservation_value_validation_edges() -> None:
+    capacity = CapacityVector(units=1)
+    with pytest.raises(TypeError, match="resource must be a string"):
+        ResourceRequirement(1, capacity)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="resource must not be empty"):
+        ResourceCapacity("", capacity)
+    with pytest.raises(TypeError, match="capacity must be"):
+        ResourceRequirement("lane", {"units": 1})  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="capacity must be"):
+        ResourceCapacity("lane", {"units": 1})  # type: ignore[arg-type]
+
+    requirement = ResourceRequirement("lane", capacity)
+    with pytest.raises(ValueError, match="at least one resource"):
+        Reservation("owner:1", "owner", 0, 1, ())
+    with pytest.raises(ValueError, match="unique resources"):
+        Reservation("owner:1", "owner", 0, 1, (requirement, requirement))
+    with pytest.raises(ValueError, match="request_id must not be empty"):
+        Reservation("owner:1", "owner", 0, 1, (requirement,), request_id="")
+    with pytest.raises(ValueError, match="buffer_before must be non-negative"):
+        Reservation("owner:1", "owner", 0, 1, (requirement,), buffer_before=-1)
+    with pytest.raises(TypeError, match="ReservationStatus"):
+        Reservation("owner:1", "owner", 0, 1, (requirement,), status="active")  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="IDs must be sorted"):
+        ReservationConflict(
+            "lane",
+            0,
+            1,
+            capacity,
+            capacity,
+            capacity,
+            ("z:1", "a:1"),
+        )
+    with pytest.raises(ValueError, match="same dimension"):
+        ReservationConflict(
+            "lane",
+            0,
+            1,
+            capacity,
+            CapacityVector(slots=1),
+            capacity,
+            (),
+        )
+    with pytest.raises(ValueError, match="requires conflict details"):
+        ReservationConflictError(())
+
+
+def test_public_ledger_request_validation_and_alias() -> None:
+    with pytest.raises(TypeError, match="resources must be a mapping"):
+        ReservationLedger([])  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="at least one resource"):
+        ReservationLedger({})
+    with pytest.raises(TypeError, match="resource capacities"):
+        ReservationLedger({"lane": 1})  # type: ignore[dict-item]
+
+    ledger = ReservationLedger({"lane": {"units": 1}})
+    demand = {"lane": {"units": 1}}
+    with pytest.raises(TypeError, match="requirements must be"):
+        ledger.reserve_exact("owner", 0, 1, [])  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="at least one resource requirement"):
+        ledger.reserve_exact("owner", 0, 1, {})
+    with pytest.raises(ValueError, match="owner must not be empty"):
+        ledger.reserve_exact("", 0, 1, demand)
+    with pytest.raises(ValueError, match="request_id must not be empty"):
+        ledger.reserve_exact("owner", 0, 1, demand, request_id="")
+    with pytest.raises(ValueError, match="buffer_after must be non-negative"):
+        ledger.reserve_exact("owner", 0, 1, demand, buffer_after=-1)
+
+    reservation = ledger.reserve(
+        "owner", 0, 1, demand, buffer_before=1, buffer_after=2
+    )
+    assert reservation.occupied_span == Span(-1, 3)
+    with pytest.raises(KeyError):
+        ledger.get("missing:1")
+    with pytest.raises(ValueError, match="reservation_id must not be empty"):
+        ledger.get("")
+    with pytest.raises(ValueError, match="owner must not be empty"):
+        ledger.reservations(owner="")
+    owner_reservations = ledger.reservations(owner="owner", active_only=True)
+    expected_reservations = (reservation,)
+    assert owner_reservations == expected_reservations
+
+
+def test_earliest_validation_disjoint_history_and_idempotency() -> None:
+    ledger = ReservationLedger(
+        {"a": CapacityVector(units=1), "b": CapacityVector(units=1)}
+    )
+    demand_a = {"a": CapacityVector(units=1)}
+    with pytest.raises(ValueError, match="search window"):
+        ledger.reserve_earliest(
+            "owner", 2, demand_a, earliest_start=2, latest_end=3
+        )
+    with pytest.raises(ValueError, match="buffer_before must be non-negative"):
+        ledger.reserve_earliest("owner", 1, demand_a, buffer_before=-1)
+
+    irrelevant = ledger.reserve_exact(
+        "other", 0, 2, {"b": CapacityVector(units=1)}
+    )
+    cancelled = ledger.reserve_exact("old", 0, 2, demand_a)
+    ledger.cancel("old", cancelled.id)
+    reservation = ledger.reserve_earliest(
+        "owner",
+        2,
+        demand_a,
+        earliest_start=5,
+        latest_end=8,
+        request_id="earliest",
+    )
+    assert reservation.start == 5
+    replay = ledger.reserve_earliest(
+        "owner",
+        2,
+        demand_a,
+        earliest_start=5,
+        latest_end=8,
+        request_id="earliest",
+    )
+    assert replay is reservation
+    before = ledger.snapshot()
+    with pytest.raises(ValueError, match="idempotency key"):
+        ledger.reserve_earliest(
+            "owner",
+            1,
+            demand_a,
+            earliest_start=5,
+            latest_end=8,
+            request_id="earliest",
+        )
+    assert ledger.snapshot() == before
+    assert ledger.get(irrelevant.id) is irrelevant
+    ledger.assert_invariants()
+
+
+def test_checkpoint_rejects_resource_identity_and_capacity_corruption() -> None:
+    two_resources = ReservationLedger(
+        {"a": CapacityVector(units=1), "b": CapacityVector(units=1)}
+    ).checkpoint()
+    invalid_resources = (
+        replace(two_resources, resources=tuple(reversed(two_resources.resources))),
+        replace(
+            two_resources,
+            resources=(two_resources.resources[0], two_resources.resources[0]),
+        ),
+    )
+    for invalid in invalid_resources:
+        with pytest.raises(ValueError, match="resources must be unique and sorted"):
+            ReservationLedger.from_checkpoint(invalid)
+
+    ledger = ReservationLedger({"lane": CapacityVector(units=1)})
+    first = ledger.reserve_exact(
+        "owner",
+        0,
+        2,
+        {"lane": CapacityVector(units=1)},
+        request_id="request",
+    )
+    checkpoint = ledger.checkpoint()
+    duplicate = replace(checkpoint, reservations=(first, first))
+    with pytest.raises(ValueError, match="duplicate reservation IDs"):
+        ReservationLedger.from_checkpoint(duplicate)
+
+    invalid_identities = (
+        replace(first, reservation_id="other:1"),
+        replace(first, reservation_id="owner:not-a-number"),
+        replace(first, reservation_id="owner:0"),
+        replace(first, reservation_id="owner:01"),
+    )
+    for invalid_reservation in invalid_identities:
+        invalid = replace(checkpoint, reservations=(invalid_reservation,))
+        with pytest.raises(ValueError, match="reservation ID"):
+            ReservationLedger.from_checkpoint(invalid)
+
+    other = replace(
+        first,
+        reservation_id="other:1",
+        owner="other",
+        request_id=None,
+    )
+    over_capacity = replace(
+        checkpoint,
+        reservations=(first, other),
+        next_sequences=(("other", 2), ("owner", 2)),
+    )
+    with pytest.raises(ValueError, match="exceeds resource capacity"):
+        ReservationLedger.from_checkpoint(over_capacity)
+
+
+def test_checkpoint_rejects_counter_corruption_variants() -> None:
+    ledger = ReservationLedger({"lane": CapacityVector(units=1)})
+    ledger.reserve_exact("owner", 0, 1, {"lane": CapacityVector(units=1)})
+    checkpoint = ledger.checkpoint()
+    invalid_counters = (
+        (checkpoint.next_sequences + checkpoint.next_sequences, "duplicate owner"),
+        ((("owner", 0),), "positive"),
+        ((), "omits the owner counter"),
+    )
+    for counters, message in invalid_counters:
+        invalid = replace(checkpoint, next_sequences=counters)
+        with pytest.raises(ValueError, match=message):
+            ReservationLedger.from_checkpoint(invalid)
+
+
+def test_checkpoint_rejects_idempotency_reference_corruption() -> None:
+    ledger = ReservationLedger({"lane": CapacityVector(units=1)})
+    ledger.reserve_exact(
+        "owner",
+        0,
+        1,
+        {"lane": CapacityVector(units=1)},
+        request_id="request",
+    )
+    checkpoint = ledger.checkpoint()
+    entry = checkpoint.idempotency[0]
+
+    duplicate = replace(checkpoint, idempotency=(entry, entry))
+    with pytest.raises(ValueError, match="duplicate idempotency keys"):
+        ReservationLedger.from_checkpoint(duplicate)
+    unknown = replace(
+        checkpoint,
+        idempotency=(replace(entry, reservation_id="missing:1"),),
+    )
+    with pytest.raises(ValueError, match="unknown reservation"):
+        ReservationLedger.from_checkpoint(unknown)
+    mismatched = replace(
+        checkpoint,
+        idempotency=(replace(entry, request_id="other-request"),),
+    )
+    with pytest.raises(ValueError, match="does not match its reservation"):
+        ReservationLedger.from_checkpoint(mismatched)
+    omitted = replace(checkpoint, idempotency=())
+    with pytest.raises(ValueError, match="omits a reservation idempotency"):
+        ReservationLedger.from_checkpoint(omitted)
+    invalid_type = replace(
+        checkpoint,
+        idempotency=(
+            IdempotencyEntry(entry.owner, entry.request_id, object(), entry.reservation_id),  # type: ignore[arg-type]
+        ),
+    )
+    with pytest.raises(TypeError, match="fingerprint has an invalid type"):
+        ReservationLedger.from_checkpoint(invalid_type)
+
+
+def test_checkpoint_rejects_fingerprint_corruption_variants() -> None:
+    exact = ReservationLedger({"lane": CapacityVector(units=1)})
+    exact.reserve_exact(
+        "owner",
+        0,
+        2,
+        {"lane": CapacityVector(units=1)},
+        request_id="exact",
+    )
+    checkpoint = exact.checkpoint()
+    entry = checkpoint.idempotency[0]
+    invalid_fingerprints = (
+        (replace(entry.fingerprint, kind="unknown"), "invalid request kind"),
+        (replace(entry.fingerprint, duration=1), "does not match"),
+        (replace(entry.fingerprint, buffer_after=1), "does not match"),
+        (replace(entry.fingerprint, start=1), "exact request fingerprint"),
+        (replace(entry.fingerprint, latest_end=3), "exact request fingerprint"),
+    )
+    for fingerprint, message in invalid_fingerprints:
+        invalid_entry = replace(entry, fingerprint=fingerprint)
+        invalid = replace(checkpoint, idempotency=(invalid_entry,))
+        with pytest.raises(ValueError, match=message):
+            ReservationLedger.from_checkpoint(invalid)
+
+    earliest = ReservationLedger({"lane": CapacityVector(units=1)})
+    earliest.reserve_earliest(
+        "owner",
+        2,
+        {"lane": CapacityVector(units=1)},
+        earliest_start=0,
+        latest_end=4,
+        request_id="earliest",
+    )
+    earliest_checkpoint = earliest.checkpoint()
+    earliest_entry = earliest_checkpoint.idempotency[0]
+    too_late = replace(earliest_entry.fingerprint, start=1)
+    invalid = replace(
+        earliest_checkpoint,
+        idempotency=(replace(earliest_entry, fingerprint=too_late),),
+    )
+    with pytest.raises(ValueError, match="earliest request fingerprint"):
+        ReservationLedger.from_checkpoint(invalid)
+
+
+def test_successful_restore_replaces_state_and_preserves_diagnostics() -> None:
+    source = ReservationLedger({"source": CapacityVector(units=1)})
+    reservation = source.reserve_exact(
+        "owner",
+        2,
+        4,
+        {"source": CapacityVector(units=1)},
+        request_id="request",
+    )
+    target = ReservationLedger({"target": CapacityVector(units=2)})
+    target.reserve_exact("old", 0, 1, {"target": CapacityVector(units=1)})
+
+    target.restore(source.checkpoint())
+
+    expected_snapshot = source.snapshot()
+    assert target.snapshot() == expected_snapshot
+    assert target.get(reservation.id) == reservation
+    assert not target.diagnostics()
+    target.assert_invariants()
