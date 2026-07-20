@@ -6,8 +6,9 @@ backend independent and form the stable public contract.
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, TypeAlias, cast
 
 
@@ -94,6 +95,8 @@ class ManagedDomain:
     """A normalized tuple of disjoint managed spans."""
 
     spans: tuple[Span, ...]
+    _ends: tuple[int, ...] = field(init=False, repr=False, compare=False)
+    _measure: int = field(init=False, repr=False, compare=False)
 
     def __init__(self, spans: SpanInput):
         if isinstance(spans, Span):
@@ -124,18 +127,22 @@ class ManagedDomain:
                 normalized[-1] = Span(normalized[-1].start, span.end)
             else:
                 normalized.append(span)
-        object.__setattr__(self, "spans", tuple(normalized))
+        committed = tuple(normalized)
+        object.__setattr__(self, "spans", committed)
+        object.__setattr__(self, "_ends", tuple(span.end for span in committed))
+        object.__setattr__(self, "_measure", sum(span.length for span in committed))
 
     @property
     def measure(self) -> int:
-        return sum(span.length for span in self.spans)
+        return self._measure
 
     @property
     def bounds(self) -> tuple[int, int]:
         return self.spans[0].start, self.spans[-1].end
 
     def contains(self, span: Span) -> bool:
-        return any(part.contains(span) for part in self.spans)
+        index = bisect_right(self._ends, span.start)
+        return index < len(self.spans) and self.spans[index].contains(span)
 
     def extended(self, span: Span) -> ManagedDomain:
         """Return the normalized union of this domain and one span."""

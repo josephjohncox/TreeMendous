@@ -164,9 +164,52 @@ class BoundarySummaryManager:
             else (ManagedDomain(managed_domain) if managed_domain is not None else None)
         )
         self._domain_explicit = managed_domain is not None
+        self._managed_spans: SortedDict[int, int] | None = (
+            None if self._domain_explicit else SortedDict()
+        )
 
         self._operation_count = 0
         self._cache_hits = 0
+
+    def _extend_inferred_domain(self, span: Span) -> None:
+        managed = self._managed_spans
+        if managed is None:
+            raise RuntimeError("explicit domains cannot be extended")
+        start = span.start
+        end = span.end
+        index = managed.bisect_left(start)
+        if index > 0:
+            previous_start = managed.keys()[index - 1]
+            previous_end = managed[previous_start]
+            if end <= previous_end:
+                return
+            if previous_end >= start:
+                start = previous_start
+                end = max(end, previous_end)
+                index -= 1
+                del managed[previous_start]
+        while index < len(managed):
+            current_start = managed.keys()[index]
+            if current_start > end:
+                break
+            end = max(end, managed[current_start])
+            del managed[current_start]
+        managed[start] = end
+        self._managed_domain = None
+
+    def _current_managed_domain(self) -> ManagedDomain | None:
+        if self._domain_explicit:
+            return self._managed_domain
+        managed = self._managed_spans
+        if managed is None:
+            raise RuntimeError("inferred domain state is unavailable")
+        if not managed:
+            return None
+        if self._managed_domain is None:
+            self._managed_domain = ManagedDomain(
+                Span(start, end) for start, end in managed.items()
+            )
+        return self._managed_domain
 
     def release_interval(self, start: int, end: int) -> None:
         """Add interval to available space with summary update"""
@@ -175,11 +218,22 @@ class BoundarySummaryManager:
             assert self._managed_domain is not None
             if not self._managed_domain.contains(span):
                 raise ValueError("span must be contained in the managed domain")
-        before = tuple(self.intervals.items())
         self._operation_count += 1
 
         # Find insertion position
         idx = self.intervals.bisect_left(start)
+
+        # A canonical interval containing the release makes it a no-op.
+        if idx > 0:
+            prev_start = self.intervals.keys()[idx - 1]
+            prev_end, _ = self.intervals[prev_start]
+            if end <= prev_end:
+                return
+        if idx < len(self.intervals):
+            current_start = self.intervals.keys()[idx]
+            current_end, _ = self.intervals[current_start]
+            if current_start == start and end <= current_end:
+                return
 
         # Merge with the previous interval if overlapping or adjacent.
         if idx > 0:
@@ -203,13 +257,8 @@ class BoundarySummaryManager:
         # Insert merged interval
         self.intervals[start] = (end, None)
         if not self._domain_explicit:
-            self._managed_domain = (
-                self._managed_domain.extended(span)
-                if self._managed_domain is not None
-                else ManagedDomain(span)
-            )
-        if tuple(self.intervals.items()) != before:
-            self._summary_dirty = True
+            self._extend_inferred_domain(span)
+        self._summary_dirty = True
 
     def reserve_interval(self, start: int, end: int) -> None:
         """Remove interval from available space with summary update"""
@@ -231,7 +280,7 @@ class BoundarySummaryManager:
         intervals_to_add: list[tuple[int, int]] = []
         keys_to_delete = []
 
-        keys = list(self.intervals.keys())
+        keys = self.intervals.keys()
         while idx < len(keys):
             curr_start = keys[idx]
             curr_end, _ = self.intervals[curr_start]
@@ -306,9 +355,10 @@ class BoundarySummaryManager:
         # Recompute primitive geometry, then derive occupancy from the normalized
         # domain measure. Disjoint unmanaged gaps are never counted as occupied.
         summary = BoundarySummary.compute_from_intervals(self.intervals)
-        if self._managed_domain is not None:
-            occupied = self._managed_domain.measure - summary.total_free_length
-            bounds = self._managed_domain.bounds
+        managed_domain = self._current_managed_domain()
+        if managed_domain is not None:
+            occupied = managed_domain.measure - summary.total_free_length
+            bounds = managed_domain.bounds
             summary = replace(
                 summary,
                 total_occupied_length=occupied,
@@ -320,7 +370,7 @@ class BoundarySummaryManager:
                 latest_end=(
                     summary.latest_end if summary.latest_end is not None else bounds[1]
                 ),
-                utilization=occupied / self._managed_domain.measure,
+                utilization=occupied / managed_domain.measure,
             )
         self._cached_summary = summary
         self._summary_dirty = False

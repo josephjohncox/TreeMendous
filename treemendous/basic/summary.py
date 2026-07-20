@@ -238,13 +238,11 @@ class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode]):
         """Find the earliest available interval at or after ``start``."""
         validate_coordinate(start, "start")
         validate_length(length)
-        intervals: list[tuple[int, int]] = []
-        self._collect_intervals(self.root, intervals)
-        for interval_start, interval_end in intervals:
-            allocation_start = max(start, interval_start)
-            if allocation_start + length <= interval_end:
-                return allocation_start, allocation_start + length
-        return None
+        node = self._find_interval_optimized(self.root, start, length)
+        if node is None:
+            return None
+        allocation_start = max(start, node.start)
+        return allocation_start, allocation_start + length
 
     def find_best_fit(
         self, length: int, prefer_early: bool = True
@@ -327,29 +325,24 @@ class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode]):
     def _find_interval_optimized(
         self, node: SummaryIntervalNode | None, start: int, length: int
     ) -> SummaryIntervalNode | None:
-        """Find interval using summary statistics to prune search space"""
-        if not node:
+        """Find the earliest fit while pruning impossible subtrees."""
+        if (
+            node is None
+            or node.summary.largest_free_length < length
+            or node.summary.latest_free_end is None
+            or node.summary.latest_free_end <= start
+        ):
             return None
 
-        # Quick elimination: if this subtree's largest interval is too small, skip
-        if node.summary.largest_free_length < length:
-            return None
+        left_result = self._find_interval_optimized(node.left, start, length)
+        if left_result is not None:
+            return left_result
 
-        # Quick elimination: if this subtree has no free space after start, skip
-        if node.summary.latest_free_end and node.summary.latest_free_end <= start:
-            return None
+        allocation_start = max(start, node.start)
+        if allocation_start + length <= node.end:
+            return node
 
-        # Check current node
-        if node.start >= start and (node.end - node.start) >= length:
-            # Look for earlier interval in left subtree first
-            left_result = self._find_interval_optimized(node.left, start, length)
-            return left_result if left_result else node
-
-        # Search appropriate subtree
-        if node.start < start:
-            return self._find_interval_optimized(node.right, start, length)
-        else:
-            return self._find_interval_optimized(node.right, start, length)
+        return self._find_interval_optimized(node.right, start, length)
 
     def _find_best_fit_node(
         self, node: SummaryIntervalNode | None, length: int, prefer_early: bool
