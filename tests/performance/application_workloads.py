@@ -207,14 +207,14 @@ APPLICATION_SPECS = (
         "Genomic annotation overlap",
         "overlap_catalog",
         "catalog",
-        "gene, exon, variant, and read spans are queried by coordinate overlap",
+        "unioned gene, exon, variant, and read coverage is queried by overlap",
     ),
     ApplicationSpec(
         "source-diagnostic-ranges",
         "Source diagnostic ranges",
         "overlap_catalog",
         "catalog",
-        "compiler and editor diagnostics are queried by byte or token span",
+        "unioned diagnostic regions are queried by byte or token span",
     ),
     ApplicationSpec(
         "filesystem-byte-locks",

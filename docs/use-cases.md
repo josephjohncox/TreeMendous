@@ -76,12 +76,14 @@ Those layers can propose a candidate range and commit it through `RangeSet`.
 ## Immutable overlap and annotation catalogs
 
 These scenarios are read-heavy catalogs with 80% overlap queries, fit queries,
-and snapshot/statistics checkpoints.
+and snapshot/statistics checkpoints. They validate unioned region geometry, not
+retrieval of every source record; preserve record identities externally or in a
+lawful payload model.
 
 | Scenario | Range interpretation |
 | --- | --- |
-| `genomic-annotation-overlap` | Gene, exon, variant, and read coordinates |
-| `source-diagnostic-ranges` | Byte or token spans from compilers and editors |
+| `genomic-annotation-overlap` | Unions of gene, exon, variant, and read coverage |
+| `source-diagnostic-ranges` | Unions of compiler and editor diagnostic regions |
 | `filesystem-byte-locks` | File byte-range locks |
 | `database-key-range-locks` | Normalized integer key bands |
 | `packet-sequence-reassembly` | Received packet sequence-number ranges |
