@@ -102,7 +102,12 @@ def test_shared_lease_value_and_pool_input_validators() -> None:
         ((1,), {"ttl": 1}, TypeError, "owner"),
         (("",), {"ttl": 1}, ValueError, "owner"),
         (("owner",), {"ttl": 1, "exact_span": [0, 1]}, TypeError, "exact_span"),
-        (("owner",), {"ttl": 1, "exact_span": (0, "x")}, TypeError, "invalid exact_span"),
+        (
+            ("owner",),
+            {"ttl": 1, "exact_span": (0, "x")},
+            TypeError,
+            "invalid exact_span",
+        ),
         (("owner",), {"ttl": 1, "request_id": ""}, ValueError, "request_id"),
     )
     for args, kwargs, error, message in invalid_acquires:
@@ -195,9 +200,7 @@ def test_shared_checkpoint_rejects_inconsistent_public_evidence() -> None:
             clock=clock,
         )
     with pytest.raises(ValueError, match="missing its request"):
-        LeasePool.from_checkpoint(
-            replace(checkpoint, requests=()), clock=clock
-        )
+        LeasePool.from_checkpoint(replace(checkpoint, requests=()), clock=clock)
 
     overlapping = replace(
         checkpoint,
@@ -299,9 +302,7 @@ def test_common_checkpoint_and_wrapper_validators() -> None:
             replace(scoped.pool, allowed_spans=(Span(0, 1), Span(1, 3))),
         )
     with pytest.raises(ValueError, match="domain does not match"):
-        ScopedPoolCheckpoint(
-            "scope", scoped.source_pool_id, (Span(0, 2),), scoped.pool
-        )
+        ScopedPoolCheckpoint("scope", scoped.source_pool_id, (Span(0, 2),), scoped.pool)
     with pytest.raises(ValueError, match="source_pool_id"):
         ScopedPoolCheckpoint("scope", "", scoped.allowed_spans, scoped.pool)
     with pytest.raises(ValueError, match="lineage"):
@@ -358,9 +359,7 @@ def test_region_public_validators_unavailability_and_adjacency_states() -> None:
         with pytest.raises(error, match=message):
             engine.acquire(**kwargs)  # type: ignore[arg-type]
 
-    first = engine.acquire(
-        "west", "owner", ttl=5, start_region=1, request_id="exact"
-    )
+    first = engine.acquire("west", "owner", ttl=5, start_region=1, request_id="exact")
     assert (
         engine.acquire("west", "owner", ttl=5, start_region=1, request_id="exact")
         == first
@@ -405,9 +404,7 @@ def test_region_handoff_retries_require_unchanged_identity() -> None:
             ttl=2,
             request_id="bad",
         )
-    transferred = engine.handoff(
-        source, "target", ttl=2, request_id="handoff"
-    )
+    transferred = engine.handoff(source, "target", ttl=2, request_id="handoff")
     assert transferred.resource == source.resource
     assert engine.handoff(source, "target", ttl=2, request_id="handoff") == transferred
     with pytest.raises(RegionHandoffError, match="different arguments"):
@@ -423,12 +420,8 @@ def test_region_handoff_retries_require_unchanged_identity() -> None:
 def test_region_restore_rejects_shard_request_and_handoff_corruption() -> None:
     clock = LogicalClock()
     engine = GameRegionPool({"west": (1, 8)}, clock=clock)
-    anchor = engine.acquire(
-        "west", "owner", ttl=10, start_region=1, request_id="exact"
-    )
-    engine.acquire(
-        "west", "owner", ttl=10, adjacent_to=anchor, request_id="adjacent"
-    )
+    anchor = engine.acquire("west", "owner", ttl=10, start_region=1, request_id="exact")
+    engine.acquire("west", "owner", ttl=10, adjacent_to=anchor, request_id="adjacent")
     engine.acquire("west", "owner", ttl=10, request_id="automatic")
     engine.handoff(anchor, "next", ttl=10, request_id="handoff")
     checkpoint = engine.checkpoint()
@@ -579,18 +572,14 @@ def test_database_public_lifecycle_reuse_exhaustion_and_identity() -> None:
 def test_database_restore_validates_bounds_commits_and_reusable_spans() -> None:
     clock = LogicalClock(5)
     pool = DatabaseIdPool("ids", maximum_id=10, clock=clock)
-    committed = pool.commit(
-        pool.acquire("permanent", ttl=5, request_id="committed")
-    )
+    committed = pool.commit(pool.acquire("permanent", ttl=5, request_id="committed"))
     active = pool.acquire("active", ttl=5, count=2, request_id="active")
     checkpoint = pool.checkpoint()
 
     with pytest.raises(TypeError, match="DatabaseIdCheckpoint"):
         DatabaseIdPool.from_checkpoint(object(), clock=clock)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="must not exceed"):
-        DatabaseIdPool.from_checkpoint(
-            replace(checkpoint, minimum_id=11), clock=clock
-        )
+        DatabaseIdPool.from_checkpoint(replace(checkpoint, minimum_id=11), clock=clock)
     for next_id in (0, 12):
         with pytest.raises(ValueError, match="outside the ID domain"):
             DatabaseIdPool.from_checkpoint(
@@ -910,13 +899,9 @@ def test_software_policy_checkout_and_renewal_public_edges() -> None:
     with pytest.raises(ValueError, match="entitlement owner"):
         SoftwareSeatPool({"ide": 1}, entitlements={"": {"ide": 1}}, clock=clock)
     with pytest.raises(UnknownProductError):
-        SoftwareSeatPool(
-            {"ide": 1}, entitlements={"owner": {"other": 1}}, clock=clock
-        )
+        SoftwareSeatPool({"ide": 1}, entitlements={"owner": {"other": 1}}, clock=clock)
     with pytest.raises(ValueError, match="entitlement limit"):
-        SoftwareSeatPool(
-            {"ide": 1}, entitlements={"owner": {"ide": 0}}, clock=clock
-        )
+        SoftwareSeatPool({"ide": 1}, entitlements={"owner": {"ide": 0}}, clock=clock)
 
     unrestricted = SoftwareSeatPool({"ide": 1}, clock=clock)
     seat = unrestricted.checkout("ide", "owner", ttl=5, request_id="login")
@@ -945,9 +930,7 @@ def test_software_policy_checkout_and_renewal_public_edges() -> None:
 
 def test_software_restore_rejects_malformed_entitlement_policy() -> None:
     clock = LogicalClock()
-    pool = SoftwareSeatPool(
-        {"ide": 2}, entitlements={"alice": {"ide": 2}}, clock=clock
-    )
+    pool = SoftwareSeatPool({"ide": 2}, entitlements={"alice": {"ide": 2}}, clock=clock)
     pool.checkout("ide", "alice", ttl=5)
     checkpoint = pool.checkpoint()
 
@@ -958,9 +941,7 @@ def test_software_restore_rejects_malformed_entitlement_policy() -> None:
             replace(checkpoint, products=checkpoint.products * 2), clock=clock
         )
     with pytest.raises(ValueError, match="at least one product"):
-        SoftwareSeatPool.from_checkpoint(
-            replace(checkpoint, products=()), clock=clock
-        )
+        SoftwareSeatPool.from_checkpoint(replace(checkpoint, products=()), clock=clock)
     with pytest.raises(TypeError, match="must be a bool"):
         SoftwareSeatPool.from_checkpoint(
             replace(checkpoint, entitlement_restricted=1),  # type: ignore[arg-type]
@@ -1002,7 +983,10 @@ def test_software_restricted_renewal_requires_original_entitlement() -> None:
     foreign_policy = SoftwareSeatPool(
         {"ide": 1}, entitlements={"bob": {"ide": 1}}, clock=clock
     )
-    foreign_handle = NumericLease("ide", replace(seat.lease, pool_id=foreign_policy.snapshot().pools[0][1].pool_id))
+    foreign_handle = NumericLease(
+        "ide",
+        replace(seat.lease, pool_id=foreign_policy.snapshot().pools[0][1].pool_id),
+    )
     with pytest.raises(EntitlementError):
         foreign_policy.renew(foreign_handle, ttl=1)
 
@@ -1109,11 +1093,7 @@ def test_numeric_ip_restore_rejects_scope_and_domain_corruption() -> None:
     network = ipaddress.ip_network("192.0.2.0/29")
     network_start = 3_221_225_984
     outside_group = PoolGroup(
-        {
-            network.with_prefixlen: (
-                Span(network_start - 1, network_start),
-            )
-        },
+        {network.with_prefixlen: (Span(network_start - 1, network_start),)},
         clock=clock,
     )
     outside_checkpoint = AddressPoolCheckpoint(

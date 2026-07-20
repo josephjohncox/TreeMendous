@@ -84,7 +84,9 @@ def test_runtime_transitions_and_callback_failures_are_atomic() -> None:
     )
     assert abandoned.state is ClaimState.ABANDONED
     assert committed == ["swapped"]
-    assert runtime.abandon(runtime.claim("plain-abandon", 1)).state is ClaimState.ABANDONED
+    assert (
+        runtime.abandon(runtime.claim("plain-abandon", 1)).state is ClaimState.ABANDONED
+    )
 
     active = runtime.claim("retry", 1)
     with pytest.raises(RuntimeError, match="prepare failed"):
@@ -229,7 +231,9 @@ def test_url_normalization_and_crawler_validate_adversarial_inputs() -> None:
         lambda: WebCrawlEngine("https://example.test", fetcher, max_pages=1),
         lambda: WebCrawlEngine((), fetcher, max_pages=1),
         lambda: WebCrawlEngine(
-            ("https://example.test",), None, max_pages=1  # type: ignore[arg-type]
+            ("https://example.test",),
+            None,
+            max_pages=1,  # type: ignore[arg-type]
         ),
         lambda: WebCrawlEngine(("https://example.test",), fetcher, max_pages=0),
     )
@@ -247,9 +251,7 @@ def test_crawler_rejects_invalid_fetch_results_and_stops_at_budget() -> None:
 
     invalid_fetchers = (return_object, return_invalid_body)
     for invalid_fetcher in invalid_fetchers:
-        engine = WebCrawlEngine(
-            ("https://example.test",), invalid_fetcher, max_pages=1
-        )
+        engine = WebCrawlEngine(("https://example.test",), invalid_fetcher, max_pages=1)
         with pytest.raises(RuntimeError, match="fetch failed"):
             engine.crawl_next()
         no_visits: tuple[str, ...] = ()
@@ -278,13 +280,17 @@ def test_hyperparameter_validators_and_minimization_paths() -> None:
     invalid_constructors = (
         lambda: HyperparameterSearchEngine({}, _constant_objective),
         lambda: HyperparameterSearchEngine(
-            {"x": (1,)}, None  # type: ignore[arg-type]
+            {"x": (1,)},
+            None,  # type: ignore[arg-type]
         ),
         lambda: HyperparameterSearchEngine(
-            {"x": (1,)}, _constant_objective, maximize=1  # type: ignore[arg-type]
+            {"x": (1,)},
+            _constant_objective,
+            maximize=1,  # type: ignore[arg-type]
         ),
         lambda: HyperparameterSearchEngine(
-            {1: (1,)}, _constant_objective  # type: ignore[dict-item]
+            {1: (1,)},
+            _constant_objective,  # type: ignore[dict-item]
         ),
         lambda: HyperparameterSearchEngine({"": (1,)}, _constant_objective),
         lambda: HyperparameterSearchEngine({"x": "one"}, _constant_objective),
@@ -339,7 +345,9 @@ def test_genetic_validators_callback_failures_and_terminal_step() -> None:
         lambda: GeneticSearchEngine(("0", "01"), _score_ones, generations=1),
         lambda: GeneticSearchEngine(("0", "x"), _score_ones, generations=1),
         lambda: GeneticSearchEngine(
-            ("0", "1"), None, generations=1  # type: ignore[arg-type]
+            ("0", "1"),
+            None,
+            generations=1,  # type: ignore[arg-type]
         ),
         lambda: GeneticSearchEngine(("0", "1"), _score_ones, generations=0),
         lambda: GeneticSearchEngine(("0", "1"), _score_ones, generations=1, seed=True),
@@ -368,7 +376,9 @@ def test_genetic_validators_callback_failures_and_terminal_step() -> None:
     with pytest.raises(ClaimUnavailableError, match="complete"):
         engine.step()
     assert create_genetic_search(generations=1).run()[0].number == 0
-    assert create_genetic_search(fitness=_score_ones, generations=1).run()[0].number == 0
+    assert (
+        create_genetic_search(fitness=_score_ones, generations=1).run()[0].number == 0
+    )
 
 
 def test_genetic_restore_rejects_application_checkpoint_corruption() -> None:
@@ -435,9 +445,7 @@ def test_genetic_restore_rejects_unfinished_and_malformed_runtime_claims() -> No
             unfinished, fitness=_score_ones, clock=clock
         )
 
-    history = (
-        GeneticGeneration(0, ("00", "11"), ((2.0, "11"), (0.0, "00"))),
-    )
+    history = (GeneticGeneration(0, ("00", "11"), ((2.0, "11"), (0.0, "00"))),)
     metadata_runtime = PartitionRuntime(2, clock=clock)
     claim = metadata_runtime.claim("worker", 1)
     metadata_runtime.complete(claim, "generation", {"other": 0})
@@ -491,9 +499,7 @@ def test_log_replay_rejects_every_invalid_event_shape() -> None:
 
 def test_graph_search_validators_empty_frontier_and_factory_paths() -> None:
     class UnavailableGraphSearch(GraphSearchEngine):
-        def expand(
-            self, *, width: int = 1, owner: str = "local"
-        ) -> tuple[str, ...]:
+        def expand(self, *, width: int = 1, owner: str = "local") -> tuple[str, ...]:
             del width, owner
             raise ClaimUnavailableError("frontier temporarily unavailable")
 
@@ -555,10 +561,16 @@ def test_map_reduce_validators_emissions_and_default_factory() -> None:
     invalid_constructors = (
         lambda: MapReduceEngine(b"", _pair_mapper, _sum, split_size=1),
         lambda: MapReduceEngine(
-            b"x", None, _sum, split_size=1  # type: ignore[arg-type]
+            b"x",
+            None,
+            _sum,
+            split_size=1,  # type: ignore[arg-type]
         ),
         lambda: MapReduceEngine(
-            b"x", _pair_mapper, None, split_size=1  # type: ignore[arg-type]
+            b"x",
+            _pair_mapper,
+            None,
+            split_size=1,  # type: ignore[arg-type]
         ),
         lambda: MapReduceEngine(b"x", _pair_mapper, _sum, split_size=0),
         lambda: MapReduceEngine(b"x", _pair_mapper, _sum, split_size=1, mode="bad"),

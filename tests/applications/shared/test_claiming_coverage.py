@@ -146,9 +146,7 @@ def test_restore_rejects_claim_event_envelope_corruption() -> None:
         claims=(replace(checkpoint.claims[0], revision=2),),
     )
     extra_payload = _replace_event(checkpoint, 1, payload_changes={"extra": 1})
-    wrong_revision = _replace_event(
-        checkpoint, 1, payload_changes={"revision": 2}
-    )
+    wrong_revision = _replace_event(checkpoint, 1, payload_changes={"revision": 2})
     invalid_coordinate = _replace_event(
         checkpoint,
         1,
@@ -226,9 +224,7 @@ def test_restore_rejects_corrupted_renewal_evidence() -> None:
         2,
         payload_changes={"fencing_token": first_payload["fencing_token"]},
     )
-    missing_expiry = _replace_event(
-        checkpoint, 2, payload_changes={"expires_at": None}
-    )
+    missing_expiry = _replace_event(checkpoint, 2, payload_changes={"expires_at": None})
     renewed_after_expiry = replace(
         _replace_event(checkpoint, 2, occurred_at=2), last_observed_at=2
     )
