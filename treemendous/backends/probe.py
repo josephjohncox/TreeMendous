@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from treemendous.backends.normalize import normalize_interval, normalize_intervals
+from treemendous.domain import MutationResult
 
 from .types import (
     Available,
@@ -38,6 +39,103 @@ def _assert_invalid_atomic(implementation: Any, method: str) -> None:
         raise AssertionError(f"failed {method} changed observable state")
 
 
+def _delta_shape(delta: Any) -> tuple[tuple[int, int], ...]:
+    return tuple((item.start, item.end) for item in normalize_intervals(delta.changed))
+
+
+def _probe_authoritative_geometry(spec: BackendSpec) -> None:
+    implementation = spec.loader()(**dict(spec.constructor_args))
+    required = (
+        "release_with_delta",
+        "reserve_with_delta",
+        "find_overlapping_intervals",
+    )
+    if not all(callable(getattr(implementation, name, None)) for name in required):
+        return
+
+    implementation.release_interval(0, 2)
+    implementation.release_interval(4, 6)
+    released = implementation.release_with_delta(1, 5)
+    if not isinstance(released, MutationResult):
+        raise AssertionError("authoritative mutations must return MutationResult")
+    if (
+        _delta_shape(released) != ((2, 4),)
+        or released.changed_length != 2
+        or released.fully_covered
+        or _shape(implementation) != ((0, 6),)
+    ):
+        raise AssertionError("authoritative release delta is invalid")
+
+    before = _shape(implementation)
+    rejected = implementation.reserve_with_delta(1, 7, True)
+    if not isinstance(rejected, MutationResult):
+        raise AssertionError("authoritative mutations must return MutationResult")
+    if (
+        _delta_shape(rejected)
+        or rejected.changed_length != 0
+        or rejected.fully_covered
+        or _shape(implementation) != before
+    ):
+        raise AssertionError("covered reservation rejection is not atomic")
+
+    reserved = implementation.reserve_with_delta(1, 5, True)
+    if not isinstance(reserved, MutationResult):
+        raise AssertionError("authoritative mutations must return MutationResult")
+    if (
+        _delta_shape(reserved) != ((1, 5),)
+        or reserved.changed_length != 4
+        or not reserved.fully_covered
+        or _shape(implementation) != ((0, 1), (5, 6))
+    ):
+        raise AssertionError("authoritative reserve delta is invalid")
+
+    overlaps = normalize_intervals(implementation.find_overlapping_intervals(0, 6))
+    if tuple((item.start, item.end) for item in overlaps) != (
+        (0, 1),
+        (5, 6),
+    ):
+        raise AssertionError("authoritative overlap query is invalid")
+
+    if all(
+        callable(getattr(implementation, name, None))
+        for name in ("get_interval_count", "get_largest_available_length")
+    ) and (
+        implementation.get_interval_count() != 2
+        or implementation.get_largest_available_length() != 1
+    ):
+        raise AssertionError("authoritative structural statistics are invalid")
+
+    if callable(getattr(implementation, "allocate_interval", None)):
+        implementation.release_interval(6, 12)
+        allocated = normalize_interval(implementation.allocate_interval(5, 3, None))
+        if (
+            allocated is None
+            or (allocated.start, allocated.end) != (5, 8)
+            or _shape(implementation) != ((0, 1), (8, 12))
+        ):
+            raise AssertionError("authoritative allocation is not atomic")
+        before = _shape(implementation)
+        if (
+            implementation.allocate_interval(8, 3, 10) is not None
+            or _shape(implementation) != before
+        ):
+            raise AssertionError("bounded allocation rejection changed state")
+
+    if callable(getattr(implementation, "set_managed_domain", None)):
+        managed = spec.loader()(**dict(spec.constructor_args))
+        managed.set_managed_domain([(0, 5), (10, 15)])
+        managed.release_interval(0, 5)
+        before = _shape(managed)
+        try:
+            managed.release_interval(5, 10)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("authoritative managed domain is not enforced")
+        if _shape(managed) != before:
+            raise AssertionError("managed-domain rejection changed state")
+
+
 def _probe_core(spec: BackendSpec, implementation: Any) -> None:
     if _shape(implementation) or implementation.get_total_available_length() != 0:
         raise AssertionError("new implementation is not empty")
@@ -65,6 +163,7 @@ def _probe_core(spec: BackendSpec, implementation: Any) -> None:
     if implementation.get_total_available_length() != 12:
         raise AssertionError("reserve total semantic check failed")
 
+    _probe_authoritative_geometry(spec)
     if spec.runtime is Runtime.CPP:
         _probe_native_limits(spec)
 

@@ -228,16 +228,28 @@ The raw geometry backend is only one layer. `RangeSet` additionally owns:
 - payload cloning and payload algebra;
 - immutable snapshots and canonical result values.
 
-`RangeSet` reads one normalized backend snapshot during construction and keeps
-a private payload-free geometry cache synchronized after successful mutations.
-Ordinary queries do not retrieve, convert, validate, and sort the entire backend
-state again.
+`RangeSet` reads one normalized backend snapshot during construction. Backends
+with the authoritative-geometry capability return exact mutation deltas and
+answer fit, overlap, allocation, and structural-statistics queries directly.
+For those payload-free sets, a successful mutation updates the cached total and
+invalidates a read-through interval snapshot; it does not publish a copied
+Python interval tuple. If the next operation observes geometry, `RangeSet`
+patches the cached tuple from that single mutation. Several effective mutations
+without an intervening observation instead trigger one authoritative backend
+snapshot when geometry is next requested. Repeated `intervals()` calls do no
+further publication work until another effective mutation.
 
-The cache is an immutable tuple. Bisect locates a local change in `O(log n)`,
-but publishing a successful mutation copies tuple references around the changed
-slice, which is `O(n)`. This is a deliberate publication and failure-atomicity
-tradeoff. It has a low C-level copying constant, but it means the stable API's
-mutation bound is not simply the raw backend's bound.
+Fallback backends and payload-bearing sets retain the immutable Python geometry
+cache. Bisect locates a local change in `O(log n)`, but publishing a successful
+fallback mutation copies tuple references around the changed slice, which is
+`O(n)`. The fallback preserves one common semantic implementation for payload
+algebra and for backends without exact deltas.
+
+The stable C++ boundary backend also accepts the normalized managed domain at
+construction. It validates geometry mutations and overlap queries against that
+domain inside the same native call. `RangeSet` still owns and exposes the public
+`ManagedDomain`; moving its hot-path containment check does not transfer API
+ownership to the backend.
 
 Payload policies add their own costs. A structural policy can require segment
 splits, restrictions, combinations, event ordering, and defensive clones. No
@@ -248,7 +260,7 @@ geometry-backend throughput number predicts payload-heavy throughput.
 Fragmentation turns one free span into many. It increases `n`, which affects:
 
 - tree height and ordered-map search;
-- tuple publication in `RangeSet`;
+- fallback tuple publication or authoritative snapshot rematerialization;
 - failed or weakly selective fit scans;
 - enumeration and snapshots;
 - summary recomputation;
@@ -274,10 +286,13 @@ The fast path has these properties:
    scan.
 3. **Prunable queries.** Maximum-length and endpoint summaries reject impossible
    subtrees.
-4. **No repeated materialization.** Stable calls do not rebuild all Python
-   interval objects after each mutation.
-5. **Staged commit.** Validation, checked arithmetic, callback work, and required
-   allocations happen before a small non-fallible publication step.
+4. **No repeated materialization.** Exact backend deltas avoid rebuilding
+   Python interval objects after each mutation. One observed local mutation is
+   patched into the cached tuple; a burst of unobserved mutations incurs one
+   backend rematerialization when finally observed.
+5. **Staged commit.** Validation, checked arithmetic, callback work, and result
+   construction precede geometry mutation. The stable C++ boundary path also
+   allocates any required map nodes before its no-throw commit.
 6. **Appropriate representation.** Compact boundary maps favor local churn;
    augmented trees favor the queries their summaries can prune.
 7. **Amortized boundaries.** Native batch or query work must be large enough to

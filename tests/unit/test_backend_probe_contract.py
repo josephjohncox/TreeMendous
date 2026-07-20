@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -18,7 +20,7 @@ from treemendous.backends.types import (
     Unavailable,
 )
 from treemendous.basic.boundary import IntervalManager
-from treemendous.domain import Span
+from treemendous.domain import IntervalResult, MutationResult, Span
 
 
 def _spec(
@@ -116,6 +118,50 @@ class _IgnoresValidReserve(IntervalManager):
         return None
 
 
+class _WrongReleaseDelta(IntervalManager):
+    def release_with_delta(self, start: int, end: int) -> MutationResult:
+        super().release_with_delta(start, end)
+        return MutationResult((), 0, True)
+
+
+class _ShapeOnlyDelta(IntervalManager):
+    _treemendous_authoritative_geometry = True
+
+    def release_with_delta(self, start: int, end: int) -> MutationResult:
+        result = super().release_with_delta(start, end)
+        return cast(
+            MutationResult,
+            SimpleNamespace(
+                changed=result.changed,
+                changed_length=result.changed_length,
+                fully_covered=result.fully_covered,
+            ),
+        )
+
+
+class _WrongAllocation(IntervalManager):
+    _treemendous_authoritative_geometry = True
+
+    def allocate_interval(
+        self, start: int, length: int, not_after: int | None
+    ) -> IntervalResult | None:
+        return self.find_interval(start, length)
+
+
+class _WrongStats(IntervalManager):
+    _treemendous_authoritative_geometry = True
+
+    def get_interval_count(self) -> int:
+        return 999
+
+
+class _IgnoredManagedDomain(IntervalManager):
+    _treemendous_authoritative_geometry = True
+
+    def set_managed_domain(self, spans: list[tuple[int, int]]) -> None:
+        return None
+
+
 @pytest.mark.parametrize(
     ("implementation", "message"),
     [
@@ -124,6 +170,11 @@ class _IgnoresValidReserve(IntervalManager):
         (_MutatesBeforeInvalidRelease, "changed observable state"),
         (_NeverFits, "fragmented first-fit"),
         (_IgnoresValidReserve, "reserve snapshot"),
+        (_WrongReleaseDelta, "authoritative release delta"),
+        (_ShapeOnlyDelta, "must return MutationResult"),
+        (_WrongAllocation, "authoritative allocation"),
+        (_WrongStats, "structural statistics"),
+        (_IgnoredManagedDomain, "managed domain"),
     ],
 )
 def test_core_probe_rejects_observable_semantic_faults(

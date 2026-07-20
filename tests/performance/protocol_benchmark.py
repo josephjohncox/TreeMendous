@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from tests.performance.harness import benchmark_backends
-from tests.performance.workload import fragmented_workload, scheduling_workload
+from tests.performance.workload import (
+    fragmented_workload,
+    observed_mutation_workload,
+    scheduling_workload,
+)
 from treemendous import BackendRegistry
 from treemendous.backends import Available
 
@@ -27,6 +31,11 @@ def _parser() -> argparse.ArgumentParser:
         "--quick",
         action="store_true",
         help="small correctness-checked CPU smoke run (still uses 20 samples)",
+    )
+    parser.add_argument(
+        "--observed-mutations",
+        action="store_true",
+        help="also run fragmented mutations followed by exact snapshots",
     )
     parser.add_argument(
         "--scheduling",
@@ -107,6 +116,13 @@ def main(argv: list[str] | None = None) -> int:
             operation_count=args.operations,
         )
     ]
+    if args.observed_mutations:
+        workloads.append(
+            observed_mutation_workload(
+                interval_count=args.intervals,
+                operation_count=args.operations,
+            )
+        )
     if args.scheduling:
         workloads.extend(
             scheduling_workload(

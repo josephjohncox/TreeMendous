@@ -12,6 +12,7 @@ from sortedcontainers import SortedDict
 from treemendous.domain import (
     IntervalResult,
     ManagedDomain,
+    MutationResult,
     Span,
     validate_coordinate,
     validate_length,
@@ -144,6 +145,8 @@ class BoundarySummary:
 
 class BoundarySummaryManager:
     """Boundary manager enhanced with comprehensive summary statistics"""
+
+    _treemendous_authoritative_geometry = True
 
     def __init__(
         self,
@@ -309,6 +312,117 @@ class BoundarySummaryManager:
         if keys_to_delete:
             self._summary_dirty = True
 
+    def release_with_delta(self, start: int, end: int) -> MutationResult:
+        span = Span(start, end)
+        if self._domain_explicit:
+            assert self._managed_domain is not None
+            if not self._managed_domain.contains(span):
+                raise ValueError("span must be contained in the managed domain")
+
+        requested_end = end
+        merged_start = start
+        merged_end = end
+        changed: list[Span] = []
+        keys_to_delete: list[int] = []
+        cursor = start
+        index = self.intervals.bisect_left(start)
+        if index > 0:
+            previous_start = self.intervals.keys()[index - 1]
+            previous_end, _ = self.intervals[previous_start]
+            if previous_end >= start:
+                if end <= previous_end:
+                    self._operation_count += 1
+                    return MutationResult((), 0, True)
+                cursor = min(previous_end, requested_end)
+                merged_start = previous_start
+                merged_end = max(merged_end, previous_end)
+                keys_to_delete.append(previous_start)
+        if index < len(self.intervals):
+            current_start = self.intervals.keys()[index]
+            current_end, _ = self.intervals[current_start]
+            if current_start == start and end <= current_end:
+                self._operation_count += 1
+                return MutationResult((), 0, True)
+
+        while index < len(self.intervals):
+            current_start = self.intervals.keys()[index]
+            current_end, _ = self.intervals[current_start]
+            if current_start > merged_end:
+                break
+            if current_end > cursor and current_start < requested_end:
+                if current_start > cursor:
+                    changed.append(Span(cursor, min(current_start, requested_end)))
+                cursor = max(cursor, min(current_end, requested_end))
+            merged_end = max(merged_end, current_end)
+            keys_to_delete.append(current_start)
+            index += 1
+        if cursor < requested_end:
+            changed.append(Span(cursor, requested_end))
+
+        changed_tuple = tuple(changed)
+        result = MutationResult(
+            changed_tuple,
+            sum(part.length for part in changed_tuple),
+            not changed_tuple,
+        )
+        self._operation_count += 1
+        for key in keys_to_delete:
+            del self.intervals[key]
+        self.intervals[merged_start] = (merged_end, None)
+        if not self._domain_explicit:
+            self._extend_inferred_domain(span)
+        self._summary_dirty = True
+        return result
+
+    def reserve_with_delta(
+        self, start: int, end: int, require_covered: bool
+    ) -> MutationResult:
+        target = Span(start, end)
+        if self._domain_explicit:
+            assert self._managed_domain is not None
+            if not self._managed_domain.contains(target):
+                raise ValueError("span must be contained in the managed domain")
+
+        index = self.intervals.bisect_left(start)
+        if index > 0:
+            previous_start = self.intervals.keys()[index - 1]
+            previous_end, _ = self.intervals[previous_start]
+            if previous_end > start:
+                index -= 1
+        changed: list[Span] = []
+        intervals_to_add: list[tuple[int, int]] = []
+        keys_to_delete: list[int] = []
+        while index < len(self.intervals):
+            current_start = self.intervals.keys()[index]
+            current_end, _ = self.intervals[current_start]
+            if current_start >= end:
+                break
+            overlap_start = max(start, current_start)
+            overlap_end = min(end, current_end)
+            if overlap_start < overlap_end:
+                changed.append(Span(overlap_start, overlap_end))
+                keys_to_delete.append(current_start)
+                if current_start < start:
+                    intervals_to_add.append((current_start, start))
+                if current_end > end:
+                    intervals_to_add.append((end, current_end))
+            index += 1
+
+        changed_tuple = tuple(changed)
+        changed_length = sum(part.length for part in changed_tuple)
+        covered = changed_length == target.length
+        if require_covered and not covered:
+            return MutationResult((), 0, False)
+        result = MutationResult(changed_tuple, changed_length, covered)
+        self._operation_count += 1
+        for key in keys_to_delete:
+            del self.intervals[key]
+        for remaining_start, remaining_end in intervals_to_add:
+            self.intervals[remaining_start] = (remaining_end, None)
+        if keys_to_delete:
+            self._summary_dirty = True
+        return result
+
     def find_interval(self, start: int, length: int) -> IntervalResult | None:
         """Return the earliest fit at or after *start*."""
         validate_coordinate(start, "start")
@@ -332,6 +446,29 @@ class BoundarySummaryManager:
             idx += 1
         return None
 
+    def allocate_interval(
+        self, start: int, length: int, not_after: int | None
+    ) -> IntervalResult | None:
+        result = self.find_interval(start, length)
+        if result is None or (not_after is not None and result.end > not_after):
+            return None
+        self.reserve_interval(result.start, result.end)
+        return result
+
+    def find_overlapping_intervals(self, start: int, end: int) -> list[IntervalResult]:
+        Span(start, end)
+        result: list[IntervalResult] = []
+        index = max(0, self.intervals.bisect_right(start) - 1)
+        while index < len(self.intervals):
+            interval_start = self.intervals.keys()[index]
+            interval_end, _ = self.intervals[interval_start]
+            if interval_start >= end:
+                break
+            if interval_end > start:
+                result.append(IntervalResult(interval_start, interval_end))
+            index += 1
+        return result
+
     def get_intervals(self) -> list[IntervalResult]:
         """Get all available intervals"""
         return [
@@ -340,9 +477,14 @@ class BoundarySummaryManager:
         ]
 
     def get_total_available_length(self) -> int:
-        """Get total available space (with caching)"""
-        summary = self.get_summary()
-        return summary.total_free_length
+        """Get total available space from the cached summary."""
+        return self.get_summary().total_free_length
+
+    def get_interval_count(self) -> int:
+        return len(self.intervals)
+
+    def get_largest_available_length(self) -> int:
+        return self.get_summary().largest_interval_length
 
     def get_summary(self) -> BoundarySummary:
         """Get comprehensive summary statistics (cached for performance)"""

@@ -44,7 +44,27 @@ def test_smoke_profile_covers_canonical_geometry_operations_and_real_use_cases()
         "snapshot",
         "stats",
     } <= operations
-    assert len(dimensions) == 4
+    assert dimensions == {
+        "allocator publishing state after each local mutation",
+        "bounded compute-lane scheduling",
+        "free-space allocator with release/reserve churn",
+        "high-rate local free-space mutation",
+        "read-mostly capacity and availability lookup",
+        "sharded port, ID, address, or seat leasing",
+    }
+
+
+@pytest.mark.parametrize("profile_name", ("smoke", "standard", "large"))
+def test_profiles_publish_mutation_fast_path_and_observation_costs(
+    profile_name: str,
+) -> None:
+    names = {
+        workload.name for workload in benchmark_profile(profile_name).sampled_workloads
+    }
+    assert {
+        "canonical-local-mutation-throughput",
+        "observed-fragmented-mutations",
+    } <= names
 
 
 def test_application_matrix_covers_fifty_distinct_interval_tasks():

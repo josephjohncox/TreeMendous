@@ -6,9 +6,11 @@ from dataclasses import dataclass
 
 from tests.performance.harness import BenchmarkWorkload
 from tests.performance.workload import (
+    canonical_mutation_workload,
     fragmented_workload,
     immutable_query_workload,
     lease_pool_workload,
+    observed_mutation_workload,
     scheduling_workload,
 )
 
@@ -44,7 +46,13 @@ def benchmark_profile(name: str) -> BenchmarkProfile:
             payload_scale=32,
             payload_operations=100,
             sampled_workloads=(
+                canonical_mutation_workload(
+                    interval_count=32, operation_count=200, seed=40
+                ),
                 fragmented_workload(interval_count=32, operation_count=200, seed=41),
+                observed_mutation_workload(
+                    interval_count=32, operation_count=200, seed=47
+                ),
                 immutable_query_workload(
                     interval_count=128, queries_per_snapshot=1_100, seed=42
                 ),
@@ -70,7 +78,13 @@ def benchmark_profile(name: str) -> BenchmarkProfile:
             payload_scale=64,
             payload_operations=200,
             sampled_workloads=(
+                canonical_mutation_workload(
+                    interval_count=64, operation_count=1_000, seed=50
+                ),
                 fragmented_workload(interval_count=64, operation_count=500, seed=51),
+                observed_mutation_workload(
+                    interval_count=64, operation_count=500, seed=58
+                ),
                 immutable_query_workload(
                     interval_count=128, queries_per_snapshot=1_100, seed=52
                 ),
@@ -97,7 +111,13 @@ def benchmark_profile(name: str) -> BenchmarkProfile:
             payload_scale=128,
             payload_operations=500,
             sampled_workloads=(
+                canonical_mutation_workload(
+                    interval_count=64, operation_count=1_000, seed=60
+                ),
                 fragmented_workload(interval_count=64, operation_count=500, seed=61),
+                observed_mutation_workload(
+                    interval_count=64, operation_count=500, seed=68
+                ),
                 immutable_query_workload(
                     interval_count=128, queries_per_snapshot=1_100, seed=62
                 ),

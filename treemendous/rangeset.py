@@ -152,6 +152,7 @@ class RangeSet:
         self._lock = RLock()
         self._payload_activity_lock = Lock()
         self._payload_activity = 0
+        self._authoritative_mutation_active = False
         self._payload_policy = payload_policy
         if not callable(payload_cloner):
             raise TypeError("payload_cloner must be callable")
@@ -163,6 +164,10 @@ class RangeSet:
         self._ordered_events: list[_OrderedEvent] | None = (
             [] if isinstance(self._payload_policy, OrderedPayloadPolicy) else None
         )
+        self._authoritative_geometry = (
+            payload_policy is None and adapter.supports_authoritative_geometry
+        )
+        self._backend_validates_domain = False
 
         staged_payloads = self._payload_segments
         staged_events = self._ordered_events
@@ -190,6 +195,13 @@ class RangeSet:
                             )
                             for span in self._domain.spans
                         ]
+        if (
+            self._authoritative_geometry
+            and self._domain is not None
+            and self._adapter.supports_managed_domain
+        ):
+            self._adapter.configure_domain(self._domain.spans)
+            self._backend_validates_domain = True
         if initially_available and self._domain is not None:
             for span in self._domain.spans:
                 self._adapter.release(span.start, span.end)
@@ -197,6 +209,8 @@ class RangeSet:
         self._total_free = sum(
             interval.end - interval.start for interval in self._geometry_cache
         )
+        self._geometry_cache_valid = True
+        self._pending_geometry_update: tuple[bool, Span] | None = None
         self._payload_segments = staged_payloads
         self._ordered_events = staged_events
 
@@ -279,18 +293,60 @@ class RangeSet:
     def _payload_identity(self) -> Any:
         return self._clone_payload(self._owned_payload_identity)
 
-    def _validate_domain(self, span: Span) -> None:
-        if self._domain is not None and not self._domain.contains(span):
+    def _validate_domain(self, span: Span, *, force: bool = False) -> None:
+        if (
+            self._domain is not None
+            and (force or not self._backend_validates_domain)
+            and not self._domain.contains(span)
+        ):
             raise ValueError("span must be contained in the managed domain")
+
+    @staticmethod
+    def _validate_fit_bounds(
+        length: int, not_before: int, not_after: int | None
+    ) -> None:
+        validate_coordinate(not_before, "not_before")
+        validate_length(length)
+        if not_after is not None:
+            validate_coordinate(not_after, "not_after")
+            if not_after <= not_before:
+                raise ValueError("not_after must be greater than not_before")
 
     def _geometry_intervals(self) -> tuple[IntervalResult, ...]:
         return self._geometry_cache
+
+    def _invalidate_authoritative_geometry_cache(
+        self, span: Span, *, adding: bool
+    ) -> None:
+        if self._geometry_cache_valid:
+            self._pending_geometry_update = (adding, span)
+        else:
+            self._pending_geometry_update = None
+        self._geometry_cache_valid = False
 
     def intervals(self) -> tuple[IntervalResult, ...]:
         with self._lock:
             if self._payload_segments is not None:
                 with self._payload_processing():
                     return tuple(self._clone_segments(self._payload_segments))
+            if self._authoritative_geometry:
+                if not self._geometry_cache_valid:
+                    pending = self._pending_geometry_update
+                    if pending is None:
+                        self._geometry_cache = _normalize_geometry(
+                            self._adapter.intervals()
+                        )
+                    elif pending[0]:
+                        self._geometry_cache = _geometry_after_add(
+                            self._geometry_cache, pending[1]
+                        )
+                    else:
+                        self._geometry_cache = _geometry_after_discard(
+                            self._geometry_cache, pending[1]
+                        )
+                    self._pending_geometry_update = None
+                    self._geometry_cache_valid = True
+                return self._geometry_cache
             return self._geometry_intervals()
 
     def _covered(
@@ -450,7 +506,24 @@ class RangeSet:
         return self._merge_payload_segments(result)
 
     def add(self, span: Span, payload: Any = _MISSING) -> MutationResult:
-        self._validate_domain(span)
+        self._validate_domain(span, force=payload is not _MISSING)
+        if self._authoritative_geometry:
+            if payload is not _MISSING:
+                raise ValueError("payload requires an explicit payload policy")
+            with self._lock:
+                if self._authoritative_mutation_active:
+                    raise RuntimeError(
+                        "reentrant mutation on the same RangeSet is not allowed"
+                    )
+                self._authoritative_mutation_active = True
+                try:
+                    result = self._adapter.release_with_delta(span.start, span.end)
+                    self._total_free += result.changed_length
+                    if result.changed:
+                        self._invalidate_authoritative_geometry_cache(span, adding=True)
+                    return result
+                finally:
+                    self._authoritative_mutation_active = False
         with self._mutation():
             if payload is not _MISSING and self._payload_policy is None:
                 raise ValueError("payload requires an explicit payload policy")
@@ -502,6 +575,25 @@ class RangeSet:
 
     def discard(self, span: Span, *, require_covered: bool = False) -> MutationResult:
         self._validate_domain(span)
+        if self._authoritative_geometry:
+            with self._lock:
+                if self._authoritative_mutation_active:
+                    raise RuntimeError(
+                        "reentrant mutation on the same RangeSet is not allowed"
+                    )
+                self._authoritative_mutation_active = True
+                try:
+                    result = self._adapter.reserve_with_delta(
+                        span.start, span.end, require_covered
+                    )
+                    self._total_free -= result.changed_length
+                    if result.changed:
+                        self._invalidate_authoritative_geometry_cache(
+                            span, adding=False
+                        )
+                    return result
+                finally:
+                    self._authoritative_mutation_active = False
         with self._mutation():
             before = self._geometry_intervals()
             changed = _intersect_geometry(before, span)
@@ -577,15 +669,17 @@ class RangeSet:
         coordinate-ordered tuple; a homogeneous fit returns the single value.
         The predicate, when supplied, must accept every crossed segment.
         """
-        validate_coordinate(not_before, "not_before")
-        validate_length(length)
-        if not_after is not None:
-            validate_coordinate(not_after, "not_after")
-            if not_after <= not_before:
-                raise ValueError("not_after must be greater than not_before")
+        self._validate_fit_bounds(length, not_before, not_after)
         if payload_predicate is not None and self._payload_policy is None:
             raise ValueError("payload predicate requires an explicit payload policy")
         with self._lock:
+            if self._authoritative_geometry:
+                result = self._adapter.first_fit(not_before, length)
+                if result is None:
+                    return None
+                if not_after is not None and result.end > not_after:
+                    return None
+                return result
             if self._payload_segments is None:
                 available = self._geometry_intervals()
                 first = bisect_right(available, not_before, key=lambda item: item.end)
@@ -652,6 +746,28 @@ class RangeSet:
         not_after: int | None = None,
         payload_predicate: Callable[[Any], bool] | None = None,
     ) -> IntervalResult | None:
+        if self._authoritative_geometry and self._adapter.supports_atomic_allocate:
+            self._validate_fit_bounds(length, not_before, not_after)
+            if payload_predicate is not None:
+                raise ValueError(
+                    "payload predicate requires an explicit payload policy"
+                )
+            with self._lock:
+                if self._authoritative_mutation_active:
+                    raise RuntimeError(
+                        "reentrant mutation on the same RangeSet is not allowed"
+                    )
+                self._authoritative_mutation_active = True
+                try:
+                    result = self._adapter.allocate(not_before, length, not_after)
+                    if result is not None:
+                        self._total_free -= result.end - result.start
+                        self._invalidate_authoritative_geometry_cache(
+                            result.span, adding=False
+                        )
+                    return result
+                finally:
+                    self._authoritative_mutation_active = False
         with self._mutation():
             result = self.first_fit(
                 length,
@@ -672,6 +788,8 @@ class RangeSet:
         self._validate_domain(span)
         if self._payload_segments is None:
             with self._lock:
+                if self._authoritative_geometry:
+                    return tuple(self._adapter.overlaps(span.start, span.end))
                 available = self._geometry_intervals()
                 first = bisect_right(available, span.start, key=lambda item: item.end)
                 last = bisect_left(available, span.end, key=lambda item: item.start)
@@ -696,14 +814,23 @@ class RangeSet:
                 raise ManagedDomainRequiredError(
                     "availability statistics require an explicit managed domain"
                 )
-            intervals = self._geometry_intervals()
+            if self._authoritative_geometry and self._adapter.supports_geometry_stats:
+                free_chunks, largest_chunk = self._adapter.geometry_stats()
+            else:
+                intervals = (
+                    self.intervals()
+                    if self._authoritative_geometry
+                    else self._geometry_intervals()
+                )
+                free_chunks = len(intervals)
+                largest_chunk = max(
+                    (item.end - item.start for item in intervals), default=0
+                )
             return AvailabilityStats(
                 total_free=self._total_free,
                 total_occupied=self._domain.measure - self._total_free,
                 total_space=self._domain.measure,
-                free_chunks=len(intervals),
-                largest_chunk=max(
-                    (item.end - item.start for item in intervals), default=0
-                ),
+                free_chunks=free_chunks,
+                largest_chunk=largest_chunk,
                 bounds=self._domain.bounds,
             )

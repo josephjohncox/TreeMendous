@@ -55,6 +55,91 @@ def fragmented_workload(
     )
 
 
+def canonical_mutation_workload(
+    *,
+    interval_count: int = 64,
+    operation_count: int = 1_000,
+    seed: int = 42,
+) -> BenchmarkWorkload:
+    """Measure exact local mutations without folding publication into timing."""
+    if interval_count <= 0 or operation_count <= 0:
+        raise ValueError("interval and operation counts must be positive")
+    extent = interval_count * 4
+    setup = tuple(
+        Operation("add", start=index * 4, end=index * 4 + 2)
+        for index in range(interval_count)
+    )
+    rng = random.Random(seed)
+    available = set(range(interval_count))
+    operations: list[Operation] = []
+    for _ in range(operation_count):
+        index = rng.randrange(interval_count)
+        start = index * 4
+        if index in available:
+            operations.append(Operation("discard", start=start, end=start + 2))
+            available.remove(index)
+        else:
+            operations.append(Operation("add", start=start, end=start + 2))
+            available.add(index)
+    return BenchmarkWorkload(
+        "canonical-local-mutation-throughput",
+        ((0, extent),),
+        setup,
+        tuple(operations),
+        extent,
+        (
+            ("plausible_use", "high-rate local free-space mutation"),
+            ("update_query_ratio", "100:0"),
+            ("mutation_evidence", "exact changed geometry and measure"),
+            ("fragmentation", "alternating equal free/reserved spans"),
+        ),
+    )
+
+
+def observed_mutation_workload(
+    *,
+    interval_count: int = 64,
+    operation_count: int = 500,
+    seed: int = 42,
+) -> BenchmarkWorkload:
+    """Alternate local mutations with exact snapshots over fragmented geometry."""
+    if interval_count <= 0 or operation_count <= 0:
+        raise ValueError("interval and operation counts must be positive")
+    extent = interval_count * 4
+    setup = tuple(
+        Operation("add", start=index * 4, end=index * 4 + 2)
+        for index in range(interval_count)
+    )
+    rng = random.Random(seed)
+    operations: list[Operation] = []
+    available = set(range(interval_count))
+    if operation_count % 2:
+        operations.append(Operation("snapshot"))
+    while len(operations) < operation_count:
+        index = rng.randrange(interval_count)
+        start = index * 4
+        if index in available:
+            operations.append(Operation("discard", start=start, end=start + 2))
+            available.remove(index)
+        else:
+            operations.append(Operation("add", start=start, end=start + 2))
+            available.add(index)
+        operations.append(Operation("snapshot"))
+    return BenchmarkWorkload(
+        "observed-fragmented-mutations",
+        ((0, extent),),
+        setup,
+        tuple(operations),
+        extent,
+        (
+            ("plausible_use", "allocator publishing state after each local mutation"),
+            ("update_query_ratio", "50:50"),
+            ("observation", "full canonical snapshot after every mutation"),
+            ("fragmentation", "alternating equal free/reserved spans"),
+        ),
+    )
+
+
 def immutable_query_workload(
     *,
     interval_count: int = 64,
