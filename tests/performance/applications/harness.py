@@ -11,6 +11,7 @@ from enum import Enum
 from pathlib import Path
 from time import perf_counter_ns
 from typing import Any, TypeVar
+from uuid import UUID
 
 RawResult = TypeVar("RawResult")
 CanonicalValue = (
@@ -72,6 +73,8 @@ def canonicalize(value: Any) -> CanonicalValue:
         return {"bytes_hex": value.hex()}
     if isinstance(value, Path):
         return {"path": value.as_posix()}
+    if isinstance(value, UUID):
+        return {"uuid": str(value)}
     if isinstance(value, Enum):
         return canonicalize(value.value)
     if is_dataclass(value) and not isinstance(value, type):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterator
+from uuid import UUID
 
 import pytest
 
@@ -73,6 +74,9 @@ def test_canonicalization_is_order_independent_and_rejects_unsafe_values() -> No
     right = {"mapping": {1: "a", 2: "b"}, "values": {2, 3, 1}}
     assert canonicalize(left) == canonicalize(right)
     assert evidence_checksum(left) == evidence_checksum(right)
+    assert canonicalize(UUID("12345678-1234-5678-1234-567812345678")) == {
+        "uuid": "12345678-1234-5678-1234-567812345678"
+    }
     with pytest.raises(ValueError, match="finite"):
         canonicalize(math.inf)
     with pytest.raises(TypeError, match="unsupported"):
