@@ -17,63 +17,63 @@ between unrelated processes is not a distributed protocol.
 <!-- BEGIN GENERATED SCENARIO STATUS -->
 ## Application implementation status
 
-Current completion: **0/50** real engines.
+Current completion: **50/50** real engines.
 A benchmark trace is not implementation evidence. An entry becomes
 `COMPLETE` only when its engine, example, independent oracle, benchmark,
 and scenario documentation are all registered.
 
 | Scenario | Family | Category | Status | Engine | Example | Oracle | Benchmark | Docs |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `distributed-document-search` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
-| `distributed-regex-scan` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
-| `distributed-genetic-search` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
-| `distributed-graph-search` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
-| `distributed-sat-search` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
-| `distributed-fuzzing` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
-| `distributed-hyperparameter-search` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
-| `distributed-log-replay` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
-| `distributed-build-sharding` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
-| `map-reduce-input-splits` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
-| `distributed-web-crawl` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
-| `distributed-index-merge` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
-| `distributed-cluster-scheduling` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
-| `gpu-stream-scheduling` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
-| `render-farm-frames` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
-| `ci-runner-reservations` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
-| `meeting-room-booking` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
-| `airline-gate-assignment` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
-| `operating-room-booking` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
-| `laboratory-equipment-booking` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
-| `fleet-charging-windows` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
-| `radio-spectrum-timeslots` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
-| `warehouse-dock-appointments` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
-| `maintenance-window-planning` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
-| `genomic-annotation-overlap` | `catalog` | `overlap_catalog` | `PLANNED` | missing | missing | missing | missing | missing |
-| `source-diagnostic-ranges` | `catalog` | `overlap_catalog` | `PLANNED` | missing | missing | missing | missing | missing |
-| `filesystem-byte-locks` | `catalog` | `overlap_catalog` | `PLANNED` | missing | missing | missing | missing | missing |
-| `database-key-range-locks` | `catalog` | `overlap_catalog` | `PLANNED` | missing | missing | missing | missing | missing |
-| `packet-sequence-reassembly` | `catalog` | `overlap_catalog` | `PLANNED` | missing | missing | missing | missing | missing |
-| `subtitle-cue-ranges` | `catalog` | `overlap_catalog` | `PLANNED` | missing | missing | missing | missing | missing |
-| `video-edit-regions` | `catalog` | `overlap_catalog` | `PLANNED` | missing | missing | missing | missing | missing |
-| `timeseries-alert-windows` | `catalog` | `overlap_catalog` | `PLANNED` | missing | missing | missing | missing | missing |
-| `distributed-trace-spans` | `catalog` | `overlap_catalog` | `PLANNED` | missing | missing | missing | missing | missing |
-| `morton-geospatial-ranges` | `catalog` | `overlap_catalog` | `PLANNED` | missing | missing | missing | missing | missing |
-| `heap-free-space` | `allocator` | `allocation_churn` | `PLANNED` | missing | missing | missing | missing | missing |
-| `disk-block-allocation` | `allocator` | `allocation_churn` | `PLANNED` | missing | missing | missing | missing | missing |
-| `virtual-address-space` | `allocator` | `allocation_churn` | `PLANNED` | missing | missing | missing | missing | missing |
-| `database-page-allocation` | `allocator` | `allocation_churn` | `PLANNED` | missing | missing | missing | missing | missing |
-| `object-store-multipart-ranges` | `allocator` | `allocation_churn` | `PLANNED` | missing | missing | missing | missing | missing |
-| `cdn-byte-range-cache` | `allocator` | `allocation_churn` | `PLANNED` | missing | missing | missing | missing | missing |
-| `gpu-memory-arena` | `allocator` | `allocation_churn` | `PLANNED` | missing | missing | missing | missing | missing |
-| `ring-buffer-sequences` | `allocator` | `allocation_churn` | `PLANNED` | missing | missing | missing | missing | missing |
-| `tcp-udp-port-leases` | `lease` | `resource_leasing` | `PLANNED` | missing | missing | missing | missing | missing |
-| `numeric-ip-address-pools` | `lease` | `resource_leasing` | `PLANNED` | missing | missing | missing | missing | missing |
-| `database-id-pools` | `lease` | `resource_leasing` | `PLANNED` | missing | missing | missing | missing | missing |
-| `software-license-seats` | `lease` | `resource_leasing` | `PLANNED` | missing | missing | missing | missing | missing |
-| `warehouse-bin-ranges` | `lease` | `resource_leasing` | `PLANNED` | missing | missing | missing | missing | missing |
-| `game-world-region-ids` | `lease` | `resource_leasing` | `PLANNED` | missing | missing | missing | missing | missing |
-| `vlan-tag-pools` | `lease` | `resource_leasing` | `PLANNED` | missing | missing | missing | missing | missing |
-| `phone-extension-pools` | `lease` | `resource_leasing` | `PLANNED` | missing | missing | missing | missing | missing |
+| `distributed-document-search` | `partition` | `distributed_partition` | `COMPLETE` | present | present | present | present | present |
+| `distributed-regex-scan` | `partition` | `distributed_partition` | `COMPLETE` | present | present | present | present | present |
+| `distributed-genetic-search` | `partition` | `distributed_partition` | `COMPLETE` | present | present | present | present | present |
+| `distributed-graph-search` | `partition` | `distributed_partition` | `COMPLETE` | present | present | present | present | present |
+| `distributed-sat-search` | `partition` | `distributed_partition` | `COMPLETE` | present | present | present | present | present |
+| `distributed-fuzzing` | `partition` | `distributed_partition` | `COMPLETE` | present | present | present | present | present |
+| `distributed-hyperparameter-search` | `partition` | `distributed_partition` | `COMPLETE` | present | present | present | present | present |
+| `distributed-log-replay` | `partition` | `distributed_partition` | `COMPLETE` | present | present | present | present | present |
+| `distributed-build-sharding` | `partition` | `distributed_partition` | `COMPLETE` | present | present | present | present | present |
+| `map-reduce-input-splits` | `partition` | `distributed_partition` | `COMPLETE` | present | present | present | present | present |
+| `distributed-web-crawl` | `partition` | `distributed_partition` | `COMPLETE` | present | present | present | present | present |
+| `distributed-index-merge` | `partition` | `distributed_partition` | `COMPLETE` | present | present | present | present | present |
+| `distributed-cluster-scheduling` | `scheduling` | `scheduling_reservation` | `COMPLETE` | present | present | present | present | present |
+| `gpu-stream-scheduling` | `scheduling` | `scheduling_reservation` | `COMPLETE` | present | present | present | present | present |
+| `render-farm-frames` | `scheduling` | `scheduling_reservation` | `COMPLETE` | present | present | present | present | present |
+| `ci-runner-reservations` | `scheduling` | `scheduling_reservation` | `COMPLETE` | present | present | present | present | present |
+| `meeting-room-booking` | `scheduling` | `scheduling_reservation` | `COMPLETE` | present | present | present | present | present |
+| `airline-gate-assignment` | `scheduling` | `scheduling_reservation` | `COMPLETE` | present | present | present | present | present |
+| `operating-room-booking` | `scheduling` | `scheduling_reservation` | `COMPLETE` | present | present | present | present | present |
+| `laboratory-equipment-booking` | `scheduling` | `scheduling_reservation` | `COMPLETE` | present | present | present | present | present |
+| `fleet-charging-windows` | `scheduling` | `scheduling_reservation` | `COMPLETE` | present | present | present | present | present |
+| `radio-spectrum-timeslots` | `scheduling` | `scheduling_reservation` | `COMPLETE` | present | present | present | present | present |
+| `warehouse-dock-appointments` | `scheduling` | `scheduling_reservation` | `COMPLETE` | present | present | present | present | present |
+| `maintenance-window-planning` | `scheduling` | `scheduling_reservation` | `COMPLETE` | present | present | present | present | present |
+| `genomic-annotation-overlap` | `catalog` | `overlap_catalog` | `COMPLETE` | present | present | present | present | present |
+| `source-diagnostic-ranges` | `catalog` | `overlap_catalog` | `COMPLETE` | present | present | present | present | present |
+| `filesystem-byte-locks` | `catalog` | `overlap_catalog` | `COMPLETE` | present | present | present | present | present |
+| `database-key-range-locks` | `catalog` | `overlap_catalog` | `COMPLETE` | present | present | present | present | present |
+| `packet-sequence-reassembly` | `catalog` | `overlap_catalog` | `COMPLETE` | present | present | present | present | present |
+| `subtitle-cue-ranges` | `catalog` | `overlap_catalog` | `COMPLETE` | present | present | present | present | present |
+| `video-edit-regions` | `catalog` | `overlap_catalog` | `COMPLETE` | present | present | present | present | present |
+| `timeseries-alert-windows` | `catalog` | `overlap_catalog` | `COMPLETE` | present | present | present | present | present |
+| `distributed-trace-spans` | `catalog` | `overlap_catalog` | `COMPLETE` | present | present | present | present | present |
+| `morton-geospatial-ranges` | `catalog` | `overlap_catalog` | `COMPLETE` | present | present | present | present | present |
+| `heap-free-space` | `allocator` | `allocation_churn` | `COMPLETE` | present | present | present | present | present |
+| `disk-block-allocation` | `allocator` | `allocation_churn` | `COMPLETE` | present | present | present | present | present |
+| `virtual-address-space` | `allocator` | `allocation_churn` | `COMPLETE` | present | present | present | present | present |
+| `database-page-allocation` | `allocator` | `allocation_churn` | `COMPLETE` | present | present | present | present | present |
+| `object-store-multipart-ranges` | `allocator` | `allocation_churn` | `COMPLETE` | present | present | present | present | present |
+| `cdn-byte-range-cache` | `allocator` | `allocation_churn` | `COMPLETE` | present | present | present | present | present |
+| `gpu-memory-arena` | `allocator` | `allocation_churn` | `COMPLETE` | present | present | present | present | present |
+| `ring-buffer-sequences` | `allocator` | `allocation_churn` | `COMPLETE` | present | present | present | present | present |
+| `tcp-udp-port-leases` | `lease` | `resource_leasing` | `COMPLETE` | present | present | present | present | present |
+| `numeric-ip-address-pools` | `lease` | `resource_leasing` | `COMPLETE` | present | present | present | present | present |
+| `database-id-pools` | `lease` | `resource_leasing` | `COMPLETE` | present | present | present | present | present |
+| `software-license-seats` | `lease` | `resource_leasing` | `COMPLETE` | present | present | present | present | present |
+| `warehouse-bin-ranges` | `lease` | `resource_leasing` | `COMPLETE` | present | present | present | present | present |
+| `game-world-region-ids` | `lease` | `resource_leasing` | `COMPLETE` | present | present | present | present | present |
+| `vlan-tag-pools` | `lease` | `resource_leasing` | `COMPLETE` | present | present | present | present | present |
+| `phone-extension-pools` | `lease` | `resource_leasing` | `COMPLETE` | present | present | present | present | present |
 <!-- END GENERATED SCENARIO STATUS -->
 
 The benchmark suite executes the following 50 application-shaped scenarios

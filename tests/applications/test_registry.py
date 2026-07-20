@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import FrozenInstanceError
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -16,7 +17,6 @@ from treemendous.applications import (
     SCENARIO_SPECS,
     SCENARIOS_BY_ID,
     ScenarioNotFoundError,
-    ScenarioNotImplementedError,
     ScenarioSpec,
     ScenarioStatus,
     create_application,
@@ -26,6 +26,8 @@ from treemendous.applications import (
     validate_catalog_evidence,
     validate_completion_evidence,
 )
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 EXPECTED_IDS = (
     "distributed-document-search",
@@ -114,23 +116,18 @@ def test_catalog_has_exact_ids_order_and_family_counts() -> None:
     assert tuple(SCENARIOS_BY_ID) == EXPECTED_IDS
 
 
-def test_all_scenarios_are_honestly_planned_without_artifacts() -> None:
-    assert not list_scenarios(status=ScenarioStatus.COMPLETE)
-    assert list_scenarios(status=ScenarioStatus.PLANNED) == SCENARIO_SPECS
+def test_all_scenarios_have_complete_validated_evidence() -> None:
+    assert list_scenarios(status=ScenarioStatus.COMPLETE) == SCENARIO_SPECS
+    assert not list_scenarios(status=ScenarioStatus.PLANNED)
     assert scenario_status_counts() == {
-        ScenarioStatus.PLANNED: 50,
-        ScenarioStatus.COMPLETE: 0,
+        ScenarioStatus.PLANNED: 0,
+        ScenarioStatus.COMPLETE: 50,
     }
+    validate_catalog_evidence(SCENARIO_SPECS, root=PROJECT_ROOT)
     for spec in SCENARIO_SPECS:
-        assert spec.status is ScenarioStatus.PLANNED
-        artifacts = [
-            spec.engine,
-            spec.example,
-            spec.oracle,
-            spec.benchmark,
-            spec.docs,
-        ]
-        assert artifacts == [None] * 5
+        assert spec.status is ScenarioStatus.COMPLETE
+        for field in ("engine", "example", "oracle", "benchmark", "docs"):
+            assert getattr(spec, field) is not None
 
 
 def test_specs_and_registry_mappings_are_immutable() -> None:
@@ -150,8 +147,10 @@ def test_lookup_filter_and_explicit_errors() -> None:
         list_scenarios(family="unknown")
     with pytest.raises(ScenarioNotFoundError):
         get_scenario("missing-scenario")
-    with pytest.raises(ScenarioNotImplementedError, match="no application engine"):
-        create_application(EXPECTED_IDS[0])
+    application = create_application(EXPECTED_IDS[0])
+    assert application.__class__.__module__.startswith(
+        "treemendous.applications.partitioning"
+    )
     with pytest.raises(ScenarioNotFoundError):
         create_application("missing-scenario")
 
@@ -208,20 +207,22 @@ def test_planned_entries_cannot_expose_a_factory_or_use_invalid_ids() -> None:
         _synthetic(status="complete")
 
 
-def test_benchmark_catalog_is_an_alias_not_a_completion_fallback() -> None:
+def test_benchmark_catalog_aliases_real_application_evidence() -> None:
     assert application_workloads.APPLICATION_SPECS is SCENARIO_SPECS
     assert application_workloads.ApplicationSpec is ScenarioSpec
     assert not hasattr(treemendous.applications, "_workload_for")
     for spec in application_workloads.APPLICATION_SPECS:
-        assert spec.engine is None
-        with pytest.raises(ScenarioNotImplementedError):
-            create_application(spec.id)
+        assert spec.engine is not None
+        module_name, separator, factory_name = spec.engine.partition(":")
+        assert module_name.startswith("treemendous.applications.")
+        assert separator == ":"
+        assert factory_name.startswith("create_")
 
 
 def test_generator_check_is_side_effect_free_on_drift(tmp_path, monkeypatch) -> None:
     document = tmp_path / "use-cases.md"
     stale = generate_scenario_catalog.render_status_block().replace(
-        "`PLANNED`", "`DRIFTED`", 1
+        "`COMPLETE`", "`DRIFTED`", 1
     )
     document.write_text(stale, encoding="utf-8")
     monkeypatch.setattr(generate_scenario_catalog, "DOCUMENT", document)
