@@ -117,3 +117,6 @@ then proceed normally.
 
 See the executable [fixed-dimensional example](../../examples/multidimensional/core/fixed_box_indexes.py)
 and [bounded example](../../examples/multidimensional/core/bounded_box_index.py).
+The separate [multidimensional acceleration design](multidimensional_acceleration.md)
+defines the workload, ordering, coordinate-width, batching, SIMD, Metal, CUDA,
+and evidence requirements for future native query snapshots.

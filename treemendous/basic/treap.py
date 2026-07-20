@@ -1,10 +1,8 @@
-"""
-Treap (Tree + Heap) Implementation for Interval Trees
+"""Randomized treap implementation for canonical free intervals.
 
-A treap combines the properties of a binary search tree and a heap,
-using random priorities to maintain probabilistic balance without
-complex rotation logic. This provides O(log n) expected performance
-for all operations with high probability.
+Independent priorities give expected logarithmic tree height. Range mutations
+also depend on the number of affected spans, and the current unaugmented
+first-fit search remains linear in the worst case.
 """
 
 import math

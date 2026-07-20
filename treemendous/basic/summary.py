@@ -1,9 +1,8 @@
-"""
-Enhanced AVL Interval Tree with Summary Statistics
+"""AVL interval tree with composable subtree summary statistics.
 
-This implementation extends the basic AVL tree with comprehensive aggregate statistics
-to enable efficient scheduling queries. Each node maintains summary information about
-the free space distribution in its subtree, allowing for fast "best fit" operations.
+The summaries make root analytics cheap and let fit queries prune impossible
+subtrees. Mutations pay to rebuild summaries along changed tree paths, and
+best-fit search can still inspect many qualifying nodes.
 """
 
 from dataclasses import dataclass

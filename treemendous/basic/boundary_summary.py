@@ -1,9 +1,7 @@
-"""
-Boundary-Based Summary Interval Tree
+"""Boundary-map interval manager with lazily cached summary statistics.
 
-Combines the simplicity and efficiency of boundary management (SortedDict)
-with comprehensive summary statistics for O(1) analytics. This hybrid approach
-provides the best of both worlds: simple implementation with advanced analytics.
+The first summary read after an effective mutation scans all free intervals;
+subsequent reads are constant-time cache hits until the next mutation.
 """
 
 from dataclasses import dataclass, replace
