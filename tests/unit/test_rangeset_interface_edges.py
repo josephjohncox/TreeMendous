@@ -54,6 +54,25 @@ def test_mutations_and_queries_do_not_reenumerate_unchanged_backend_state() -> N
     assert implementation.interval_reads == initial_reads
 
 
+def test_geometry_aggregates_track_equal_maxima_merges_and_splits() -> None:
+    ranges = _ranges(domain=(0, 20), initially_available=False)
+    for span in (Span(0, 4), Span(6, 10), Span(12, 16)):
+        ranges.add(span)
+
+    assert ranges.stats().total_free == 12
+    assert ranges.stats().largest_chunk == 4
+    ranges.discard(Span(1, 3), require_covered=True)
+    ranges.discard(Span(6, 10), require_covered=True)
+    assert ranges.stats().largest_chunk == 4
+    ranges.discard(Span(12, 16), require_covered=True)
+    assert ranges.stats().largest_chunk == 1
+
+    ranges.add(Span(1, 15))
+    assert ranges.snapshot().total_free == 15
+    assert ranges.stats().largest_chunk == 15
+    assert ranges.first_fit(16, not_before=0) is None
+
+
 def test_payload_operations_require_an_explicit_policy() -> None:
     ranges = _ranges(initially_available=False)
     before = ranges.snapshot()

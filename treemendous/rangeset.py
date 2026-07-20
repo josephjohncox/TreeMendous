@@ -194,6 +194,9 @@ class RangeSet:
             for span in self._domain.spans:
                 self._adapter.release(span.start, span.end)
         self._geometry_cache = _normalize_geometry(self._adapter.intervals())
+        self._total_free = sum(
+            interval.end - interval.start for interval in self._geometry_cache
+        )
         self._payload_segments = staged_payloads
         self._ordered_events = staged_events
 
@@ -456,9 +459,11 @@ class RangeSet:
                 (IntervalResult(span.start, span.end),), before
             )
             covered = not changed
+            changed_length = sum(part.length for part in changed)
             committed_geometry = (
                 before if not changed else _geometry_after_add(before, span)
             )
+            committed_total = self._total_free + changed_length
             committed_payloads = None
             committed_events = None
             if self._payload_segments is not None:
@@ -488,15 +493,12 @@ class RangeSet:
             # deliberately the final fallible external call before commit.
             self._adapter.release(span.start, span.end)
             self._geometry_cache = committed_geometry
+            self._total_free = committed_total
             if committed_payloads is not None:
                 self._payload_segments = committed_payloads
             if committed_events is not None:
                 self._ordered_events = committed_events
-            return MutationResult(
-                changed,
-                sum(part.length for part in changed),
-                covered,
-            )
+            return MutationResult(changed, changed_length, covered)
 
     def discard(self, span: Span, *, require_covered: bool = False) -> MutationResult:
         self._validate_domain(span)
@@ -510,6 +512,7 @@ class RangeSet:
             committed_geometry = (
                 before if not changed else _geometry_after_discard(before, span)
             )
+            committed_total = self._total_free - changed_length
             committed_events = None
             committed_payloads = None
             if self._payload_segments is not None:
@@ -553,6 +556,7 @@ class RangeSet:
             # See add(): adapter mutations must themselves be failure-atomic.
             self._adapter.reserve(span.start, span.end)
             self._geometry_cache = committed_geometry
+            self._total_free = committed_total
             if committed_payloads is not None:
                 self._payload_segments = committed_payloads
             if committed_events is not None:
@@ -679,12 +683,12 @@ class RangeSet:
         )
 
     def snapshot(self) -> RangeSnapshot:
-        intervals = self.intervals()
-        return RangeSnapshot(
-            intervals,
-            sum(item.end - item.start for item in intervals),
-            self._domain,
-        )
+        with self._lock:
+            return RangeSnapshot(
+                self.intervals(),
+                self._total_free,
+                self._domain,
+            )
 
     def stats(self) -> AvailabilityStats:
         with self._lock:
@@ -693,13 +697,13 @@ class RangeSet:
                     "availability statistics require an explicit managed domain"
                 )
             intervals = self._geometry_intervals()
-            total_free = sum(item.end - item.start for item in intervals)
-            largest = max((item.end - item.start for item in intervals), default=0)
             return AvailabilityStats(
-                total_free=total_free,
-                total_occupied=self._domain.measure - total_free,
+                total_free=self._total_free,
+                total_occupied=self._domain.measure - self._total_free,
                 total_space=self._domain.measure,
                 free_chunks=len(intervals),
-                largest_chunk=largest,
+                largest_chunk=max(
+                    (item.end - item.start for item in intervals), default=0
+                ),
                 bounds=self._domain.bounds,
             )
