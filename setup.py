@@ -9,6 +9,7 @@ from typing import Any
 
 from pybind11.setup_helpers import Pybind11Extension, build_ext
 from setuptools import setup  # type: ignore[import-untyped]
+from setuptools.command.build_py import build_py  # type: ignore[import-untyped]
 
 
 def _boost_paths() -> tuple[list[str], list[str]]:
@@ -26,6 +27,25 @@ def _boost_paths() -> tuple[list[str], list[str]]:
             )
             return [str(Path(candidate, "include"))], library_dirs
     return [], []
+
+
+class PortableBuildPy(build_py):
+    """Remove native rebuild sources from wheels on every host platform."""
+
+    _source_suffixes = frozenset({".cpp", ".h", ".cu", ".mm", ".metal"})
+
+    @classmethod
+    def remove_native_sources(cls, package_root: Path) -> None:
+        """Delete source-only native files copied into a wheel build tree."""
+        if not package_root.is_dir():
+            return
+        for path in package_root.rglob("*"):
+            if path.is_file() and path.suffix.lower() in cls._source_suffixes:
+                path.unlink()
+
+    def run(self) -> None:
+        super().run()
+        self.remove_native_sources(Path(self.build_lib) / "treemendous")
 
 
 class PortableBuildExt(build_ext):
@@ -112,7 +132,10 @@ def make_cpu_extensions() -> list[Pybind11Extension]:
 def run_setup() -> None:
     setup(
         ext_modules=make_cpu_extensions(),
-        cmdclass={"build_ext": PortableBuildExt},
+        cmdclass={
+            "build_ext": PortableBuildExt,
+            "build_py": PortableBuildPy,
+        },
         zip_safe=False,
     )
 
