@@ -84,14 +84,23 @@ class GPUStreamScheduler:
         self._devices = {device.name: device for device in devices}
         if len(self._devices) != len(devices):
             raise ValueError("GPU device names must be unique")
+        self._device_resources: dict[str, str] = {}
+        self._stream_resources: dict[tuple[str, str], str] = {}
         resources: dict[str, CapacityVector] = {}
-        for device in devices:
-            resources[f"device:{device.name}"] = device.capacity
-            for stream in device.streams:
-                resources[f"stream:{device.name}:{stream.name}"] = CapacityVector(
-                    units=1
-                )
+        for device_index, device in enumerate(
+            sorted(devices, key=lambda item: item.name)
+        ):
+            device_resource = f"device:{device_index}"
+            self._device_resources[device.name] = device_resource
+            resources[device_resource] = device.capacity
+            for stream_index, stream in enumerate(
+                sorted(device.streams, key=lambda item: item.name)
+            ):
+                stream_resource = f"stream:{device_index}:{stream_index}"
+                self._stream_resources[(device.name, stream.name)] = stream_resource
+                resources[stream_resource] = CapacityVector(units=1)
         self._ledger = ReservationLedger(resources)
+        self._placements: dict[str, GPUPlacement] = {}
         self._requests: dict[tuple[str, str], tuple[object, GPUPlacement]] = {}
         self._lock = RLock()
 
@@ -164,8 +173,10 @@ class GPUStreamScheduler:
             for start in range(ready_start, latest_end - duration + 1):
                 for device_name, stream_name in pairs:
                     requirements = {
-                        f"device:{device_name}": demand,
-                        f"stream:{device_name}:{stream_name}": CapacityVector(units=1),
+                        self._device_resources[device_name]: demand,
+                        self._stream_resources[(device_name, stream_name)]: (
+                            CapacityVector(units=1)
+                        ),
                     }
                     conflicts = self._ledger.conflicts_for(
                         start, start + duration, requirements
@@ -183,8 +194,10 @@ class GPUStreamScheduler:
                 )
             start, device_name, stream_name = selected
             requirements = {
-                f"device:{device_name}": demand,
-                f"stream:{device_name}:{stream_name}": CapacityVector(units=1),
+                self._device_resources[device_name]: demand,
+                self._stream_resources[(device_name, stream_name)]: (
+                    CapacityVector(units=1)
+                ),
             }
             reservation = self._ledger.reserve_exact(
                 kernel_id,
@@ -194,17 +207,24 @@ class GPUStreamScheduler:
                 request_id=request_id,
             )
             placement = GPUPlacement(device_name, stream_name, reservation)
+            self._placements[placement.id] = placement
             if request_id is not None:
                 self._requests[(kernel_id, request_id)] = fingerprint, placement
             return placement
 
     def cancel(self, kernel_id: str, reservation_id: str) -> GPUPlacement:
         with self._lock:
+            try:
+                prior_placement = self._placements[reservation_id]
+            except KeyError:
+                raise KeyError(reservation_id) from None
             reservation = self._ledger.cancel(kernel_id, reservation_id)
-            device = reservation.requirements[0].resource.removeprefix("device:")
-            stream_resource = reservation.requirements[1].resource
-            stream = stream_resource.split(":", maxsplit=2)[2]
-            placement = GPUPlacement(device, stream, reservation)
+            placement = GPUPlacement(
+                prior_placement.device,
+                prior_placement.stream,
+                reservation,
+            )
+            self._placements[reservation_id] = placement
             for key, (fingerprint, prior) in tuple(self._requests.items()):
                 if prior.id == reservation_id:
                     self._requests[key] = fingerprint, placement

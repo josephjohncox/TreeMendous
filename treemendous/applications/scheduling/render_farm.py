@@ -8,12 +8,17 @@ from threading import RLock
 
 from treemendous.applications._shared.capacity import CapacityVector
 from treemendous.applications._shared.reservations import ReservationSnapshot
-from treemendous.applications.scheduling._common import Placement, integer, text
+from treemendous.applications.scheduling._common import (
+    Placement,
+    integer,
+    positive,
+    text,
+)
 from treemendous.applications.scheduling._placement import (
     BoundedPlacementEngine,
     LabeledResource,
 )
-from treemendous.domain import Span
+from treemendous.domain import Span, validate_coordinate
 
 
 @dataclass(frozen=True)
@@ -71,6 +76,9 @@ class RenderFarmScheduler:
             )
         )
         self._assignments: dict[str, FrameChunkAssignment] = {}
+        self._retry_requests: dict[
+            tuple[str, str], tuple[object, FrameChunkAssignment]
+        ] = {}
         self._lock = RLock()
 
     def assign_chunk(
@@ -118,9 +126,7 @@ class RenderFarmScheduler:
             attempt = 1
             if _replacing is not None:
                 attempt = self._assignments[_replacing].attempt + 1
-            assignment = FrameChunkAssignment(
-                render_id, frames, attempt, placement
-            )
+            assignment = FrameChunkAssignment(render_id, frames, attempt, placement)
             self._assignments[placement.id] = assignment
             return assignment
 
@@ -135,7 +141,30 @@ class RenderFarmScheduler:
         request_id: str,
     ) -> FrameChunkAssignment:
         """Atomically schedule a replacement before retiring the failed attempt."""
+        text(render_id, "render_id")
+        text(assignment_id, "assignment_id")
+        positive(duration, "duration")
+        validate_coordinate(earliest_start, "earliest_start")
+        validate_coordinate(latest_end, "latest_end")
+        if earliest_start + duration > latest_end:
+            raise ValueError("duration does not fit within the bounded window")
+        text(request_id, "request_id")
+        fingerprint: object = (
+            assignment_id,
+            duration,
+            earliest_start,
+            latest_end,
+        )
         with self._lock:
+            request_key = (render_id, request_id)
+            prior_request = self._retry_requests.get(request_key)
+            if prior_request is not None:
+                if prior_request[0] != fingerprint:
+                    raise ValueError(
+                        "idempotency key was already used for a different retry"
+                    )
+                return prior_request[1]
+
             previous = self._owned_active(render_id, assignment_id)
             replacement = self.assign_chunk(
                 render_id,
@@ -147,10 +176,22 @@ class RenderFarmScheduler:
                 request_id=request_id,
                 _replacing=assignment_id,
             )
-            self._engine.cancel(render_id, assignment_id)
-            self._assignments[assignment_id] = replace(
-                previous, status=ChunkStatus.RETRIED
+            if (
+                replacement.id == assignment_id
+                or replacement.status is not ChunkStatus.ACTIVE
+                or not replacement.placement.reservation.active
+            ):
+                raise ValueError(
+                    "retry request must create a distinct active replacement assignment"
+                )
+            cancelled_placement = self._engine.cancel(render_id, assignment_id)
+            retired = replace(
+                previous,
+                placement=cancelled_placement,
+                status=ChunkStatus.RETRIED,
             )
+            self._record_assignment(retired)
+            self._retry_requests[request_key] = fingerprint, replacement
             return replacement
 
     def cancel(self, render_id: str, assignment_id: str) -> FrameChunkAssignment:
@@ -162,14 +203,22 @@ class RenderFarmScheduler:
                 raise PermissionError("assignment belongs to a different render")
             if assignment.status is not ChunkStatus.ACTIVE:
                 return assignment
-            self._engine.cancel(render_id, assignment_id)
-            cancelled = replace(assignment, status=ChunkStatus.CANCELLED)
-            self._assignments[assignment_id] = cancelled
+            cancelled_placement = self._engine.cancel(render_id, assignment_id)
+            cancelled = replace(
+                assignment,
+                placement=cancelled_placement,
+                status=ChunkStatus.CANCELLED,
+            )
+            self._record_assignment(cancelled)
             return cancelled
 
-    def _owned_active(
-        self, render_id: str, assignment_id: str
-    ) -> FrameChunkAssignment:
+    def _record_assignment(self, assignment: FrameChunkAssignment) -> None:
+        self._assignments[assignment.id] = assignment
+        for key, (fingerprint, prior) in tuple(self._retry_requests.items()):
+            if prior.id == assignment.id:
+                self._retry_requests[key] = fingerprint, assignment
+
+    def _owned_active(self, render_id: str, assignment_id: str) -> FrameChunkAssignment:
         assignment = self._assignments.get(assignment_id)
         if assignment is None:
             raise KeyError(assignment_id)

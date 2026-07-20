@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from threading import RLock
 
 from treemendous.applications._shared.capacity import CapacityVector
 from treemendous.applications._shared.reservations import ReservationSnapshot
@@ -54,6 +55,8 @@ class MeetingRoomScheduler:
                 for room in rooms
             )
         )
+        self._requests: dict[tuple[str, str], tuple[object, MeetingBooking]] = {}
+        self._lock = RLock()
 
     def book(
         self,
@@ -66,10 +69,20 @@ class MeetingRoomScheduler:
         features: frozenset[str] = frozenset(),
         request_id: str | None = None,
     ) -> MeetingBooking:
+        text(meeting_id, "meeting_id")
         validate_coordinate(timezone_offset_slots, "timezone_offset_slots")
         local = Span(local_start, local_end)
         integer(attendees, "attendees", minimum=1)
         names(features, "features")
+        if request_id is not None:
+            text(request_id, "request_id")
+        fingerprint: object = (
+            local.start,
+            local.end,
+            timezone_offset_slots,
+            attendees,
+            features,
+        )
         utc = Span(
             local.start - timezone_offset_slots,
             local.end - timezone_offset_slots,
@@ -79,20 +92,45 @@ class MeetingRoomScheduler:
             for room in self._rooms.values()
             if attendees <= room.attendee_capacity
         )
-        placement = self._engine.place(
-            meeting_id,
-            utc.length,
-            CapacityVector(units=1),
-            required_labels=features,
-            earliest_start=utc.start,
-            latest_end=utc.end,
-            request_id=request_id,
-            eligible=eligible,
-        )
-        return MeetingBooking(placement, attendees, utc)
+        with self._lock:
+            if request_id is not None:
+                prior = self._requests.get((meeting_id, request_id))
+                if prior is not None:
+                    if prior[0] != fingerprint:
+                        raise ValueError(
+                            "idempotency key was already used for a different booking"
+                        )
+                    return prior[1]
+
+            placement = self._engine.place(
+                meeting_id,
+                utc.length,
+                CapacityVector(units=1),
+                required_labels=features,
+                earliest_start=utc.start,
+                latest_end=utc.end,
+                request_id=request_id,
+                eligible=eligible,
+            )
+            booking = MeetingBooking(placement, attendees, utc)
+            if request_id is not None:
+                self._requests[(meeting_id, request_id)] = fingerprint, booking
+            return booking
 
     def cancel(self, meeting_id: str, reservation_id: str) -> Placement:
-        return self._engine.cancel(meeting_id, reservation_id)
+        with self._lock:
+            placement = self._engine.cancel(meeting_id, reservation_id)
+            for key, (fingerprint, booking) in tuple(self._requests.items()):
+                if booking.placement.id == reservation_id:
+                    self._requests[key] = (
+                        fingerprint,
+                        MeetingBooking(
+                            placement,
+                            booking.attendees,
+                            booking.utc_span,
+                        ),
+                    )
+            return placement
 
     def snapshot(self) -> ReservationSnapshot:
         return self._engine.snapshot()
@@ -103,8 +141,5 @@ def create_meeting_room_scheduler(
 ) -> MeetingRoomScheduler:
     """Construct a meeting-room scheduler."""
     return MeetingRoomScheduler(
-        rooms
-        or (
-            MeetingRoom("room-a", 8, frozenset({"video"})),
-        )
+        rooms or (MeetingRoom("room-a", 8, frozenset({"video"})),)
     )
