@@ -20,6 +20,9 @@ from tests.performance.applications.catalogs import (
     video_edit_regions,
 )
 from tests.performance.applications.harness import ApplicationSample
+from treemendous.applications.catalogs.morton_geospatial_ranges import (
+    MortonGeospatialCatalog,
+)
 
 CATALOG_BENCHMARKS = (
     database_key_range_locks,
@@ -46,23 +49,27 @@ def test_catalog_benchmark_returns_repeatable_validated_evidence(
     assert first.validated
     assert first.operations == 7
     assert first.execution_ns >= 0
-    assert (
+    first_checksums = (
         first.result_checksum,
         first.state_checksum,
         first.counters_checksum,
         first.evidence_checksum,
-    ) == (
+    )
+    second_checksums = (
         second.result_checksum,
         second.state_checksum,
         second.counters_checksum,
         second.evidence_checksum,
     )
+    assert first_checksums == second_checksums
 
 
 @pytest.mark.parametrize("benchmark", CATALOG_BENCHMARKS)
 def test_catalog_benchmark_has_uniform_bounded_api(benchmark: ModuleType) -> None:
     parameters = inspect.signature(benchmark.run_benchmark).parameters
-    assert tuple(parameters) == ("operations", "seed")
+    parameter_names = tuple(parameters)
+    expected_names = ("operations", "seed")
+    assert parameter_names == expected_names
     assert parameters["seed"].default == 0
 
     with pytest.raises(ValueError, match="between"):
@@ -89,4 +96,78 @@ def test_legacy_smoke_entry_point_delegates_to_validated_benchmark(
     monkeypatch.setattr(benchmark, "run_benchmark", fake_run_benchmark)
 
     assert benchmark.run_smoke(iterations=3, seed=11) is expected
-    assert received == [(3, 11)]
+    expected_calls = [(3, 11)]
+    assert received == expected_calls
+
+
+def test_catalog_benchmark_rejects_corrupted_retained_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_add = MortonGeospatialCatalog.add
+
+    def corrupted_add(
+        self: MortonGeospatialCatalog,
+        item_id: str,
+        min_x: int,
+        min_y: int,
+        max_x: int,
+        max_y: int,
+        *,
+        label: str,
+    ) -> object:
+        return original_add(
+            self,
+            item_id,
+            min_x,
+            min_y,
+            max_x,
+            max_y,
+            label=f"CORRUPTED:{label}",
+        )
+
+    monkeypatch.setattr(MortonGeospatialCatalog, "add", corrupted_add)
+
+    with pytest.raises(AssertionError, match="evidence differs"):
+        morton_geospatial_ranges.run_benchmark(operations=3, seed=5)
+
+
+def test_catalog_benchmark_rejects_foreign_instance_query_records(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    foreign = MortonGeospatialCatalog(bits=10)
+    for index in range(200):
+        x = index % 50 * 10
+        y = index // 50 * 20
+        foreign.add(f"g{index}", x, y, x + 8, y + 8, label="region")
+    foreign_search = foreign.search
+
+    def search_foreign(
+        _self: MortonGeospatialCatalog,
+        min_x: int,
+        min_y: int,
+        max_x: int,
+        max_y: int,
+    ) -> object:
+        return foreign_search(min_x, min_y, max_x, max_y)
+
+    monkeypatch.setattr(MortonGeospatialCatalog, "search", search_foreign)
+
+    with pytest.raises(AssertionError, match="evidence differs"):
+        morton_geospatial_ranges.run_benchmark(operations=3, seed=5)
+
+
+def test_catalog_record_serialization_distinguishes_two_lineages() -> None:
+    left_catalog = MortonGeospatialCatalog(bits=10)
+    right_catalog = MortonGeospatialCatalog(bits=10)
+    left_catalog.add("region", 1, 2, 3, 4, label="same")
+    right_catalog.add("region", 1, 2, 3, 4, label="same")
+    left = left_catalog.snapshot().records[0]
+    right = right_catalog.snapshot().records[0]
+
+    left_evidence = morton_geospatial_ranges._record(left)
+    right_evidence = morton_geospatial_ranges._record(right)
+
+    assert left.handle.lineage != right.handle.lineage
+    assert left_evidence[2] == str(left.handle.lineage)
+    assert right_evidence[2] == str(right.handle.lineage)
+    assert left_evidence != right_evidence

@@ -34,7 +34,7 @@ def _record(record: AnnotationRecord) -> tuple[Any, ...]:
     return (
         record.handle.owner,
         record.handle.sequence,
-        "engine-lineage",
+        str(record.handle.lineage),
         record.start,
         record.end,
         record.insertion_order,
@@ -61,10 +61,11 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
     random = _parameters(operations, seed)
     catalog = GenomicAnnotationCatalog()
     rows: list[tuple[str, str, str, str, int, int]] = []
+    expected_records: list[tuple[Any, ...]] = []
     for index in range(200):
         feature_id = f"f{index}"
         start = index * 5
-        catalog.add(
+        handle = catalog.add(
             feature_id,
             start,
             start + 20,
@@ -73,10 +74,30 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
             feature_type="exon",
         )
         rows.append((feature_id, "GRCh38", "chr1", ".", start, start + 20))
+        expected_records.append(
+            (
+                feature_id,
+                1,
+                str(handle.lineage),
+                start,
+                start + 20,
+                index,
+                feature_id,
+                "GRCh38",
+                "chr1",
+                ".",
+                "exon",
+                None,
+            )
+        )
 
     commands = tuple(random.randrange(900) for _ in range(operations))
-    expected_state = _state(catalog)
-    by_id = {row[6]: row for row in expected_state["records"]}
+    expected_state = {
+        "records": tuple(expected_records),
+        "next_sequences": tuple((feature_id, 2) for feature_id, *_ in rows),
+        "next_insertion_order": len(rows),
+    }
+    by_id = {row[6]: row for row in expected_records}
 
     def execute() -> tuple[tuple[AnnotationRecord, ...], ...]:
         return tuple(

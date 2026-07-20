@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterator
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -65,6 +65,39 @@ def test_mismatch_rejects_timing_evidence() -> None:
             execute=lambda: 1,
             observe=lambda raw: ApplicationOutcome(raw, (), {"operations": 1}),
             oracle=lambda: ApplicationOutcome(2, (), {"operations": 1}),
+            timer=iter((1, 2)).__next__,
+        )
+
+
+def test_uuid_checksums_normalize_values_but_preserve_identity_relations() -> None:
+    first, second = uuid4(), uuid4()
+    replacement_first, replacement_second = uuid4(), uuid4()
+
+    original_pattern = evidence_checksum(
+        [str(first), str(first), str(second)]
+    )
+    matching_pattern = evidence_checksum(
+        [str(replacement_first), str(replacement_first), str(replacement_second)]
+    )
+    different_pattern = evidence_checksum(
+        [str(replacement_first), str(replacement_second), str(replacement_second)]
+    )
+
+    assert original_pattern == matching_pattern
+    assert original_pattern != different_pattern
+    assert canonicalize(str(first)) == str(first)
+
+
+def test_exact_uuid_mismatch_is_rejected_before_checksum_normalization() -> None:
+    actual_lineage, expected_lineage = uuid4(), uuid4()
+
+    with pytest.raises(AssertionError, match="evidence differs"):
+        run_application_case(
+            scenario_id="lineage-mismatch",
+            operations=1,
+            execute=lambda: str(actual_lineage),
+            observe=lambda raw: ApplicationOutcome(raw, (), {}),
+            oracle=lambda: ApplicationOutcome(str(expected_lineage), (), {}),
             timer=iter((1, 2)).__next__,
         )
 

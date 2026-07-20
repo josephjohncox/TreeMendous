@@ -35,7 +35,7 @@ def _record(record: AlertRecord) -> tuple[Any, ...]:
     return (
         record.handle.owner,
         record.handle.sequence,
-        "engine-lineage",
+        str(record.handle.lineage),
         record.start,
         record.end,
         record.insertion_order,
@@ -69,12 +69,13 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
     random = _parameters(operations, seed)
     catalog = AlertCatalog()
     rows: list[tuple[str, str, str, int, int, int]] = []
+    expected_records: list[tuple[Any, ...]] = []
     insertion_order: dict[str, int] = {}
     for index in range(200):
         window_id = f"a{index}"
         start = index * 10
         priority = index % 10
-        catalog.add(
+        handle = catalog.add(
             window_id,
             start,
             start + 100,
@@ -85,10 +86,25 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
         )
         insertion_order[window_id] = len(rows)
         rows.append((window_id, "cpu", "alert", priority, start, start + 100))
+        expected_records.append(
+            (
+                window_id,
+                1,
+                str(handle.lineage),
+                start,
+                start + 100,
+                insertion_order[window_id],
+                window_id,
+                "cpu",
+                "alert",
+                priority,
+                "cpu",
+            )
+        )
     for index in range(20):
         window_id = f"s{index}"
         start = index * 100
-        catalog.add(
+        handle = catalog.add(
             window_id,
             start,
             start + 20,
@@ -99,10 +115,29 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
         )
         insertion_order[window_id] = len(rows)
         rows.append((window_id, "cpu", "suppression", 5, start, start + 20))
+        expected_records.append(
+            (
+                window_id,
+                1,
+                str(handle.lineage),
+                start,
+                start + 20,
+                insertion_order[window_id],
+                window_id,
+                "cpu",
+                "suppression",
+                5,
+                "maintenance",
+            )
+        )
 
     commands = tuple(random.randrange(2_000) for _ in range(operations))
-    expected_state = _state(catalog)
-    by_id = {row[6]: row for row in expected_state["records"]}
+    expected_state = {
+        "records": tuple(expected_records),
+        "next_sequences": tuple((window_id, 2) for window_id, *_ in rows),
+        "next_insertion_order": len(rows),
+    }
+    by_id = {row[6]: row for row in expected_records}
     priority_by_id = {row[0]: row[3] for row in rows}
 
     def execute() -> tuple[AlertEvaluation, ...]:

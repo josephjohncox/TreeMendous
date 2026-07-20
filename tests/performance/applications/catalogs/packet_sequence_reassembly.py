@@ -34,7 +34,7 @@ def _identity(record: PacketRecord) -> tuple[Any, ...]:
     return (
         record.handle.owner,
         record.handle.sequence,
-        "engine-lineage",
+        str(record.handle.lineage),
     )
 
 
@@ -72,7 +72,7 @@ def _result(result: ReassemblyResult) -> dict[str, Any]:
                 segment.end,
                 tuple(
                     sorted(
-                        (handle.owner, handle.sequence, "engine-lineage")
+                        (handle.owner, handle.sequence, str(handle.lineage))
                         for handle in segment.record_ids
                     )
                 ),
@@ -113,15 +113,33 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
     random = _parameters(operations, seed)
     catalog = PacketReassemblyCatalog()
     fragments: list[tuple[int, bytes]] = []
+    lineages: list[str] = []
     for index in range(200):
         sequence = index * 8
         payload = b"abcdefgh"
-        catalog.add("flow", sequence, payload)
+        handle = catalog.add("flow", sequence, payload)
         fragments.append((sequence, payload))
+        lineages.append(str(handle.lineage))
 
     commands = tuple(random.randrange(191) * 8 for _ in range(operations))
-    expected_state = _state(catalog)
-    expected_records = expected_state["records"]
+    expected_records = tuple(
+        (
+            "flow",
+            index + 1,
+            lineages[index],
+            sequence,
+            sequence + len(payload),
+            index,
+            "flow",
+            payload,
+        )
+        for index, (sequence, payload) in enumerate(fragments)
+    )
+    expected_state = {
+        "records": expected_records,
+        "next_sequences": (("flow", len(fragments) + 1),),
+        "next_insertion_order": len(fragments),
+    }
 
     def execute() -> tuple[ReassemblyResult, ...]:
         return tuple(catalog.assemble("flow", start, start + 80) for start in commands)

@@ -98,9 +98,33 @@ def _encoded(value: CanonicalValue) -> str:
     return json.dumps(value, separators=(",", ":"), sort_keys=True)
 
 
+def _is_uuid_string(value: str) -> bool:
+    try:
+        return str(UUID(value)) == value
+    except ValueError:
+        return False
+
+
+def _normalize_uuid_relations(value: CanonicalValue) -> CanonicalValue:
+    """Replace UUID values by first-occurrence aliases for reproducible hashes."""
+    aliases: dict[str, str] = {}
+
+    def normalize(item: CanonicalValue) -> CanonicalValue:
+        if isinstance(item, str) and _is_uuid_string(item):
+            return aliases.setdefault(item, f"uuid-{len(aliases)}")
+        if isinstance(item, list):
+            return [normalize(child) for child in item]
+        if isinstance(item, dict):
+            return {key: normalize(child) for key, child in item.items()}
+        return item
+
+    return normalize(value)
+
+
 def evidence_checksum(value: Any) -> str:
-    """Hash canonical evidence without leaking normalization into timed work."""
-    encoded = (_encoded(canonicalize(value)) + "\n").encode()
+    """Hash evidence while retaining UUID equality and distinctness relations."""
+    canonical = canonicalize(value)
+    encoded = (_encoded(_normalize_uuid_relations(canonical)) + "\n").encode()
     return hashlib.sha256(encoded).hexdigest()
 
 

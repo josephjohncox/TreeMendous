@@ -34,7 +34,7 @@ def _identity(record: EditRecord) -> tuple[Any, ...]:
     return (
         record.handle.owner,
         record.handle.sequence,
-        "engine-lineage",
+        str(record.handle.lineage),
     )
 
 
@@ -70,7 +70,7 @@ def _actual_result(result: Invalidation) -> dict[str, Any]:
                 segment.end,
                 tuple(
                     sorted(
-                        (handle.owner, handle.sequence, "engine-lineage")
+                        (handle.owner, handle.sequence, str(handle.lineage))
                         for handle in segment.record_ids
                     )
                 ),
@@ -134,17 +134,38 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
     random = _parameters(operations, seed)
     catalog = VideoEditCatalog()
     rows: list[tuple[str, str, str, int, int]] = []
+    expected_records: list[tuple[Any, ...]] = []
     for index in range(200):
         region_id = f"r{index}"
         start = index * 5
         track = f"v{index % 4}"
-        catalog.add(region_id, start, start + 30, track=track, effect="grade")
+        handle = catalog.add(
+            region_id, start, start + 30, track=track, effect="grade"
+        )
         rows.append((region_id, track, "grade", start, start + 30))
+        expected_records.append(
+            (
+                region_id,
+                1,
+                str(handle.lineage),
+                start,
+                start + 30,
+                index,
+                region_id,
+                track,
+                "grade",
+                (),
+            )
+        )
 
     commands = tuple(random.randrange(900) for _ in range(operations))
     tracks = frozenset({"v1"})
-    expected_state = _state(catalog)
-    by_id = {row[6]: row for row in expected_state["records"]}
+    expected_state = {
+        "records": tuple(expected_records),
+        "next_sequences": tuple((region_id, 2) for region_id, *_ in rows),
+        "next_insertion_order": len(rows),
+    }
+    by_id = {row[6]: row for row in expected_records}
 
     def execute() -> tuple[Invalidation, ...]:
         return tuple(

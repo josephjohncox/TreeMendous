@@ -35,7 +35,7 @@ def _lock(lock: KeyRangeLock) -> tuple[Any, ...]:
         lock.handle.table,
         handle.owner,
         handle.sequence,
-        "engine-lineage",
+        str(handle.lineage),
         lock.start_key,
         lock.end_key,
         lock.encoded_start,
@@ -46,19 +46,46 @@ def _lock(lock: KeyRangeLock) -> tuple[Any, ...]:
     )
 
 
+def _encode_key(key: str) -> int:
+    raw = key.encode("utf-8")
+    result = 0
+    for index in range(32):
+        digit = raw[index] + 1 if index < len(raw) else 0
+        result = result * 257 + digit
+    return result
+
+
 def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
     """Run bounded conflict queries and attest results and unchanged lock state."""
     random = _parameters(operations, seed)
     locks = DatabaseKeyRangeLocks()
     rows: list[tuple[str, str, str, int, int, str]] = []
+    expected_state: list[tuple[Any, ...]] = []
     for index in range(100):
         owner = f"reader-{index}"
-        locks.acquire("table", owner, f"k{index:04d}", f"k{index + 1:04d}", "shared")
+        start_key = f"k{index:04d}"
+        end_key = f"k{index + 1:04d}"
+        handle = locks.acquire("table", owner, start_key, end_key, "shared")
         rows.append((owner, "table", owner, index, index + 1, "shared"))
+        expected_state.append(
+            (
+                "table",
+                owner,
+                1,
+                str(handle.lock.lineage),
+                start_key,
+                end_key,
+                _encode_key(start_key),
+                _encode_key(end_key),
+                "shared",
+                owner,
+                index,
+            )
+        )
 
     commands = tuple(random.randrange(99) for _ in range(operations))
-    expected_state = tuple(_lock(lock) for lock in locks.snapshot().locks)
-    by_owner = {row[9]: row for row in expected_state}
+    expected_locks = tuple(expected_state)
+    by_owner = {row[9]: row for row in expected_locks}
 
     def execute() -> tuple[tuple[KeyRangeLock, ...], ...]:
         return tuple(
@@ -93,7 +120,7 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
         )
         return ApplicationOutcome(
             results,
-            expected_state,
+            expected_locks,
             {
                 "query_calls": operations,
                 "returned_locks": sum(len(result) for result in results),

@@ -35,7 +35,7 @@ def _record(record: TraceRecord) -> tuple[Any, ...]:
     return (
         record.handle.owner,
         record.handle.sequence,
-        "engine-lineage",
+        str(record.handle.lineage),
         record.start,
         record.end,
         record.insertion_order,
@@ -99,7 +99,8 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
     random = _parameters(operations, seed)
     catalog = TraceCatalog()
     rows: list[TraceRow] = []
-    catalog.add(
+    lineages: dict[str, str] = {}
+    root_handle = catalog.add(
         "trace",
         "root",
         0,
@@ -108,11 +109,12 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
         service="api",
         operation="request",
     )
+    lineages["root"] = str(root_handle.lineage)
     rows.append(("trace", "root", None, 0, 1_000))
     for index in range(100):
         span_id = f"s{index}"
         start = index * 8
-        catalog.add(
+        handle = catalog.add(
             "trace",
             span_id,
             start,
@@ -121,6 +123,7 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
             service="worker",
             operation="work",
         )
+        lineages[span_id] = str(handle.lineage)
         rows.append(("trace", span_id, "root", start, start + 20))
 
     commands = tuple(
@@ -128,8 +131,36 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
         for index in range(operations)
     )
     overlap_rows: list[TraceRow] = list(rows)
-    expected_state = _state(catalog)
-    by_id = {row[7]: row for row in expected_state["records"]}
+    expected_records = tuple(
+        (
+            (trace_id, span_id),
+            1,
+            lineages[span_id],
+            start,
+            end,
+            insertion_order,
+            trace_id,
+            span_id,
+            parent_span_id,
+            "api" if span_id == "root" else "worker",
+            "request" if span_id == "root" else "work",
+        )
+        for insertion_order, (
+            trace_id,
+            span_id,
+            parent_span_id,
+            start,
+            end,
+        ) in enumerate(rows)
+    )
+    expected_state = {
+        "records": expected_records,
+        "next_sequences": tuple(
+            ((trace_id, span_id), 2) for trace_id, span_id, *_ in rows
+        ),
+        "next_insertion_order": len(rows),
+    }
+    by_id = {row[7]: row for row in expected_records}
 
     def execute() -> tuple[tuple[str, tuple[TraceRecord, ...]], ...]:
         return tuple(

@@ -34,7 +34,7 @@ def _record(record: CueRecord) -> tuple[Any, ...]:
     return (
         record.handle.owner,
         record.handle.sequence,
-        "engine-lineage",
+        str(record.handle.lineage),
         record.start,
         record.end,
         record.insertion_order,
@@ -59,11 +59,12 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
     random = _parameters(operations, seed)
     catalog = SubtitleCatalog()
     rows: list[tuple[str, str, int, int, int]] = []
+    expected_records: list[tuple[Any, ...]] = []
     for index in range(200):
         cue_id = f"c{index}"
         start = index * 100
         layer = index % 3
-        catalog.add(
+        handle = catalog.add(
             cue_id,
             start,
             start + 500,
@@ -72,10 +73,28 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
             text="cue",
         )
         rows.append((cue_id, "en", layer, start, start + 500))
+        expected_records.append(
+            (
+                cue_id,
+                1,
+                str(handle.lineage),
+                start,
+                start + 500,
+                index,
+                cue_id,
+                "en",
+                layer,
+                "cue",
+            )
+        )
 
     commands = tuple(random.randrange(20_000) for _ in range(operations))
-    expected_state = _state(catalog)
-    by_id = {row[6]: row for row in expected_state["records"]}
+    expected_state = {
+        "records": tuple(expected_records),
+        "next_sequences": tuple((cue_id, 2) for cue_id, *_ in rows),
+        "next_insertion_order": len(rows),
+    }
+    by_id = {row[6]: row for row in expected_records}
 
     def execute() -> tuple[tuple[CueRecord, ...], ...]:
         return tuple(catalog.active_at(time, language="en") for time in commands)

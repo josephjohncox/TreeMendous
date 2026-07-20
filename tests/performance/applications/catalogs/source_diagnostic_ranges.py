@@ -35,7 +35,7 @@ def _record(record: DiagnosticRecord) -> tuple[Any, ...]:
     return (
         record.handle.owner,
         record.handle.sequence,
-        "engine-lineage",
+        str(record.handle.lineage),
         record.start,
         record.end,
         record.insertion_order,
@@ -61,10 +61,11 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
     random = _parameters(operations, seed)
     catalog = SourceDiagnosticCatalog()
     rows: list[tuple[str, str, int, int, int, int]] = []
+    expected_records: list[tuple[Any, ...]] = []
     for index in range(200):
         diagnostic_id = f"d{index}"
         start = index * 3
-        catalog.add(
+        handle = catalog.add(
             diagnostic_id,
             start,
             start + 8,
@@ -76,10 +77,29 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
         rows.append(
             (diagnostic_id, "main.py", 1, Severity.WARNING.value, start, start + 8)
         )
+        expected_records.append(
+            (
+                diagnostic_id,
+                1,
+                str(handle.lineage),
+                start,
+                start + 8,
+                index,
+                diagnostic_id,
+                "main.py",
+                1,
+                Severity.WARNING.value,
+                "warning",
+            )
+        )
 
     commands = tuple(random.randrange(500) for _ in range(operations))
-    expected_state = _state(catalog)
-    by_id = {row[6]: row for row in expected_state["records"]}
+    expected_state = {
+        "records": tuple(expected_records),
+        "next_sequences": tuple((diagnostic_id, 2) for diagnostic_id, *_ in rows),
+        "next_insertion_order": len(rows),
+    }
+    by_id = {row[6]: row for row in expected_records}
 
     def execute() -> tuple[tuple[DiagnosticRecord, ...], ...]:
         return tuple(

@@ -35,7 +35,7 @@ def _lock(lock: FileLock) -> tuple[Any, ...]:
         lock.handle.file,
         handle.owner,
         handle.sequence,
-        "engine-lineage",
+        str(handle.lineage),
         lock.start,
         lock.end,
         lock.mode.value,
@@ -49,15 +49,29 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
     random = _parameters(operations, seed)
     locks = FilesystemByteLocks()
     rows: list[tuple[str, str, str, int, int, str]] = []
+    expected_records: list[tuple[Any, ...]] = []
     for index in range(200):
         owner = f"reader-{index}"
         start = index * 8
-        locks.acquire("data", owner, start, start + 4, "shared")
+        handle = locks.acquire("data", owner, start, start + 4, "shared")
         rows.append((owner, "data", owner, start, start + 4, "shared"))
+        expected_records.append(
+            (
+                "data",
+                owner,
+                1,
+                str(handle.lock.lineage),
+                start,
+                start + 4,
+                "shared",
+                owner,
+                index,
+            )
+        )
 
     commands = tuple(random.randrange(1_500) for _ in range(operations))
-    expected_state = tuple(_lock(lock) for lock in locks.snapshot().locks)
-    by_owner = {row[7]: row for row in expected_state}
+    expected_state = tuple(expected_records)
+    by_owner = {row[7]: row for row in expected_records}
 
     def execute() -> tuple[tuple[FileLock, ...], ...]:
         return tuple(
