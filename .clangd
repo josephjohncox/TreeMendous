@@ -1,5 +1,10 @@
 CompileFlags:
-  Add: [-std=c++20]
+  Add:
+    - -std=c++20
+    - -I.venv/lib/python3.11/site-packages/pybind11/include
+    - -I.venv/lib/python3.12/site-packages/pybind11/include
+    - -I.venv/lib/python3.13/site-packages/pybind11/include
+    - -I.venv/lib/python3.14/site-packages/pybind11/include
 
 ---
 # CUDA requires toolkit-generated include paths and is compiled in its

@@ -42,11 +42,24 @@ PYBIND11_MODULE(boundary_summary_optimized, m) {
              py::arg("start"), py::arg("end"))
         .def("reserve_interval", &BoundarySummaryManagerOptimized::reserve_interval,
              py::arg("start"), py::arg("end"))
-        .def("find_interval", &BoundarySummaryManagerOptimized::find_interval,
-             py::arg("start"), py::arg("length"))
-        .def("find_best_fit", &BoundarySummaryManagerOptimized::find_best_fit,
-             py::arg("length"), py::arg("prefer_early") = true)
-        .def("find_largest_available", &BoundarySummaryManagerOptimized::find_largest_available)
+        .def("find_interval", [](BoundarySummaryManagerOptimized& self, int start, int length) -> py::object {
+            auto result = self.find_interval(start, length);
+            if (!result.has_value()) return py::none();
+            const auto& interval = result.value();
+            return py::make_tuple(interval.start, interval.end);
+        }, py::arg("start"), py::arg("length"))
+        .def("find_best_fit", [](BoundarySummaryManagerOptimized& self, int length, bool prefer_early) -> py::object {
+            auto result = self.find_best_fit(length, prefer_early);
+            if (!result.has_value()) return py::none();
+            const auto& interval = result.value();
+            return py::make_tuple(interval.start, interval.end);
+        }, py::arg("length"), py::arg("prefer_early") = true)
+        .def("find_largest_available", [](BoundarySummaryManagerOptimized& self) -> py::object {
+            auto result = self.find_largest_available();
+            if (!result.has_value()) return py::none();
+            const auto& interval = result.value();
+            return py::make_tuple(interval.start, interval.end);
+        })
         .def("get_summary", &BoundarySummaryManagerOptimized::get_summary)
         .def("get_availability_stats", &BoundarySummaryManagerOptimized::get_availability_stats)
         .def("get_total_available_length", &BoundarySummaryManagerOptimized::get_total_available_length)

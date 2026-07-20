@@ -1,14 +1,12 @@
-// High-Performance Treap Implementation for Interval Trees
-// Combines binary search tree with randomized heap priorities
-// Provides O(log n) expected performance with high probability
+// Experimental treap implementation for interval geometry.
+// Random priorities give expected logarithmic height; range and unaugmented
+// fit operations can still inspect multiple nodes.
 
 #include <random>
 #include <vector>
-#include <optional>
 #include <iostream>
 #include <algorithm>
 #include <cmath>
-#include <chrono>
 #include <iomanip>
 
 class TreapNode {
@@ -123,7 +121,7 @@ public:
         root = delete_range(root, start, end);
     }
     
-    std::optional<std::pair<int, int>> find_interval(int start, int length) {
+    std::pair<int, int> find_interval(int start, int length) {
         TreapNode* result = find_interval_node(root, start, length);
         if (result) {
             // Allocate at the requested start point if possible, otherwise at interval start
@@ -132,7 +130,7 @@ public:
                 return std::make_pair(alloc_start, alloc_start + length);
             }
         }
-        return std::nullopt;
+        return {0, 0};
     }
     
     std::vector<std::pair<int, int>> get_intervals() const {
@@ -159,8 +157,8 @@ public:
     }
     
     // Treap-specific operations
-    std::optional<std::pair<int, int>> sample_random_interval() {
-        if (!root) return std::nullopt;
+    std::pair<int, int> sample_random_interval() {
+        if (!root) return {0, 0};
         
         std::uniform_int_distribution<int> dis(0, root->subtree_size - 1);
         int target_index = dis(rng);
@@ -169,20 +167,20 @@ public:
         if (node) {
             return std::make_pair(node->start, node->end);
         }
-        return std::nullopt;
+        return {0, 0};
     }
     
     std::pair<IntervalTreap, IntervalTreap> split(int key) {
-        IntervalTreap left_treap, right_treap;
+        std::pair<IntervalTreap, IntervalTreap> result;
         auto [left_root, right_root] = split_at_key(root, key);
-        
-        left_treap.root = left_root;
-        right_treap.root = right_root;
-        
+
+        result.first.root = left_root;
+        result.second.root = right_root;
+
         // Prevent double deletion
         root = nullptr;
-        
-        return {std::move(left_treap), std::move(right_treap)};
+
+        return result;
     }
     
     std::vector<std::pair<int, int>> find_overlapping_intervals(int start, int end) const {
@@ -352,20 +350,15 @@ private:
     
     TreapNode* find_interval_node(TreapNode* node, int start, int length) {
         if (!node) return nullptr;
-        
-        // Simple implementation: find any interval that can accommodate the request
-        // Check if current node works
-        if (node->start <= start && start < node->end && (node->end - start) >= length) {
-            return node;  // Found suitable interval
-        }
-        
-        // If start is before this node, try left subtree first
+
         if (start < node->start) {
             TreapNode* left_result = find_interval_node(node->left, start, length);
             if (left_result) return left_result;
+            if (node->end - node->start >= length) return node;
+        } else if (start < node->end && node->end - start >= length) {
+            return node;
         }
-        
-        // Try right subtree
+
         return find_interval_node(node->right, start, length);
     }
     
