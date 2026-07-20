@@ -519,7 +519,68 @@ _SCENARIO_ROWS = (
     ),
 )
 
-SCENARIO_SPECS = tuple(ScenarioSpec(*row) for row in _SCENARIO_ROWS)
+_FAMILY_EVIDENCE_MODULES: Mapping[str, str] = MappingProxyType(
+    {
+        "partition": "treemendous.applications.partitioning.manifest",
+        "scheduling": "treemendous.applications.scheduling.manifest",
+        "catalog": "treemendous.applications.catalogs.manifest",
+        "allocator": "treemendous.applications.allocation.manifest",
+        "lease": "treemendous.applications.leasing.manifest",
+    }
+)
+_EVIDENCE_FIELDS = frozenset({"engine", "example", "oracle", "benchmark", "docs"})
+
+
+def _load_implementation_evidence() -> dict[str, dict[str, str]]:
+    """Load data-only family manifests without importing application engines."""
+    collected: dict[str, dict[str, str]] = {}
+    rows_by_id = {row[0]: row for row in _SCENARIO_ROWS}
+    for family, module_name in _FAMILY_EVIDENCE_MODULES.items():
+        try:
+            module = importlib.import_module(module_name)
+        except ModuleNotFoundError as exc:
+            missing = exc.name if exc.name is not None else ""
+            if missing == module_name:
+                continue
+            if missing and module_name.startswith(f"{missing}."):
+                continue
+            raise
+        raw = getattr(module, "EVIDENCE", None)
+        if not isinstance(raw, Mapping):
+            raise TypeError(f"{module_name}.EVIDENCE must be a mapping")
+        for scenario_id, references in raw.items():
+            if not isinstance(scenario_id, str) or scenario_id not in rows_by_id:
+                raise ValueError(f"unknown scenario evidence id: {scenario_id!r}")
+            if rows_by_id[scenario_id][3] != family:
+                raise ValueError(f"scenario evidence has wrong family: {scenario_id}")
+            if scenario_id in collected:
+                raise ValueError(f"duplicate scenario evidence: {scenario_id}")
+            if not isinstance(references, Mapping):
+                raise TypeError(f"scenario evidence must be a mapping: {scenario_id}")
+            if set(references) != _EVIDENCE_FIELDS:
+                raise ValueError(
+                    f"scenario evidence fields differ for {scenario_id}: "
+                    f"{set(references)!r}"
+                )
+            if not all(isinstance(value, str) and value for value in references.values()):
+                raise ValueError("scenario evidence references must be nonempty strings")
+            collected[scenario_id] = dict(references)
+    return collected
+
+
+_IMPLEMENTATION_EVIDENCE = _load_implementation_evidence()
+SCENARIO_SPECS = tuple(
+    ScenarioSpec(
+        *row,
+        status=(
+            ScenarioStatus.COMPLETE
+            if row[0] in _IMPLEMENTATION_EVIDENCE
+            else ScenarioStatus.PLANNED
+        ),
+        **_IMPLEMENTATION_EVIDENCE.get(row[0], {}),
+    )
+    for row in _SCENARIO_ROWS
+)
 
 
 def _validate_catalog(specs: tuple[ScenarioSpec, ...]) -> None:
