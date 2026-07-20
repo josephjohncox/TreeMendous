@@ -98,6 +98,13 @@ from treemendous.applications import (
     ScenarioStatus,
     create_application,
 )
+from treemendous.multidimensional import (
+    BoundedBoxIndex,
+    Box,
+    BoxIndex2D,
+    BoxIndex3D,
+    BoxIndex4D,
+)
 
 expected_root_all = [
     'AvailabilityStats',
@@ -153,9 +160,19 @@ expected_module_families = {
 for family, application in representatives.items():
     assert expected_module_families[family] in type(application).__module__
 
+multidimensional = [BoxIndex2D(), BoxIndex3D(), BoxIndex4D()]
+for index in multidimensional:
+    box = Box((0,) * index.dimensions, (2,) * index.dimensions)
+    index.insert(box, 'payload')
+    assert [entry.data for entry in index.overlaps(box)] == ['payload']
+bounded = BoundedBoxIndex(Box((0, 0), (8, 8)), (2, 2))
+bounded.insert(Box((1, 1), (3, 3)), 'bounded')
+assert [entry.data for entry in bounded.overlaps(Box((2, 2), (4, 4)))] == ['bounded']
+
 print(json.dumps({
     'complete': len(SCENARIO_SPECS),
     'families_constructed': sorted(representatives),
+    'multidimensional': [type(index).__name__ for index in multidimensional] + [type(bounded).__name__],
     'resolved': len(resolved),
     'root_all': treemendous.__all__,
 }))
@@ -183,6 +200,12 @@ print(json.dumps({
             "lease",
             "partition",
             "scheduling",
+        ],
+        "multidimensional": [
+            "BoxIndex2D",
+            "BoxIndex3D",
+            "BoxIndex4D",
+            "BoundedBoxIndex",
         ],
         "resolved": 50,
         "root_all": [
