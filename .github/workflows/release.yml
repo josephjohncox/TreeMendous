@@ -21,10 +21,12 @@ jobs:
       - name: Require v<project.version> release tag
         shell: bash
         run: |
-          version=$(python -c \
-            "import tomllib; "\
-            "project=tomllib.load(open('pyproject.toml', 'rb')); "\
-            "print(project['project']['version'])")
+          version=$(python -c '
+          import tomllib
+          with open("pyproject.toml", "rb") as stream:
+              project = tomllib.load(stream)
+          print(project["project"]["version"])
+          ')
           expected="v${version}"
           if [[ "$GITHUB_REF_NAME" != "$expected" ]]; then
             echo "Release tag mismatch: expected $expected;" \
