@@ -203,6 +203,6 @@ jobs:
           path: dist
       # pypa/gh-action-pypi-publish v1.13.0
       - uses: >-
-          pypa/gh-action-pypi-publish@106e0b0b7c337fa67ed433972f777c6357f78598
+          pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e
         with:
           packages-dir: dist
