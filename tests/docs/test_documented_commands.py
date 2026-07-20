@@ -76,6 +76,40 @@ def test_generated_scenario_status_is_current() -> None:
     assert completed.returncode == 0, completed.stderr
 
 
+def test_completed_catalog_has_no_stale_zero_of_fifty_claim() -> None:
+    assert len(SCENARIO_SPECS) == 50
+    assert all(spec.status.value == "complete" for spec in SCENARIO_SPECS)
+    text = (ROOT / "docs/use-cases.md").read_text(encoding="utf-8")
+    assert re.search(r"(?<!\d)0\s*/\s*50(?!\d)", text) is None
+
+
+def test_generated_status_links_every_registered_evidence_file() -> None:
+    document = ROOT / "docs/use-cases.md"
+    text = document.read_text(encoding="utf-8")
+    _, remainder = text.split("<!-- BEGIN GENERATED SCENARIO STATUS -->", 1)
+    block, _ = remainder.split("<!-- END GENERATED SCENARIO STATUS -->", 1)
+    actual_targets = re.findall(r"\[[^]]+\]\(([^)]+)\)", block)
+
+    expected_targets: list[str] = []
+    for spec in SCENARIO_SPECS:
+        assert spec.engine is not None
+        module_name, separator, _ = spec.engine.partition(":")
+        assert separator == ":"
+        expected_targets.append(f"../{module_name.replace('.', '/')}.py")
+        for field_name in ("example", "oracle", "benchmark", "docs"):
+            reference = getattr(spec, field_name)
+            assert reference is not None
+            expected_targets.append(
+                reference.removeprefix("docs/")
+                if reference.startswith("docs/")
+                else f"../{reference}"
+            )
+
+    assert sorted(actual_targets) == sorted(expected_targets)
+    for target in actual_targets:
+        assert (document.parent / target).resolve().is_file(), target
+
+
 def test_documented_backend_tables_match_catalog() -> None:
     expected = set(CATALOG_BY_ID)
     for document in (ROOT / "README.md", ROOT / "docs/backends.md"):
