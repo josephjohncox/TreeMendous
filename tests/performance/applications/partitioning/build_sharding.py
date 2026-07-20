@@ -82,7 +82,7 @@ def run_benchmark(
         )
 
     return run_application_case(
-        scenario_id="partitioning.build_sharding",
+        scenario_id="distributed-build-sharding",
         operations=operations,
         execute=execute,
         observe=observe,

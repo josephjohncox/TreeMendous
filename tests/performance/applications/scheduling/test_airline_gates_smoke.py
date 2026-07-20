@@ -103,7 +103,7 @@ def run_benchmark(
         )
 
     return run_reservation_case(
-        scenario_id="scheduling-airline-gates",
+        scenario_id="airline-gate-assignment",
         operations=operations,
         scheduler=scheduler,
         commands=prepared,

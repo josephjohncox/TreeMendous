@@ -10,20 +10,22 @@ import pytest
 
 from tests.performance.applications.harness import ApplicationSample
 
-_MODULE_NAMES = (
-    "build_sharding",
-    "document_search",
-    "fuzzing",
-    "genetic_search",
-    "graph_search",
-    "hyperparameter_search",
-    "index_merge",
-    "log_replay",
-    "map_reduce",
-    "regex_scan",
-    "sat_search",
-    "web_crawl",
-)
+_SCENARIO_IDS = {
+    "build_sharding": "distributed-build-sharding",
+    "document_search": "distributed-document-search",
+    "fuzzing": "distributed-fuzzing",
+    "genetic_search": "distributed-genetic-search",
+    "graph_search": "distributed-graph-search",
+    "hyperparameter_search": "distributed-hyperparameter-search",
+    "index_merge": "distributed-index-merge",
+    "log_replay": "distributed-log-replay",
+    "map_reduce": "map-reduce-input-splits",
+    "regex_scan": "distributed-regex-scan",
+    "sat_search": "distributed-sat-search",
+    "web_crawl": "distributed-web-crawl",
+}
+_MODULE_NAMES = tuple(_SCENARIO_IDS)
+_EXPECTED_PARAMETERS = ("operations", "seed")
 
 
 def _module(name: str) -> ModuleType:
@@ -37,16 +39,17 @@ def test_partitioning_run_benchmark_contract(name: str) -> None:
     """Every scenario accepts uniform keywords and returns validated evidence."""
     module = _module(name)
     signature = inspect.signature(module.run_benchmark)
-    assert tuple(signature.parameters) == ("operations", "seed")
+    parameter_names = tuple(signature.parameters)
+    assert parameter_names == _EXPECTED_PARAMETERS
 
     sample = module.run_benchmark(operations=8, seed=101)
     repeated = module.run_benchmark(operations=8, seed=101)
 
     assert isinstance(sample, ApplicationSample)
-    assert sample.scenario_id == f"partitioning.{name}"
+    assert sample.scenario_id == _SCENARIO_IDS[name]
     assert sample.operations == 8
     assert sample.execution_ns >= 0
-    assert sample.validated is True
+    assert sample.validated
     assert sample.result_checksum == repeated.result_checksum
     assert sample.state_checksum == repeated.state_checksum
     assert sample.counters_checksum == repeated.counters_checksum

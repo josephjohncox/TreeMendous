@@ -99,7 +99,7 @@ def run_benchmark(
         )
 
     return run_application_case(
-        scenario_id="partitioning.map_reduce",
+        scenario_id="map-reduce-input-splits",
         operations=operations,
         execute=execute,
         observe=observe,

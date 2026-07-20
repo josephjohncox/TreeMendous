@@ -78,7 +78,7 @@ def run_benchmark(
         )
 
     return run_reservation_case(
-        scenario_id="scheduling-ci-runners",
+        scenario_id="ci-runner-reservations",
         operations=operations,
         scheduler=scheduler,
         commands=prepared,

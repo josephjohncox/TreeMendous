@@ -107,7 +107,7 @@ def run_benchmark(
         )
 
     return run_reservation_case(
-        scenario_id="scheduling-fleet-charging",
+        scenario_id="fleet-charging-windows",
         operations=operations,
         scheduler=scheduler,
         commands=prepared,

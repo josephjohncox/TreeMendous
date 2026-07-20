@@ -84,7 +84,7 @@ def run_benchmark(
         )
 
     return run_application_case(
-        scenario_id="partitioning.log_replay",
+        scenario_id="distributed-log-replay",
         operations=operations,
         execute=execute,
         observe=observe,

@@ -70,7 +70,7 @@ def run_benchmark(
         )
 
     return run_application_case(
-        scenario_id="partitioning.graph_search",
+        scenario_id="distributed-graph-search",
         operations=operations,
         execute=execute,
         observe=observe,

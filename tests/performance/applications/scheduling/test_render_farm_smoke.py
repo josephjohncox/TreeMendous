@@ -168,7 +168,7 @@ def run_benchmark(
         )
 
     return run_application_case(
-        scenario_id="scheduling-render-farm",
+        scenario_id="render-farm-frames",
         operations=operations,
         execute=execute,
         observe=observe,

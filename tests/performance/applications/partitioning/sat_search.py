@@ -97,7 +97,7 @@ def run_benchmark(
         )
 
     return run_application_case(
-        scenario_id="partitioning.sat_search",
+        scenario_id="distributed-sat-search",
         operations=operations,
         execute=execute,
         observe=observe,

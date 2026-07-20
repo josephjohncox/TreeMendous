@@ -79,7 +79,7 @@ def run_benchmark(
         )
 
     return run_reservation_case(
-        scenario_id="scheduling-cluster",
+        scenario_id="distributed-cluster-scheduling",
         operations=operations,
         scheduler=scheduler,
         commands=prepared,

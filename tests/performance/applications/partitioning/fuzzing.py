@@ -89,7 +89,7 @@ def run_benchmark(
         )
 
     return run_application_case(
-        scenario_id="partitioning.fuzzing",
+        scenario_id="distributed-fuzzing",
         operations=operations,
         execute=execute,
         observe=observe,

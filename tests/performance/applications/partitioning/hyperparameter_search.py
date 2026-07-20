@@ -26,7 +26,13 @@ _SHARD_SIZE = 17
 
 
 def _objective(parameters: Mapping[str, Any]) -> float:
-    return float(parameters["candidate"] * 10 + parameters["offset"])
+    candidate = parameters["candidate"]
+    offset = parameters["offset"]
+    if isinstance(candidate, bool) or not isinstance(candidate, int):
+        raise TypeError("candidate must be an integer")
+    if isinstance(offset, bool) or not isinstance(offset, int):
+        raise TypeError("offset must be an integer")
+    return candidate * 10.0 + offset
 
 
 def _trial_tuple(
@@ -82,7 +88,7 @@ def run_benchmark(
         )
 
     return run_application_case(
-        scenario_id="partitioning.hyperparameter_search",
+        scenario_id="distributed-hyperparameter-search",
         operations=operations,
         execute=execute,
         observe=observe,

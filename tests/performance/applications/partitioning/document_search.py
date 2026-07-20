@@ -85,7 +85,7 @@ def run_benchmark(
         )
 
     return run_application_case(
-        scenario_id="partitioning.document_search",
+        scenario_id="distributed-document-search",
         operations=operations,
         execute=execute,
         observe=observe,

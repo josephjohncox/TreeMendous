@@ -188,7 +188,7 @@ def run_benchmark(
         )
 
     return run_application_case(
-        scenario_id="scheduling-radio-spectrum",
+        scenario_id="radio-spectrum-timeslots",
         operations=operations,
         execute=execute,
         observe=observe,

@@ -82,7 +82,7 @@ def run_benchmark(
         )
 
     return run_reservation_case(
-        scenario_id="scheduling-lab-instruments",
+        scenario_id="laboratory-equipment-booking",
         operations=operations,
         scheduler=scheduler,
         commands=prepared,

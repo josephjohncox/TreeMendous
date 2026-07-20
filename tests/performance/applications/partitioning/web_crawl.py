@@ -81,7 +81,7 @@ def run_benchmark(
         )
 
     return run_application_case(
-        scenario_id="partitioning.web_crawl",
+        scenario_id="distributed-web-crawl",
         operations=operations,
         execute=execute,
         observe=observe,

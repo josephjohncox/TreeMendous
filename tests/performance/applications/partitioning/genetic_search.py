@@ -96,7 +96,7 @@ def run_benchmark(
         )
 
     return run_application_case(
-        scenario_id="partitioning.genetic_search",
+        scenario_id="distributed-genetic-search",
         operations=operations,
         execute=execute,
         observe=observe,

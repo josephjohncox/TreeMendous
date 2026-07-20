@@ -125,7 +125,7 @@ def run_benchmark(
         )
 
     return run_reservation_case(
-        scenario_id="scheduling-operating-rooms",
+        scenario_id="operating-room-booking",
         operations=operations,
         scheduler=scheduler,
         commands=prepared,

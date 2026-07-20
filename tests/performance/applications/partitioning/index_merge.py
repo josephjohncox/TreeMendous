@@ -84,7 +84,7 @@ def run_benchmark(
         )
 
     return run_application_case(
-        scenario_id="partitioning.index_merge",
+        scenario_id="distributed-index-merge",
         operations=operations,
         execute=execute,
         observe=observe,

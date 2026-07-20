@@ -78,7 +78,7 @@ def run_benchmark(
         )
 
     return run_application_case(
-        scenario_id="partitioning.regex_scan",
+        scenario_id="distributed-regex-scan",
         operations=operations,
         execute=execute,
         observe=observe,
