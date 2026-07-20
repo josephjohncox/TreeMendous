@@ -7,21 +7,12 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from tests.docs.inventory import tracked_markdown
 from tests.performance.application_workloads import APPLICATION_SPECS
 from treemendous.backends import CATALOG_BY_ID
 
 ROOT = Path(__file__).resolve().parents[2]
-DOCUMENTS = (
-    ROOT / "README.md",
-    ROOT / "docs/getting-started.md",
-    ROOT / "docs/api.md",
-    ROOT / "docs/backends.md",
-    ROOT / "docs/building.md",
-    ROOT / "docs/benchmarking.md",
-    ROOT / "docs/use-cases.md",
-    ROOT / "docs/contributing.md",
-    ROOT / "docs/releasing.md",
-)
+DOCUMENTS = (ROOT / "README.md", *tracked_markdown(ROOT))
 
 
 def _just_recipes() -> set[str]:

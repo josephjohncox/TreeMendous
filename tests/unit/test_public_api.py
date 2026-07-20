@@ -54,6 +54,23 @@ def test_removed_modules_do_not_exist() -> None:
         assert find_spec(module_name) is None, module_name
 
 
+def test_multidimensional_exports_are_explicitly_experimental() -> None:
+    import treemendous.multidimensional as multidimensional
+
+    expected = {
+        "Box",
+        "BoxEntry",
+        "BoxHandle",
+        "BoxIndex",
+        "BoxIndexDiagnostics",
+        "BoxIndexProtocol",
+        "BoxIndexSnapshot",
+    }
+    assert set(multidimensional.__all__) == expected
+    assert expected.isdisjoint(treemendous.__all__)
+    assert all(not hasattr(treemendous, name) for name in expected)
+
+
 def test_internal_backend_packages_export_nothing() -> None:
     import treemendous.basic as basic
     import treemendous.cpp as cpp

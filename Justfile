@@ -91,7 +91,10 @@ benchmark-gpu-focused: install-dev
 benchmark-batch backend="metal_boundary_summary": install-dev
     uv run python tests/performance/batch_operations_benchmark.py --backend {{backend}}
 
-check: install-dev
+check-layout: install-dev
+    uv run pytest tests/packaging/test_repository_layout.py -q
+
+check: install-dev check-layout
     uv run ruff check .
     uv run ruff format --check .
     uv run mypy treemendous
@@ -104,6 +107,7 @@ validate: test check
 
 run-examples: install-dev
     uv run python examples/basic_rangeset.py
+    uv run python examples/multidimensional/core/linear_box_index.py
 
 version:
     @python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])"
