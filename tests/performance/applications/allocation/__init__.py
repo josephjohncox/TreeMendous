@@ -1,0 +1,1 @@
+"""Allocation application performance smokes."""
