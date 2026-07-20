@@ -1,129 +1,118 @@
-// IntervalManager class implementation
-#include <map>
-#include <vector>
-#include <optional>
+// Canonical portable CPU boundary interval manager.
+#include <algorithm>
 #include <iostream>
+#include <iterator>
+#include <map>
+#include <utility>
+#include <vector>
+
+#include "interval_types.h"
+
+using treemendous::Coordinate;
+using treemendous::Measure;
 
 class IntervalManager {
 public:
     IntervalManager() : total_available_length(0) {}
 
-    void release_interval(int start, int end) {
-        if (start >= end) return;
+    void release_interval(Coordinate start, Coordinate end) {
+        treemendous::validate_span(start, end);
 
-        auto it = intervals.lower_bound(start);
-
-        // Merge with previous interval if overlapping or adjacent
-        if (it != intervals.begin()) {
-            auto prev_it = std::prev(it);
-            if (prev_it->second >= start) {
-                start = prev_it->first;
-                end = std::max(end, prev_it->second);
-                total_available_length -= prev_it->second - prev_it->first;
-                intervals.erase(prev_it);
+        // Work against a complete prospective state. Any checked length or
+        // aggregate failure must leave both the map and cached total unchanged.
+        auto prospective = intervals;
+        auto it = prospective.lower_bound(start);
+        if (it != prospective.begin()) {
+            auto previous = std::prev(it);
+            if (previous->second >= start) {
+                start = previous->first;
+                end = std::max(end, previous->second);
+                prospective.erase(previous);
             }
         }
-
-        // Merge with overlapping intervals
-        while (it != intervals.end() && it->first <= end) {
+        it = prospective.lower_bound(start);
+        while (it != prospective.end() && it->first <= end) {
             end = std::max(end, it->second);
-            total_available_length -= it->second - it->first;
-            it = intervals.erase(it);
+            it = prospective.erase(it);
         }
+        prospective[start] = end;
 
-        intervals[start] = end;
-        total_available_length += end - start;
+        const Measure prospective_total = checked_total(prospective);
+        intervals.swap(prospective);
+        total_available_length = prospective_total;
     }
 
-    void reserve_interval(int start, int end) {
-        if (start >= end) return;
+    void reserve_interval(Coordinate start, Coordinate end) {
+        treemendous::validate_span(start, end);
 
-        auto it = intervals.lower_bound(start);
-
-        if (it != intervals.begin()) {
-            auto prev_it = std::prev(it);
-            if (prev_it->second > start) {
-                it = prev_it;
-            }
+        auto prospective = intervals;
+        auto it = prospective.lower_bound(start);
+        if (it != prospective.begin()) {
+            auto previous = std::prev(it);
+            if (previous->second > start) it = previous;
         }
-
-        std::vector<std::map<int, int>::iterator> to_erase;
-        std::vector<std::pair<int, int>> to_add;
-
-        while (it != intervals.end() && it->first < end) {
-            int curr_start = it->first;
-            int curr_end = it->second;
-
-            int overlap_start = std::max(start, curr_start);
-            int overlap_end = std::min(end, curr_end);
-
-            if (overlap_start < overlap_end) {
-                to_erase.push_back(it);
-                total_available_length -= curr_end - curr_start;
-
-                if (curr_start < start) {
-                    to_add.emplace_back(curr_start, start);
-                }
-                if (curr_end > end) {
-                    to_add.emplace_back(end, curr_end);
-                }
+        std::vector<Coordinate> erase;
+        std::vector<std::pair<Coordinate, Coordinate>> add;
+        while (it != prospective.end() && it->first < end) {
+            const Coordinate current_start = it->first;
+            const Coordinate current_end = it->second;
+            if (std::max(start, current_start) < std::min(end, current_end)) {
+                erase.push_back(current_start);
+                if (current_start < start) add.emplace_back(current_start, start);
+                if (current_end > end) add.emplace_back(end, current_end);
             }
             ++it;
         }
+        for (const Coordinate key : erase) prospective.erase(key);
+        for (const auto& [part_start, part_end] : add) {
+            prospective[part_start] = part_end;
+        }
 
-        for (auto& eit : to_erase) {
-            intervals.erase(eit);
-        }
-        for (const auto& interval : to_add) {
-            intervals[interval.first] = interval.second;
-            total_available_length += interval.second - interval.first;
-        }
+        const Measure prospective_total = checked_total(prospective);
+        intervals.swap(prospective);
+        total_available_length = prospective_total;
     }
 
-    std::optional<std::pair<int, int>> find_interval(int point, int length) {
-        auto it = intervals.lower_bound(point);
-
-        if (it != intervals.end()) {
-            int s = it->first;
-            int e = it->second;
-            if (s <= point && e - point >= length) {
-                return std::make_pair(point, point + length);
-            } else if (s > point && e - s >= length) {
-                return std::make_pair(s, s + length);
-            }
-        }
-
+    std::pair<Coordinate, Coordinate> find_interval(Coordinate point, Measure length) const {
+        treemendous::validate_length(length);
+        auto it = intervals.upper_bound(point);
         if (it != intervals.begin()) {
-            --it;
-            int s = it->first;
-            int e = it->second;
-            if (s <= point && e - point >= length) {
-                return std::make_pair(point, point + length);
-            } else if (point < s && e - s >= length) {
-                return std::make_pair(s, s + length);
+            auto previous = std::prev(it);
+            const Coordinate allocation_start = std::max(point, previous->first);
+            if (allocation_start < previous->second &&
+                treemendous::checked_length(allocation_start, previous->second) >= length) {
+                return {allocation_start, treemendous::checked_end(allocation_start, length)};
             }
         }
-
-        return std::nullopt;
-    }
-
-    int get_total_available_length() const {
-        return total_available_length;
-    }
-    void print_intervals() const {
-        std::ostream& out = std::cout;
-        out << "Available intervals:\n";
-        for (const auto& [s, e] : intervals) {
-            out << "[" << s << ", " << e << ")\n";
+        for (; it != intervals.end(); ++it) {
+            const Coordinate allocation_start = std::max(point, it->first);
+            if (allocation_start < it->second &&
+                treemendous::checked_length(allocation_start, it->second) >= length) {
+                return {allocation_start, treemendous::checked_end(allocation_start, length)};
+            }
         }
-        out << "Total available length: " << total_available_length << "\n";
+        return {0, 0};
     }
 
-    std::vector<std::pair<int, int>> get_intervals() const {
-        return std::vector<std::pair<int, int>>(intervals.begin(), intervals.end());
+    Measure get_total_available_length() const { return total_available_length; }
+
+    std::vector<std::pair<Coordinate, Coordinate>> get_intervals() const {
+        return {intervals.begin(), intervals.end()};
+    }
+
+    void print_intervals() const {
+        for (const auto& [start, end] : intervals) std::cout << "[" << start << ", " << end << ")\n";
     }
 
 private:
-    std::map<int, int> intervals;
-    int total_available_length;
+    static Measure checked_total(const std::map<Coordinate, Coordinate>& values) {
+        Measure total = 0;
+        for (const auto& [start, end] : values) {
+            total = treemendous::checked_add(total, treemendous::checked_length(start, end));
+        }
+        return total;
+    }
+
+    std::map<Coordinate, Coordinate> intervals;
+    Measure total_available_length;
 };

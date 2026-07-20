@@ -1,63 +1,59 @@
 [project]
 name = "treemendous"
-version = "0.2.5"
-description = "Exploring a diverse collection of interval tree implementations across multiple programming languages to identify the most efficient configurations for varied use cases, such as optimizing for query speed, memory usage, or dynamic updates."
-authors = [{name = "Joseph Cox", email = "joseph@codensity.io"}]
+version = "1.0.0"
+description = "Integer range sets with interchangeable Python and native CPU backends."
+authors = [{ name = "Joseph Cox", email = "joseph@codensity.io" }]
 license = "BSD-3-Clause"
 readme = "README.md"
 requires-python = ">=3.11"
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10", 
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Topic :: Scientific/Engineering",
-    "Topic :: Software Development :: Libraries :: Python Modules",
+  "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
-dependencies = [
-    "pybind11",
-    "setuptools",
-    "sortedcollections>=2.1.0",
-    "sortedcontainers>=2.4.0",
-]
+dependencies = ["sortedcontainers>=2.4.0"]
 
 [project.optional-dependencies]
-dev = [
-    "sortedcontainers-stubs>=2.4.2",
-    "flameprof>=0.4",
+build = ["build>=1.2.2", "pybind11>=2.13.6", "setuptools>=83.0.0"]
+quality = [
+  "mypy>=1.15.0",
+  "pip-audit>=2.8.0",
+  "ruff>=0.11.0",
+  "sortedcontainers-stubs>=2.4.2",
 ]
 test = [
-    "hypothesis>=6.119.4",
-    "pytest>=8.3.3",
+  "coverage[toml]>=7.6.9",
+  "hypothesis>=6.119.4",
+  "pytest>=8.3.3",
+  "pytest-cov>=6.0.0",
 ]
-profiling = [
-    "flameprof>=0.4",
-    "snakeviz>=2.2.0",
-    "py-spy>=0.3.14",
-    "memory-profiler>=0.61",
-]
-visualization = [
-    "matplotlib>=3.5.0",
-    "numpy>=1.21.0",
-    "jupyter>=1.0.0",
-    "networkx>=3.5.0",
-    "scipy>=1.16.0",
-    "seaborn>=0.13.2",
-]
-examples = [
-    "ortools>=9.14.6206",
-]
-
 [tool.pytest.ini_options]
-addopts = "--hypothesis-explain -vv"
+addopts = "--hypothesis-explain -vv --strict-markers --strict-config"
+# Keep repository-only test helpers importable consistently when pytest is
+# launched through an installed console script or coverage on CI.
+pythonpath = ["."]
+filterwarnings = ["error"]
+markers = [
+  "unit: fast implementation-independent tests",
+  "property: property-based semantic tests",
+  "native: stable native CPU extension tests",
+  "icl: Boost ICL tests",
+  "metal: Metal device and resource tests",
+  "cuda: CUDA device tests",
+  "slow: long-running correctness tests",
+  "benchmark: non-PR performance tests",
+  "packaging: built artifact and clean-install tests",
+]
 
 
 [build-system]
-requires = ["setuptools>=75.6.0", "pybind11>=2.13.6", "wheel"]
+requires = ["setuptools>=83.0.0", "pybind11>=2.13.6", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
@@ -65,8 +61,59 @@ where = ["."]
 include = ["treemendous*"]
 
 [tool.setuptools.package-data]
-"treemendous.cpp" = ["*.so", "*.pyd", "*.dll", "*.dylib"]
+"treemendous.cpp.metal" = ["resources/*.metallib"]
 
-# Ensure compiled extensions are included
+[tool.setuptools.exclude-package-data]
+"treemendous.cpp" = ["*.cpp", "*.h"]
+"treemendous.cpp.gpu" = ["*.cpp", "*.h", "*.cu"]
+"treemendous.cpp.metal" = ["*.cpp", "*.h", "*.mm", "*.metal"]
+
 [tool.setuptools]
 include-package-data = true
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+extend-exclude = ["dist", "performance_profiles"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# This executable native test imports the extension after making the in-place
+# build directory importable.
+"tests/unit/hypothesis/test_boundary_cpp_ic.py" = ["E402"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["treemendous"]
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unreachable = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = [
+  "treemendous.domain",
+  "treemendous.policies",
+  "treemendous.protocols",
+  "treemendous.rangeset",
+  "treemendous.backends.*",
+]
+disallow_untyped_defs = true
+disallow_any_generics = true
+disallow_incomplete_defs = true
+
+[tool.coverage.run]
+branch = true
+source = ["treemendous"]
+
+[tool.coverage.report]
+# Retain a platform margin while preventing regression below the measured
+# 90% branch-coverage floor.
+fail_under = 90
+show_missing = true
+skip_covered = true
+exclude_also = ["if TYPE_CHECKING:", "if __name__ == .__main__.:"]

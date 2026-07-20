@@ -1,0 +1,10 @@
+CompileFlags:
+  Add: [-std=c++20]
+
+---
+# CUDA requires toolkit-generated include paths and is compiled in its
+# dedicated hardware lane.
+If:
+  PathMatch: .*\.cu
+Diagnostics:
+  Suppress: '*'

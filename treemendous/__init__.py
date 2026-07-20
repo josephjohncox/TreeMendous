@@ -1,79 +1,71 @@
-"""
-Tree-Mendous: High-Performance Interval Tree Implementations
+"""Canonical Tree-Mendous range-set interface."""
 
-A comprehensive collection of interval tree implementations with unified backend management
-and consistent protocols across Python and C++ implementations.
-"""
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _metadata_version
 
-# Export unified backend system
-from treemendous.backend_manager import (
-    TreeMendousBackendManager,
-    UnifiedIntervalManager,
-    create_interval_tree,
-    list_available_backends,
-    print_backend_status,
-    get_backend_manager,
+from treemendous.backends.registry import BackendRegistry, create_range_set
+from treemendous.backends.types import (
+    BackendDecision,
+    BackendRequest,
+    BackendSpec,
+    Capability,
 )
-
-# Export protocol definitions
-from treemendous.basic.protocols import (
-    CoreIntervalManagerProtocol,
-    EnhancedIntervalManagerProtocol,
-    PerformanceTrackingProtocol,
-    RandomizedProtocol,
-    IntervalResult,
+from treemendous.domain import (
     AvailabilityStats,
-    PerformanceStats,
-    BackendConfiguration,
-    ImplementationType,
-    PerformanceTier,
+    BackendInvalidError,
+    BackendUnavailableError,
+    DomainInput,
+    IntervalResult,
+    ManagedDomain,
+    ManagedDomainRequiredError,
+    MutationResult,
+    RangeSnapshot,
+    Span,
 )
+from treemendous.policies import (
+    JoinPayloadPolicy,
+    OrderedPayloadPolicy,
+    PayloadPolicy,
+    UniformPayloadPolicy,
+)
+from treemendous.protocols import RangeSetProtocol
+from treemendous.rangeset import RangeSet
 
-# Export core implementations for direct use
-from treemendous.basic.summary import SummaryIntervalTree
-from treemendous.basic.treap import IntervalTreap
-from treemendous.basic.boundary_summary import BoundarySummaryManager
 
-__version__ = "0.2.5"
+def _resolve_version() -> str:
+    """Return installed metadata version or a clear source-checkout fallback."""
+    try:
+        return _metadata_version("treemendous")
+    except PackageNotFoundError:
+        return "0.0.0+dev"
+
+
+__version__ = _resolve_version()
 __author__ = "Joseph Cox"
-__description__ = "High-performance interval tree implementations with unified backend management"
+__description__ = "Canonical integer range sets with interchangeable backends"
 
-# Backwards compatibility
-def create_summary_tree():
-    """Create summary tree (backwards compatibility)"""
-    return create_interval_tree("py_summary")
-
-def create_treap(random_seed: int = 42):
-    """Create treap (backwards compatibility)"""  
-    return create_interval_tree("py_treap")
 
 __all__ = [
-    # Unified backend system (primary interface)
-    "create_interval_tree",
-    "TreeMendousBackendManager", 
-    "UnifiedIntervalManager",
-    "list_available_backends",
-    "print_backend_status",
-    "get_backend_manager",
-    
-    # Protocol definitions
-    "CoreIntervalManagerProtocol",
-    "EnhancedIntervalManagerProtocol", 
-    "PerformanceTrackingProtocol",
-    "RandomizedProtocol",
-    "IntervalResult",
     "AvailabilityStats",
-    "PerformanceStats",
-    "BackendConfiguration",
-    "ImplementationType",
-    "PerformanceTier",
-    
-    # Direct implementation access
-    "SummaryIntervalTree",
-    "IntervalTreap", 
-    "BoundarySummaryManager",
-    
-    # Backwards compatibility
-    "create_summary_tree",
-    "create_treap",
+    "BackendDecision",
+    "BackendInvalidError",
+    "BackendRegistry",
+    "BackendRequest",
+    "BackendSpec",
+    "BackendUnavailableError",
+    "Capability",
+    "DomainInput",
+    "IntervalResult",
+    "JoinPayloadPolicy",
+    "ManagedDomain",
+    "ManagedDomainRequiredError",
+    "MutationResult",
+    "OrderedPayloadPolicy",
+    "PayloadPolicy",
+    "RangeSet",
+    "RangeSetProtocol",
+    "RangeSnapshot",
+    "Span",
+    "UniformPayloadPolicy",
+    "create_range_set",
 ]

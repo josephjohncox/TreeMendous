@@ -1,283 +1,455 @@
 #!/usr/bin/env python3
-"""
-Batch Operations Benchmark - Realistic GPU Use Cases
+"""Semantics-preserving benchmark for experimental contiguous batch APIs."""
 
-Demonstrates when GPU/Metal truly excels: bulk operations that process
-many intervals in a single call, amortizing Python→C++ overhead.
+from __future__ import annotations
 
-Real-world scenarios:
-- Memory allocator: batch allocate/free for multiple processes
-- Job scheduler: process entire job queue at once
-- Network: reserve bandwidth for multiple flows simultaneously
-- Storage: allocate space for file chunks in bulk
-"""
-
-import sys
-import time
+import argparse
+import hashlib
+import json
 import random
-import statistics
-import platform
-from typing import List, Tuple
+import time
+from collections.abc import Callable
+from dataclasses import asdict
 from pathlib import Path
+from typing import Any, Protocol, cast
 
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
-
-# GPU implementations
-GPU_AVAILABLE = False
-GPU_TYPE = None
-GpuImpl = None
-
-if platform.system() == 'Darwin':
-    try:
-        from treemendous.cpp.metal.boundary_summary_metal import MetalBoundarySummaryManager as GpuImpl
-        GPU_AVAILABLE = True
-        GPU_TYPE = 'Metal'
-    except ImportError:
-        pass
-else:
-    try:
-        from treemendous.cpp.gpu.boundary_summary_gpu import GPUBoundarySummaryManager as GpuImpl
-        GPU_AVAILABLE = True
-        GPU_TYPE = 'CUDA'
-    except ImportError:
-        pass
-
-# C++ comparison
-from treemendous.cpp.boundary_optimized import IntervalManager as CppBoundary
-
-print(f"🚀 Batch Operations Benchmark - {GPU_TYPE if GPU_AVAILABLE else 'CPU Only'}")
-print("=" * 80)
+from tests.performance.accelerator_benchmark import (
+    HardwareUnavailableError,
+    _load_accelerator_class,
+)
+from tests.performance.harness import (
+    BenchmarkWorkload,
+    Operation,
+    ReplaySummary,
+    environment_metadata,
+    oracle_summary,
+    timing_statistics,
+)
+from treemendous.backends.normalize import normalize_intervals
 
 
-def benchmark_single_operations(impl, operations: List[Tuple[str, int, int]]) -> float:
-    """Benchmark traditional one-at-a-time operations"""
-    start = time.perf_counter()
-    
-    for op, s, e in operations:
-        if op == 'reserve':
-            impl.reserve_interval(s, e)
+class BatchImplementation(Protocol):
+    def release_interval(self, start: int, end: int) -> None: ...
+    def reserve_interval(self, start: int, end: int) -> None: ...
+    def batch_release(self, intervals: list[tuple[int, int]]) -> None: ...
+    def batch_reserve(self, intervals: list[tuple[int, int]]) -> None: ...
+    def get_intervals(self) -> Any: ...
+    def get_total_available_length(self) -> int: ...
+
+
+def contiguous_same_operation_runs(
+    operations: tuple[Operation, ...],
+) -> tuple[tuple[Operation, ...], ...]:
+    """Group only adjacent equal mutations; never move an operation."""
+    runs: list[list[Operation]] = []
+    for operation in operations:
+        if operation.kind not in {"add", "discard"}:
+            raise ValueError("batch traces may contain only add/discard mutations")
+        if not runs or runs[-1][0].kind != operation.kind:
+            runs.append([operation])
         else:
-            impl.release_interval(s, e)
-    
-    return time.perf_counter() - start
+            runs[-1].append(operation)
+    return tuple(tuple(run) for run in runs)
 
 
-def benchmark_batch_operations(impl, operations: List[Tuple[str, int, int]]) -> float:
-    """Benchmark batched operations (GPU-optimized)"""
-    # Separate into reserves and releases
-    reserves = [(s, e) for op, s, e in operations if op == 'reserve']
-    releases = [(s, e) for op, s, e in operations if op == 'release']
-    
-    start = time.perf_counter()
-    
-    if hasattr(impl, 'batch_reserve'):
-        # GPU implementation with batch support
-        impl.batch_reserve(reserves)
-        impl.batch_release(releases)
+def batch_workload(
+    *, interval_count: int = 64, operation_count: int = 500, seed: int = 42
+) -> BenchmarkWorkload:
+    """Build an interleaved trace with explicit contiguous batching boundaries."""
+    if interval_count <= 0 or operation_count <= 0:
+        raise ValueError("interval and operation counts must be positive")
+    extent = interval_count * 8
+    setup = tuple(
+        Operation("add", start=index * 8, end=index * 8 + 4)
+        for index in range(interval_count)
+    )
+    rng = random.Random(seed)
+    operations: list[Operation] = []
+    kind = "discard"
+    while len(operations) < operation_count - 1:
+        run_length = min(rng.randint(1, 8), operation_count - 1 - len(operations))
+        for _ in range(run_length):
+            length = rng.randint(1, 16)
+            start = rng.randint(0, extent - length)
+            operations.append(Operation(kind, start=start, end=start + length))
+        kind = "add" if kind == "discard" else "discard"
+    # A singleton invalid run proves that the implementation's error and atomic
+    # no-mutation behavior are observed rather than copied from the oracle.
+    error_kind = "add" if operations and operations[-1].kind == "discard" else "discard"
+    operations.append(
+        Operation(
+            error_kind, start=extent // 2, end=extent // 2, expected_error="ValueError"
+        )
+    )
+    return BenchmarkWorkload(
+        "contiguous-transactional-bulk-mutations",
+        ((0, extent),),
+        setup,
+        tuple(operations),
+        extent,
+        (("batching", "contiguous same-operation runs only"),),
+    )
+
+
+def _new_raw(backend_id: str) -> BatchImplementation:
+    implementation_class, _ = _load_accelerator_class(backend_id)
+    implementation = implementation_class()
+    if not all(
+        hasattr(implementation, method) for method in ("batch_release", "batch_reserve")
+    ):
+        raise HardwareUnavailableError(
+            f"{backend_id} does not expose both transactional batch methods"
+        )
+    return cast(BatchImplementation, implementation)
+
+
+def _setup(implementation: BatchImplementation, workload: BenchmarkWorkload) -> None:
+    for operation in workload.setup:
+        assert operation.start is not None and operation.end is not None
+        implementation.release_interval(operation.start, operation.end)
+
+
+def _state(implementation: BatchImplementation) -> tuple[tuple[int, int], ...]:
+    return tuple(
+        (interval.start, interval.end)
+        for interval in normalize_intervals(implementation.get_intervals())
+    )
+
+
+def _total(implementation: BatchImplementation) -> int:
+    try:
+        return int(implementation.get_total_available_length())
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise AssertionError("implementation returned an invalid total") from exc
+
+
+def _checksum(value: object) -> str:
+    encoded = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _changed_components(
+    before: tuple[tuple[int, int], ...], start: int, end: int
+) -> int:
+    cursor = start
+    components = 0
+    for interval_start, interval_end in before:
+        if interval_end <= cursor:
+            continue
+        if interval_start >= end:
+            break
+        if interval_start > cursor:
+            components += 1
+        cursor = max(cursor, interval_end)
+        if cursor >= end:
+            break
+    return components + (1 if cursor < end else 0)
+
+
+def _apply_scalar(implementation: BatchImplementation, operation: Operation) -> None:
+    assert operation.start is not None and operation.end is not None
+    if operation.kind == "add":
+        implementation.release_interval(operation.start, operation.end)
     else:
-        # Fallback for implementations without batch support
-        for s, e in reserves:
-            impl.reserve_interval(s, e)
-        for s, e in releases:
-            impl.release_interval(s, e)
-    
-    return time.perf_counter() - start
+        implementation.reserve_interval(operation.start, operation.end)
 
 
-def scenario_memory_allocator(batch_size: int = 1000):
-    """
-    Scenario: Memory allocator processing allocation requests
-    Realistic: OS kernel allocating memory for multiple processes
-    """
-    print(f"\n📦 SCENARIO 1: Memory Allocator ({batch_size:,} allocations)")
-    print("-" * 60)
-    
-    # Generate allocation requests (mix of sizes)
-    operations = []
-    for _ in range(batch_size):
-        op = random.choice(['reserve', 'release'])
-        size = random.choice([4096, 8192, 16384, 65536, 1048576])  # Common page sizes
-        start = random.randint(0, 100_000_000)
-        operations.append((op, start, start + size))
-    
-    # C++ Baseline
-    cpp = CppBoundary()
-    cpp.release_interval(0, 100_000_000)
-    cpp_time = benchmark_single_operations(cpp, operations)
-    
-    if GPU_AVAILABLE:
-        # GPU Single ops
-        gpu1 = GpuImpl()
-        gpu1.release_interval(0, 100_000_000)
-        gpu_single_time = benchmark_single_operations(gpu1, operations)
-        
-        # GPU Batch ops
-        gpu2 = GpuImpl()
-        gpu2.release_interval(0, 100_000_000)
-        gpu_batch_time = benchmark_batch_operations(gpu2, operations)
-        
-        print(f"   C++ (single ops):    {cpp_time*1000:>8.1f}ms  ({batch_size/cpp_time:>8,.0f} ops/sec)")
-        print(f"   GPU (single ops):    {gpu_single_time*1000:>8.1f}ms  ({batch_size/gpu_single_time:>8,.0f} ops/sec)")
-        print(f"   GPU (batch ops):     {gpu_batch_time*1000:>8.1f}ms  ({batch_size/gpu_batch_time:>8,.0f} ops/sec)")
-        print(f"\n   💡 Batch speedup: {gpu_single_time/gpu_batch_time:.1f}x faster")
-        print(f"   🏆 vs C++: {'FASTER' if gpu_batch_time < cpp_time else 'slower'} by {abs(cpp_time/gpu_batch_time - 1)*100:.0f}%")
+def _execute_scalar(
+    implementation: BatchImplementation, operations: tuple[Operation, ...]
+) -> None:
+    for operation in operations:
+        try:
+            _apply_scalar(implementation, operation)
+        except (ValueError, TypeError, OverflowError) as exc:
+            if operation.expected_error != type(exc).__name__:
+                raise
+        else:
+            if operation.expected_error is not None:
+                raise AssertionError(
+                    f"scalar {operation.kind} did not raise {operation.expected_error}"
+                )
+
+
+def _execute_batch_run(
+    implementation: BatchImplementation, run: tuple[Operation, ...]
+) -> None:
+    spans: list[tuple[int, int]] = []
+    for operation in run:
+        assert operation.start is not None and operation.end is not None
+        spans.append((operation.start, operation.end))
+    expected_errors = [
+        operation.expected_error for operation in run if operation.expected_error
+    ]
+    if expected_errors and len(run) != 1:
+        raise AssertionError("expected-error batch operations must be singleton runs")
+    try:
+        if run[0].kind == "add":
+            implementation.batch_release(spans)
+        else:
+            implementation.batch_reserve(spans)
+    except (ValueError, TypeError, OverflowError) as exc:
+        if expected_errors != [type(exc).__name__]:
+            raise
     else:
-        print(f"   C++ (single ops):    {cpp_time*1000:>8.1f}ms  ({batch_size/cpp_time:>8,.0f} ops/sec)")
+        if expected_errors:
+            raise AssertionError(
+                f"batch {run[0].kind} did not raise {expected_errors[0]}"
+            )
 
 
-def scenario_job_scheduler(num_jobs: int = 500):
-    """
-    Scenario: Job scheduler allocating time slots for batch jobs
-    Realistic: HPC cluster scheduling jobs across nodes
-    """
-    print(f"\n⏰ SCENARIO 2: Job Scheduler ({num_jobs:,} jobs)")
-    print("-" * 60)
-    
-    # Jobs with varying durations
-    operations = []
-    for _ in range(num_jobs):
-        start_time = random.randint(0, 86400)  # 24-hour window
-        duration = random.choice([60, 300, 900, 3600, 14400])  # 1min to 4hrs
-        operations.append(('reserve', start_time, start_time + duration))
-    
-    # C++ Baseline
-    cpp = CppBoundary()
-    cpp.release_interval(0, 86400)
-    cpp_time = benchmark_single_operations(cpp, operations)
-    
-    if GPU_AVAILABLE:
-        # GPU Single ops
-        gpu1 = GpuImpl()
-        gpu1.release_interval(0, 86400)
-        gpu_single_time = benchmark_single_operations(gpu1, operations)
-        
-        # GPU Batch ops
-        gpu2 = GpuImpl()
-        gpu2.release_interval(0, 86400)
-        gpu_batch_time = benchmark_batch_operations(gpu2, operations)
-        
-        print(f"   C++ (single ops):    {cpp_time*1000:>8.1f}ms")
-        print(f"   GPU (single ops):    {gpu_single_time*1000:>8.1f}ms")
-        print(f"   GPU (batch ops):     {gpu_batch_time*1000:>8.1f}ms")
-        print(f"\n   💡 Batch speedup: {gpu_single_time/gpu_batch_time:.1f}x faster")
-        print(f"   🏆 vs C++: {'FASTER' if gpu_batch_time < cpp_time else 'slower'} by {abs(cpp_time/gpu_batch_time - 1)*100:.0f}%")
+def _execute_batch(
+    implementation: BatchImplementation, operations: tuple[Operation, ...]
+) -> None:
+    for run in contiguous_same_operation_runs(operations):
+        _execute_batch_run(implementation, run)
+
+
+def _observe_scalar(
+    factory: Callable[[], BatchImplementation], workload: BenchmarkWorkload
+) -> ReplaySummary:
+    implementation = factory()
+    _setup(implementation, workload)
+    successes = no_ops = errors = touched_intervals = touched_length = 0
+    for operation in workload.operations:
+        assert operation.start is not None and operation.end is not None
+        before = _state(implementation)
+        before_total = _total(implementation)
+        try:
+            _apply_scalar(implementation, operation)
+        except (ValueError, TypeError, OverflowError) as exc:
+            if operation.expected_error != type(exc).__name__:
+                raise
+            errors += 1
+            if _state(implementation) != before:
+                raise AssertionError(
+                    "failed scalar mutation changed implementation state"
+                ) from exc
+            if _total(implementation) != before_total:
+                raise AssertionError(
+                    "failed scalar mutation changed implementation total"
+                ) from exc
+            continue
+        if operation.expected_error is not None:
+            raise AssertionError(
+                f"scalar {operation.kind} did not raise {operation.expected_error}"
+            )
+        after_total = _total(implementation)
+        changed = abs(after_total - before_total)
+        if operation.kind == "discard":
+            touched = sum(
+                interval_start < operation.end and interval_end > operation.start
+                for interval_start, interval_end in before
+            )
+        else:
+            touched = _changed_components(before, operation.start, operation.end)
+        touched_intervals += touched
+        touched_length += changed
+        if changed:
+            successes += 1
+        else:
+            no_ops += 1
+
+    state = _state(implementation)
+    query_results: tuple[tuple[str, int | str | None, int | str | None], ...] = ()
+    return ReplaySummary(
+        requested_operations=len(workload.operations),
+        successful_operations=successes,
+        no_op_operations=no_ops,
+        error_operations=errors,
+        actual_interval_count=len(state),
+        total_available=_total(implementation),
+        touched_intervals=touched_intervals,
+        touched_length=touched_length,
+        normalized_state=state,
+        query_results=query_results,
+        state_checksum=_checksum(state),
+        query_checksum=_checksum(query_results),
+        scheduling_success=(),
+        scheduling_fairness=None,
+    )
+
+
+def _validate_implementation(
+    factory: Callable[[], BatchImplementation],
+    workload: BenchmarkWorkload,
+    *,
+    name: str,
+) -> ReplaySummary:
+    initial_count, expected = oracle_summary(workload)
+    observed = _observe_scalar(factory, workload)
+    if observed != expected:
+        raise AssertionError(
+            f"{name} scalar accounting/intermediate semantics differ from oracle\n"
+            f"expected={expected!r}\nobserved={observed!r}"
+        )
+
+    batched = factory()
+    witness = factory()
+    _setup(batched, workload)
+    _setup(witness, workload)
+    if len(_state(batched)) != initial_count or _state(batched) != _state(witness):
+        raise AssertionError("batch setup differs from scalar implementation/oracle")
+    for index, run in enumerate(contiguous_same_operation_runs(workload.operations)):
+        _execute_scalar(witness, run)
+        _execute_batch_run(batched, run)
+        batch_observation = (_state(batched), _total(batched))
+        scalar_observation = (_state(witness), _total(witness))
+        if batch_observation != scalar_observation:
+            raise AssertionError(
+                f"{name} batch run {index} differs from ordered scalar intermediate "
+                f"semantics: batch={batch_observation!r}, scalar={scalar_observation!r}"
+            )
+    if (_state(batched), _total(batched)) != (
+        expected.normalized_state,
+        expected.total_available,
+    ):
+        raise AssertionError(f"{name} batch final semantics differ from oracle")
+    return observed
+
+
+def _validated_timing(
+    factory: Callable[[], BatchImplementation],
+    workload: BenchmarkWorkload,
+    *,
+    name: str,
+    batched: bool,
+) -> tuple[int, int, ReplaySummary]:
+    observed = _validate_implementation(factory, workload, name=name)
+    setup_started = time.perf_counter_ns()
+    implementation = factory()
+    _setup(implementation, workload)
+    setup_ns = time.perf_counter_ns() - setup_started
+    started = time.perf_counter_ns()
+    if batched:
+        _execute_batch(implementation, workload.operations)
     else:
-        print(f"   C++ (single ops):    {cpp_time*1000:>8.1f}ms")
+        _execute_scalar(implementation, workload.operations)
+    execution_ns = time.perf_counter_ns() - started
+    if (_state(implementation), _total(implementation)) != (
+        observed.normalized_state,
+        observed.total_available,
+    ):
+        raise AssertionError(
+            "timed batch/scalar execution differs from validated state"
+        )
+    return setup_ns, execution_ns, observed
 
 
-def scenario_network_bandwidth(num_flows: int = 10000):
-    """
-    Scenario: Network bandwidth allocation for multiple flows
-    Realistic: SDN controller allocating bandwidth across data center
-    """
-    print(f"\n🌐 SCENARIO 3: Network Bandwidth Manager ({num_flows:,} flows)")
-    print("-" * 60)
-    
-    # Network flows requesting bandwidth
-    operations = []
-    total_bandwidth = 100_000_000  # 100 Gbps in Mbps
-    for _ in range(num_flows):
-        op = random.choice(['reserve', 'release'])
-        bandwidth = random.choice([10, 100, 1000, 10000])  # 10Mbps to 10Gbps
-        start_time = random.randint(0, total_bandwidth - bandwidth)
-        operations.append((op, start_time, start_time + bandwidth))
-    
-    # C++ Baseline
-    cpp = CppBoundary()
-    cpp.release_interval(0, total_bandwidth)
-    cpp_time = benchmark_single_operations(cpp, operations)
-    
-    if GPU_AVAILABLE:
-        # GPU Single ops
-        gpu1 = GpuImpl()
-        gpu1.release_interval(0, total_bandwidth)
-        gpu_single_time = benchmark_single_operations(gpu1, operations)
-        
-        # GPU Batch ops
-        gpu2 = GpuImpl()
-        gpu2.release_interval(0, total_bandwidth)
-        gpu_batch_time = benchmark_batch_operations(gpu2, operations)
-        
-        print(f"   C++ (single ops):    {cpp_time*1000:>8.1f}ms")
-        print(f"   GPU (single ops):    {gpu_single_time*1000:>8.1f}ms")
-        print(f"   GPU (batch ops):     {gpu_batch_time*1000:>8.1f}ms")
-        print(f"\n   💡 Batch speedup: {gpu_single_time/gpu_batch_time:.1f}x faster")
-        print(f"   🏆 vs C++: {'FASTER' if gpu_batch_time < cpp_time else 'slower'} by {abs(cpp_time/gpu_batch_time - 1)*100:.0f}%")
-    else:
-        print(f"   C++ (single ops):    {cpp_time*1000:>8.1f}ms")
+def benchmark_batches(
+    backend_id: str,
+    *,
+    samples: int = 20,
+    warmups: int = 2,
+    interval_count: int = 64,
+    operation_count: int = 500,
+) -> dict[str, Any]:
+    """Measure raw contiguous-batch API calls after complete semantic checks."""
+    if samples < 20:
+        raise ValueError("batch benchmark runs require at least 20 samples")
+    if warmups < 1:
+        raise ValueError("at least one warmup is required")
+    workload = batch_workload(
+        interval_count=interval_count, operation_count=operation_count
+    )
+    implementation_class, device_info = _load_accelerator_class(backend_id)
+    factory = cast(Callable[[], BatchImplementation], implementation_class)
+    probe = factory()
+    if not all(hasattr(probe, method) for method in ("batch_release", "batch_reserve")):
+        raise HardwareUnavailableError(
+            f"{backend_id} does not expose both transactional batch methods"
+        )
+    observed = _validate_implementation(factory, workload, name=backend_id)
+    for batched in (False, True):
+        for _ in range(warmups):
+            _validated_timing(factory, workload, name=backend_id, batched=batched)
+    collected: dict[str, list[int]] = {"scalar": [], "contiguous_batch": []}
+    setup_times: dict[str, list[int]] = {"scalar": [], "contiguous_batch": []}
+    for index in range(samples):
+        modes = ["scalar", "contiguous_batch"]
+        random.Random(0xBA7C + index).shuffle(modes)
+        for mode in modes:
+            setup_ns, execution_ns, sample_observed = _validated_timing(
+                factory,
+                workload,
+                name=backend_id,
+                batched=mode == "contiguous_batch",
+            )
+            if sample_observed != observed:
+                raise AssertionError("implementation accounting changed between runs")
+            setup_times[mode].append(setup_ns)
+            collected[mode].append(execution_ns)
+    initial_count, _ = oracle_summary(workload)
+    return {
+        "schema": "treemendous-contiguous-batch-benchmark-v2",
+        "label": (
+            "local raw batch-API timings; host/device placement is not claimed; "
+            "experimental backend"
+        ),
+        "backend": backend_id,
+        "experimental": True,
+        "device": device_info,
+        "dataset": {
+            "actual_interval_count": initial_count,
+            "coordinate_extent": workload.coordinate_extent,
+            "timed_operations": len(workload.operations),
+            "contiguous_runs": len(contiguous_same_operation_runs(workload.operations)),
+        },
+        "validation": asdict(observed),
+        "methodology": {
+            "warmups": warmups,
+            "independent_runs": samples,
+            "order": "randomized scalar/batch order",
+            "batch_semantics": "only contiguous same-operation runs are grouped",
+            "accounting": (
+                "success/no-op/error/touched values observed from scalar backend calls; "
+                "batch state/total checked at every contiguous-run boundary"
+            ),
+            "confidence": "95% run-level percentile bootstrap interval for the median",
+        },
+        "environment": environment_metadata(),
+        "results": {
+            mode: {
+                "execution": asdict(timing_statistics(values)),
+                "setup": asdict(timing_statistics(setup_times[mode])),
+            }
+            for mode, values in collected.items()
+        },
+    }
 
 
-def scaling_analysis():
-    """Show how batch operations scale with batch size"""
-    print(f"\n📊 SCALING ANALYSIS: Batch Size Impact")
-    print("=" * 80)
-    
-    batch_sizes = [100, 500, 1000, 5000, 10000]
-    
-    print(f"\n{'Batch Size':<12} {'C++ (ms)':<12} {'GPU Single (ms)':<18} {'GPU Batch (ms)':<18} {'Speedup':<10}")
-    print("-" * 80)
-    
-    for size in batch_sizes:
-        operations = []
-        for _ in range(size):
-            op = random.choice(['reserve', 'release'])
-            start = random.randint(0, 10_000_000)
-            length = random.randint(1000, 50000)
-            operations.append((op, start, start + length))
-        
-        # C++
-        cpp = CppBoundary()
-        cpp.release_interval(0, 10_000_000)
-        cpp_time = benchmark_single_operations(cpp, operations)
-        
-        if GPU_AVAILABLE:
-            # GPU single
-            gpu1 = GpuImpl()
-            gpu1.release_interval(0, 10_000_000)
-            gpu_single = benchmark_single_operations(gpu1, operations)
-            
-            # GPU batch
-            gpu2 = GpuImpl()
-            gpu2.release_interval(0, 10_000_000)
-            gpu_batch = benchmark_batch_operations(gpu2, operations)
-            
-            speedup = gpu_single / gpu_batch
-            
-            print(f"{size:<12,} {cpp_time*1000:<11.1f} {gpu_single*1000:<17.1f} {gpu_batch*1000:<17.1f} {speedup:<9.1f}x")
-    
-    print("\n💡 Key Insight: Batch operations amortize Python→C++→Metal overhead")
-    print("   Single ops: ~30µs Python overhead PER operation")
-    print("   Batch ops:  ~30µs Python overhead for ENTIRE batch")
-
-
-def main():
-    if not GPU_AVAILABLE:
-        print("\n❌ GPU not available - showing C++ baseline only")
-        print("   Build with: just build-metal (macOS) or just build-gpu (Linux)")
-    
-    # Run scenarios
-    scenario_memory_allocator(batch_size=10_000_000)
-    scenario_job_scheduler(num_jobs=5_000_000)
-    scenario_network_bandwidth(num_flows=10_000_000)
-    
-    # Scaling analysis
-    if GPU_AVAILABLE:
-        scaling_analysis()
-    
-    print("\n" + "=" * 80)
-    print("✅ Batch Operations Benchmark Complete!")
-    print("=" * 80)
-    
-    if GPU_AVAILABLE:
-        print("\n🎯 RECOMMENDATIONS:")
-        print("   • Use batch operations for 100+ intervals at once")
-        print("   • Batch ops eliminate Python call overhead (30µs → amortized)")
-        print("   • Ideal for: bulk allocators, schedulers, resource managers")
-        print("   • GPU shines when batching 1000+ operations")
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--backend",
+        default="metal_boundary_summary",
+        choices=("metal_boundary_summary", "gpu_boundary_summary"),
+    )
+    parser.add_argument("--samples", type=int, default=20)
+    parser.add_argument("--warmups", type=int, default=2)
+    parser.add_argument("--intervals", type=int, default=64)
+    parser.add_argument("--operations", type=int, default=500)
+    parser.add_argument("--output", type=Path)
+    args = parser.parse_args(argv)
+    try:
+        report = benchmark_batches(
+            args.backend,
+            samples=args.samples,
+            warmups=args.warmups,
+            interval_count=args.intervals,
+            operation_count=args.operations,
+        )
+    except HardwareUnavailableError as exc:
+        print(f"batch benchmark unavailable: {exc}")
+        return 2
+    print(report["label"])
+    print(json.dumps(report["dataset"], indent=2))
+    for mode, result in report["results"].items():
+        timing = result["execution"]
+        print(f"{mode}: median={timing['median_ns'] / 1e6:.3f} ms")
+    if args.output is not None:
+        args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    return 0
 
 
 if __name__ == "__main__":
-    random.seed(42)
-    main()
-
+    raise SystemExit(main())

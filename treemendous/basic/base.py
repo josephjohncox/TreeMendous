@@ -1,56 +1,57 @@
+"""Shared implementation helpers for internal Python backends."""
+
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Callable, Generic, List, Optional, Tuple, TypeVar, Protocol
+from typing import Any, Generic, Protocol, TypeVar, cast
 
-D = TypeVar('D')  # Type variable for interval data
+from treemendous.domain import (
+    Span,
+    validate_coordinate,
+    validate_length,
+)
 
-class IntervalNodeProtocol(Protocol[D]):
+
+class IntervalNodeProtocol(Protocol):
     start: int
     end: int
     length: int
     height: int
     total_length: int
-    data: Optional[D]
-    left: Optional['IntervalNodeProtocol[D]']
-    right: Optional['IntervalNodeProtocol[D]']
-    
+    left: IntervalNodeProtocol | None
+    right: IntervalNodeProtocol | None
+
     def update_stats(self) -> None: ...
     def update_length(self) -> None: ...
 
-T = TypeVar('T', bound='IntervalNodeProtocol[D]')
 
-class IntervalManagerProtocol(Protocol[D]):
-    def reserve_interval(self, start: int, end: int, data: Optional[D] = None) -> None: ...
-    def release_interval(self, start: int, end: int, data: Optional[D] = None) -> None: ...
-    def find_interval(self, start: int, length: int) -> Tuple[int, int]: ...
-    def get_intervals(self) -> List[Tuple[int, int, Optional[D]]]: ...
+T = TypeVar("T")
 
-class IntervalNodeBase(Generic[T, D]):
-    def __init__(self, start: int, end: int, data: Optional[D] = None) -> None:
-        self.start: int = start
-        self.end: int = end
-        self.length: int = end - start
-        self._height: int = 1
-        self._total_length: int = self.length
-        self.data: Optional[D] = data
 
-        self.left: Optional[T] = None
-        self.right: Optional[T] = None
+class IntervalNodeBase(Generic[T]):
+    def __init__(self, start: int, end: int) -> None:
+        Span(start, end)
+        self.start = start
+        self.end = end
+        self.length = end - start
+        self._height = 1
+        self._total_length = self.length
+        self.left: T | None = None
+        self.right: T | None = None
 
     @property
-    @abstractmethod
     def height(self) -> int:
         return self._height
 
-    @height.setter 
+    @height.setter
     def height(self, value: int) -> None:
         self._height = value
 
     @property
-    @abstractmethod
     def total_length(self) -> int:
         return self._total_length
 
-    @total_length.setter 
+    @total_length.setter
     def total_length(self, value: int) -> None:
         self._total_length = value
 
@@ -58,76 +59,38 @@ class IntervalNodeBase(Generic[T, D]):
         self.length = self.end - self.start
 
 
-class IntervalTreeBase(Generic[T, D], ABC, IntervalManagerProtocol[D]):
-    def __init__(
-        self,
-        root: Optional[T] = None,
-        merge_fn: Optional[Callable[[D, D], D]] = None,
-        split_fn: Optional[Callable[[D, int, int, int, int], D]] = None,
-        can_merge: Optional[Callable[[Optional[D], Optional[D]], bool]] = None,
-        merge_idempotent: bool = False,
-        split_idempotent: bool = False,
-    ) -> None:
-        self.root: Optional[T] = root
-        self.merge_fn: Optional[Callable[[D, D], D]] = merge_fn
-        self.split_fn: Optional[Callable[[D, int, int, int, int], D]] = split_fn
-        self.can_merge_fn: Optional[Callable[[Optional[D], Optional[D]], bool]] = can_merge
-        self.merge_idempotent = merge_idempotent
-        self.split_idempotent = split_idempotent
+class IntervalTreeBase(Generic[T], ABC):
+    def __init__(self, root: T | None = None) -> None:
+        self.root = root
+
+    @staticmethod
+    def validate_span(start: int, end: int) -> Span:
+        return Span(start, end)
+
+    @staticmethod
+    def validate_query(start: int, length: int) -> tuple[int, int]:
+        validate_coordinate(start, "start")
+        validate_length(length)
+        return start, length
 
     def print_tree(self) -> None:
         self._print_tree(self.root)
 
-    def _print_tree(self, node: Optional[T], indent: str = "", prefix: str = "") -> None:
+    def _print_tree(self, node: T | None, indent: str = "", prefix: str = "") -> None:
         if node is None:
             return
-            
-        self._print_tree(node.right, indent + "    ", "┌── ")  # type: ignore
+        view = cast(IntervalNodeProtocol, node)
+        self._print_tree(cast(T | None, view.right), indent + "    ", "┌── ")
         self._print_node(node, indent, prefix)
-        if node.data is not None:
-            print(f"{indent}{prefix}data: {node.data}")
-        self._print_tree(node.left, indent + "    ", "└── ")   # type: ignore
+        self._print_tree(cast(T | None, view.left), indent + "    ", "└── ")
 
     def get_total_available_length(self) -> int:
-        if not self.root:
+        if self.root is None:
             return 0
-        return self.root.total_length
-
-    def merge_data(self, data1: Optional[D], data2: Optional[D]) -> Optional[D]:
-        if data1 is None:
-            return data2
-        if data2 is None:
-            return data1
-        if self.merge_idempotent and (data1 is data2 or data1 == data2):
-            return data1
-        if self.merge_fn is None:
-            # Default behavior: treat data as sets and merge via union
-            if isinstance(data1, set) and isinstance(data2, set):
-                return data1 | data2
-            return data1  # If not sets, keep first value
-        return self.merge_fn(data1, data2)
-
-    def split_data(
-        self,
-        data: Optional[D],
-        old_start: int,
-        old_end: int,
-        new_start: int,
-        new_end: int,
-    ) -> Optional[D]:
-        if data is None:
-            return None
-        if self.split_fn is None or self.split_idempotent:
-            return data
-        return self.split_fn(data, old_start, old_end, new_start, new_end)
-
-    def can_merge_data(self, data1: Optional[D], data2: Optional[D]) -> bool:
-        if self.can_merge_fn is None:
-            return True
-        return self.can_merge_fn(data1, data2)
+        return cast(IntervalNodeProtocol, self.root).total_length
 
     @abstractmethod
     def _print_node(self, node: T, indent: str, prefix: str) -> None: ...
 
     @abstractmethod
-    def get_intervals(self) -> List[Tuple[int, int, Optional[D]]]: ...
+    def get_intervals(self) -> list[Any]: ...
