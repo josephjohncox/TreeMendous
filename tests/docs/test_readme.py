@@ -100,6 +100,10 @@ def test_release_tag_contract_tracks_the_releasable_major_version() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text()
     assert 'expected="v${version}"' in workflow
     assert 'GITHUB_REF_NAME" != "$expected' in workflow
+    # v1.13.0 is an annotated tag. Pin the dereferenced commit whose matching
+    # GHCR image exists, not the tag-object SHA that yields `manifest unknown`.
+    assert "ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e" in workflow
+    assert "106e0b0b7c337fa67ed433972f777c6357f78598" not in workflow
     assert 'version = "1.0.0"' in (ROOT / "pyproject.toml").read_text()
 
 
