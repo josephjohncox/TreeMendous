@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from enum import Enum
 from threading import RLock
 from typing import Generic, TypeVar
+from uuid import UUID, uuid4
 
 from treemendous.domain import Span, validate_coordinate
 
@@ -22,16 +23,19 @@ class LockMode(str, Enum):
 
 @dataclass(frozen=True)
 class LockHandle(Generic[LockOwnerT]):
-    """Stable owner-scoped identity for one acquired lock."""
+    """Table-scoped value identity, not authorization for a lock."""
 
     owner: LockOwnerT
     sequence: int
+    lineage: UUID
 
     def __post_init__(self) -> None:
         hash(self.owner)
         validate_coordinate(self.sequence, "sequence")
         if self.sequence < 1:
             raise ValueError("sequence must be greater than zero")
+        if not isinstance(self.lineage, UUID):
+            raise TypeError("lineage must be a UUID")
 
 
 @dataclass(frozen=True)
@@ -125,12 +129,17 @@ class RangeLockTable(Generic[LockOwnerT]):
     """Thread-safe shared/exclusive interval locks.
 
     Locks belonging to the same owner are reentrant and never conflict with
-    one another.  They remain separate identities, so duplicate acquisitions
-    require separate releases.  Different owners conflict exactly when their
+    one another. They remain separate identities, so duplicate acquisitions
+    require separate releases. Different owners conflict exactly when their
     half-open ranges overlap and at least one mode is exclusive.
+
+    Handles are reconstructible value identities, not authorization
+    capabilities. Upgrade and release require an explicit owner assertion,
+    which callers must obtain from their own trusted authorization context.
     """
 
     def __init__(self) -> None:
+        self._lineage = uuid4()
         self._locks: dict[LockHandle[LockOwnerT], RangeLock[LockOwnerT]] = {}
         self._next_sequences: dict[LockOwnerT, int] = {}
         self._next_insertion_order = 0
@@ -142,6 +151,23 @@ class RangeLockTable(Generic[LockOwnerT]):
             hash(owner)
         except TypeError as exc:
             raise TypeError("owner must be hashable") from exc
+
+    def _range_for_unlocked(
+        self, handle: LockHandle[LockOwnerT]
+    ) -> RangeLock[LockOwnerT]:
+        if not isinstance(handle, LockHandle) or handle.lineage != self._lineage:
+            raise KeyError(handle)
+        try:
+            return self._locks[handle]
+        except KeyError:
+            raise KeyError(handle) from None
+
+    def _require_owner(
+        self, handle: LockHandle[LockOwnerT], owner: LockOwnerT
+    ) -> None:
+        self._validate_owner(owner)
+        if handle.owner != owner:
+            raise PermissionError("lock belongs to another owner")
 
     @staticmethod
     def _coerce_mode(mode: LockMode | str) -> LockMode:
@@ -198,7 +224,7 @@ class RangeLockTable(Generic[LockOwnerT]):
             if conflicts:
                 raise LockConflictError(request, conflicts)
             sequence = self._next_sequences.get(owner, 1)
-            handle = LockHandle(owner, sequence)
+            handle = LockHandle(owner, sequence, self._lineage)
             acquired = RangeLock(
                 handle,
                 request.start,
@@ -211,12 +237,13 @@ class RangeLockTable(Generic[LockOwnerT]):
             self._next_insertion_order += 1
             return handle
 
-    def upgrade(self, handle: LockHandle[LockOwnerT]) -> RangeLock[LockOwnerT]:
-        """Atomically upgrade a shared lock when no other owner conflicts."""
+    def upgrade(
+        self, handle: LockHandle[LockOwnerT], *, owner: LockOwnerT
+    ) -> RangeLock[LockOwnerT]:
+        """Upgrade a shared lock for an explicitly asserted lock owner."""
         with self._lock:
-            current = self._locks.get(handle)
-            if current is None:
-                raise KeyError(handle)
+            current = self._range_for_unlocked(handle)
+            self._require_owner(handle, owner)
             if current.mode is LockMode.EXCLUSIVE:
                 return current
             request = LockRequest(
@@ -235,22 +262,20 @@ class RangeLockTable(Generic[LockOwnerT]):
             self._locks[handle] = upgraded
             return upgraded
 
-    def release(self, handle: LockHandle[LockOwnerT]) -> RangeLock[LockOwnerT]:
-        """Release exactly one acquired identity."""
+    def release(
+        self, handle: LockHandle[LockOwnerT], *, owner: LockOwnerT
+    ) -> RangeLock[LockOwnerT]:
+        """Release one identity for an explicitly asserted lock owner."""
         with self._lock:
-            current = self._locks.get(handle)
-            if current is None:
-                raise KeyError(handle)
+            current = self._range_for_unlocked(handle)
+            self._require_owner(handle, owner)
             del self._locks[handle]
             return current
 
     def get(self, handle: LockHandle[LockOwnerT]) -> RangeLock[LockOwnerT]:
         """Return one immutable acquired lock."""
         with self._lock:
-            current = self._locks.get(handle)
-            if current is None:
-                raise KeyError(handle)
-            return current
+            return self._range_for_unlocked(handle)
 
     def diagnostics(self) -> LockDiagnostics:
         """Return aggregate active-lock counters."""

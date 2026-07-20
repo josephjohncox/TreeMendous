@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from uuid import uuid4
 
 import pytest
 
@@ -28,7 +29,39 @@ def test_shared_compatibility_exclusive_conflicts_and_half_open_edges() -> None:
     assert raised.value.request.end == 16
     assert raised.value.request.mode is LockMode.EXCLUSIVE
     # [20, 21) touches but does not overlap c's [15, 20).
-    assert table.acquire("d", 20, 21, "exclusive") == LockHandle("d", 1)
+    touching = table.acquire("d", 20, 21, "exclusive")
+    assert touching.owner == "d"
+    assert touching.sequence == 1
+
+
+def test_handles_are_table_scoped_value_identities_not_authorization() -> None:
+    first_table = RangeLockTable[str]()
+    second_table = RangeLockTable[str]()
+    local = first_table.acquire("owner", 0, 1, "exclusive")
+    foreign = second_table.acquire("owner", 0, 1, "exclusive")
+    reconstructed = LockHandle(local.owner, local.sequence, local.lineage)
+    forged = LockHandle(local.owner, local.sequence, uuid4())
+
+    assert local != foreign
+    assert reconstructed == local
+    assert first_table.get(reconstructed).handle == local
+    for invalid in (foreign, forged):
+        with pytest.raises(KeyError):
+            first_table.get(invalid)
+        with pytest.raises(KeyError):
+            first_table.upgrade(invalid, owner="owner")
+        with pytest.raises(KeyError):
+            first_table.release(invalid, owner="owner")
+
+    with pytest.raises(PermissionError, match="owner"):
+        first_table.upgrade(local, owner="intruder")
+    with pytest.raises(PermissionError, match="owner"):
+        first_table.release(local, owner="intruder")
+    assert first_table.release(reconstructed, owner="owner").handle == local
+    with pytest.raises(KeyError):
+        first_table.upgrade(local, owner="owner")
+    with pytest.raises(KeyError):
+        first_table.release(local, owner="owner")
 
 
 def test_shared_request_conflicts_only_with_other_owner_exclusive() -> None:
@@ -47,7 +80,7 @@ def test_same_owner_is_reentrant_but_duplicate_locks_release_separately() -> Non
     duplicate = table.acquire("owner", 2, 8, "exclusive")
 
     assert [shared.sequence, exclusive.sequence, duplicate.sequence] == [1, 2, 3]
-    table.release(exclusive)
+    table.release(exclusive, owner="owner")
     assert table.get(duplicate).mode is LockMode.EXCLUSIVE
     assert len(table) == 2
     with pytest.raises(KeyError):
@@ -62,16 +95,16 @@ def test_upgrade_is_atomic_and_only_succeeds_without_other_owner() -> None:
     before = table.snapshot()
 
     with pytest.raises(LockConflictError) as raised:
-        table.upgrade(target)
+        table.upgrade(target, owner="a")
     assert [lock.handle for lock in raised.value.conflicts] == [blocker]
     assert table.snapshot() == before
 
-    table.release(blocker)
-    upgraded = table.upgrade(target)
+    table.release(blocker, owner="b")
+    upgraded = table.upgrade(target, owner="a")
     assert upgraded.handle == target
     assert upgraded.mode is LockMode.EXCLUSIVE
     assert upgraded.insertion_order == 0
-    assert table.upgrade(target) == upgraded
+    assert table.upgrade(target, owner="a") == upgraded
     assert table.get(own_lock).mode is LockMode.SHARED
 
 
@@ -88,8 +121,10 @@ def test_conflict_and_validation_failures_do_not_consume_handles() -> None:
         table.acquire("waiting", 11, 12, "invalid")
     assert table.snapshot() == before
 
-    table.release(held)
-    assert table.acquire("waiting", 1, 2, "shared") == LockHandle("waiting", 1)
+    table.release(held, owner="held")
+    acquired = table.acquire("waiting", 1, 2, "shared")
+    assert acquired.owner == "waiting"
+    assert acquired.sequence == 1
 
 
 def test_snapshot_diagnostics_and_concurrent_duplicate_owners() -> None:
@@ -120,7 +155,7 @@ def test_missing_release_and_unhashable_owner_leave_state_unchanged() -> None:
     table = RangeLockTable[str]()
     before = table.snapshot()
     with pytest.raises(KeyError):
-        table.release(LockHandle("missing", 1))
+        table.release(LockHandle("missing", 1, uuid4()), owner="missing")
     with pytest.raises(TypeError, match="hashable"):
         table.acquire([], 0, 1, "shared")  # type: ignore[arg-type]
     assert table.snapshot() == before

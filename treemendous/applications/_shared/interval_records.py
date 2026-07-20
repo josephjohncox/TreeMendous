@@ -1,17 +1,17 @@
 """Identity-preserving interval records for private application engines.
 
 Unlike a range set, this index never coalesces coincident records.  Each insert
-receives an owner-scoped handle and a global insertion ordinal.  Query order is
+receives an index-scoped handle and a global insertion ordinal.  Query order is
 that insertion order, including after an interval is updated.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Hashable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass
-from threading import Lock, RLock
+from threading import RLock
 from typing import Generic, TypeVar, cast
+from uuid import UUID, uuid4
 
 from treemendous.domain import Span, validate_coordinate
 
@@ -21,16 +21,19 @@ PayloadT = TypeVar("PayloadT")
 
 @dataclass(frozen=True)
 class RecordHandle(Generic[OwnerT]):
-    """Stable owner-scoped identity for one interval record."""
+    """Index-scoped value identity, not authorization for a record."""
 
     owner: OwnerT
     sequence: int
+    lineage: UUID
 
     def __post_init__(self) -> None:
         hash(self.owner)
         validate_coordinate(self.sequence, "sequence")
         if self.sequence < 1:
             raise ValueError("sequence must be greater than zero")
+        if not isinstance(self.lineage, UUID):
+            raise TypeError("lineage must be a UUID")
 
 
 @dataclass(frozen=True)
@@ -88,21 +91,27 @@ _MISSING = object()
 class IntervalRecordIndex(Generic[OwnerT, PayloadT]):
     """Thread-safe interval record index with explicit payload detachment.
 
-    ``cloner`` is required rather than guessed.  It must not mutate its argument
+    ``cloner`` is required rather than guessed. It must not mutate its argument
     and must return a payload independently mutable from it (``copy.deepcopy``
-    is a common choice).  A cloner exception leaves the index unchanged.
+    is a common choice). Cloning never runs under the state lock. A cloner
+    exception leaves the pending operation uncommitted; any reentrant operation
+    initiated by the cloner is independent and linearizes before it.
+
+    Handles are reconstructible value identities, not authorization
+    capabilities. Mutating methods require an explicit owner assertion, which
+    callers must obtain from their own trusted authorization context.
     """
 
     def __init__(self, cloner: Callable[[PayloadT], PayloadT]) -> None:
         if not callable(cloner):
             raise TypeError("cloner must be callable")
         self._cloner = cloner
+        self._lineage = uuid4()
         self._records: dict[RecordHandle[OwnerT], IntervalRecord[OwnerT, PayloadT]] = {}
         self._next_sequences: dict[OwnerT, int] = {}
         self._next_insertion_order = 0
+        self._version = 0
         self._lock = RLock()
-        self._payload_activity_lock = Lock()
-        self._payload_activity = 0
 
     @staticmethod
     def _validate_owner(owner: OwnerT) -> None:
@@ -111,39 +120,20 @@ class IntervalRecordIndex(Generic[OwnerT, PayloadT]):
         except TypeError as exc:
             raise TypeError("owner must be hashable") from exc
 
-    @contextmanager
-    def _payload_copying(self) -> Iterator[None]:
-        with self._payload_activity_lock:
-            self._payload_activity += 1
+    def _record_for_unlocked(
+        self, handle: RecordHandle[OwnerT]
+    ) -> IntervalRecord[OwnerT, PayloadT]:
+        if not isinstance(handle, RecordHandle) or handle.lineage != self._lineage:
+            raise KeyError(handle)
         try:
-            yield
-        finally:
-            with self._payload_activity_lock:
-                self._payload_activity -= 1
+            return self._records[handle]
+        except KeyError:
+            raise KeyError(handle) from None
 
-    def _payload_is_active(self) -> bool:
-        with self._payload_activity_lock:
-            return self._payload_activity > 0
-
-    @contextmanager
-    def _mutation(self) -> Iterator[None]:
-        # Do not deadlock when a cloner waits for another thread that attempts
-        # to mutate this index.  Mutations from any cloner are rejected.
-        while True:
-            if self._payload_is_active():
-                raise RuntimeError(
-                    "IntervalRecordIndex mutation is not allowed during payload cloning"
-                )
-            if self._lock.acquire(timeout=0.01):
-                break
-        try:
-            if self._payload_is_active():
-                raise RuntimeError(
-                    "IntervalRecordIndex mutation is not allowed during payload cloning"
-                )
-            yield
-        finally:
-            self._lock.release()
+    def _require_owner(self, handle: RecordHandle[OwnerT], owner: OwnerT) -> None:
+        self._validate_owner(owner)
+        if handle.owner != owner:
+            raise PermissionError("record belongs to another owner")
 
     def _detach(
         self, record: IntervalRecord[OwnerT, PayloadT]
@@ -159,15 +149,15 @@ class IntervalRecordIndex(Generic[OwnerT, PayloadT]):
     def insert(
         self, owner: OwnerT, start: int, end: int, payload: PayloadT
     ) -> RecordHandle[OwnerT]:
-        """Insert one record and return a new owner-scoped handle."""
+        """Insert one record and return a new index-scoped handle."""
         self._validate_owner(owner)
         span = Span(start, end)
-        with self._mutation():
-            # Clone before changing either monotonic counter.
-            with self._payload_copying():
-                stored_payload = self._cloner(payload)
+        # Arbitrary cloner code runs before the state commit. Reentrant effects
+        # therefore linearize before this insertion.
+        stored_payload = self._cloner(payload)
+        with self._lock:
             sequence = self._next_sequences.get(owner, 1)
-            handle = RecordHandle(owner, sequence)
+            handle = RecordHandle(owner, sequence, self._lineage)
             record = IntervalRecord(
                 handle,
                 span.start,
@@ -178,63 +168,79 @@ class IntervalRecordIndex(Generic[OwnerT, PayloadT]):
             self._records[handle] = record
             self._next_sequences[owner] = sequence + 1
             self._next_insertion_order += 1
+            self._version += 1
             return handle
 
     def update(
         self,
         handle: RecordHandle[OwnerT],
         *,
+        owner: OwnerT,
         start: int | None = None,
         end: int | None = None,
         payload: PayloadT | object = _MISSING,
     ) -> IntervalRecord[OwnerT, PayloadT]:
-        """Atomically replace selected fields without changing identity/order."""
-        with self._mutation():
-            current = self._records.get(handle)
-            if current is None:
-                raise KeyError(handle)
-            if start is None and end is None and payload is _MISSING:
-                raise ValueError("update requires a span or payload replacement")
+        """Replace selected fields for an explicitly asserted record owner.
+
+        Payload preparation happens outside the state lock. If this identity is
+        concurrently changed, the operation retries from that newer record;
+        unrelated mutations do not invalidate its prepared candidate.
+        """
+        if start is None and end is None and payload is _MISSING:
+            raise ValueError("update requires a span or payload replacement")
+        while True:
+            with self._lock:
+                current = self._record_for_unlocked(handle)
+                self._require_owner(handle, owner)
+                version = self._version
             span = Span(
                 current.start if start is None else start,
                 current.end if end is None else end,
             )
-            with self._payload_copying():
-                if payload is _MISSING:
-                    stored_payload = self._cloner(current.payload)
-                else:
-                    stored_payload = self._cloner(cast(PayloadT, payload))
-                candidate = IntervalRecord(
-                    handle,
-                    span.start,
-                    span.end,
-                    stored_payload,
-                    current.insertion_order,
-                )
-                # Prepare the returned detached value before committing.
-                result = self._detach(candidate)
-            self._records[handle] = candidate
-            return result
+            source_payload = (
+                current.payload if payload is _MISSING else cast(PayloadT, payload)
+            )
+            stored_payload = self._cloner(source_payload)
+            candidate = IntervalRecord(
+                handle,
+                span.start,
+                span.end,
+                stored_payload,
+                current.insertion_order,
+            )
+            # Prepare the detached return before commit for failure atomicity.
+            result = self._detach(candidate)
+            with self._lock:
+                latest = self._record_for_unlocked(handle)
+                if self._version != version and latest is not current:
+                    continue
+                self._records[handle] = candidate
+                self._version += 1
+                return result
 
-    def remove(self, handle: RecordHandle[OwnerT]) -> IntervalRecord[OwnerT, PayloadT]:
-        """Remove exactly one identity and return a detached prior value."""
-        with self._mutation():
-            current = self._records.get(handle)
-            if current is None:
-                raise KeyError(handle)
-            with self._payload_copying():
-                result = self._detach(current)
-            del self._records[handle]
-            return result
+    def remove(
+        self, handle: RecordHandle[OwnerT], *, owner: OwnerT
+    ) -> IntervalRecord[OwnerT, PayloadT]:
+        """Remove one identity for an explicitly asserted record owner."""
+        while True:
+            with self._lock:
+                current = self._record_for_unlocked(handle)
+                self._require_owner(handle, owner)
+                version = self._version
+            result = self._detach(current)
+            with self._lock:
+                latest = self._record_for_unlocked(handle)
+                if self._version != version and latest is not current:
+                    continue
+                del self._records[handle]
+                self._version += 1
+                return result
 
     def get(self, handle: RecordHandle[OwnerT]) -> IntervalRecord[OwnerT, PayloadT]:
         """Return a detached record for ``handle``."""
         with self._lock:
-            current = self._records.get(handle)
-            if current is None:
-                raise KeyError(handle)
-            with self._payload_copying():
-                return self._detach(current)
+            current = self._record_for_unlocked(handle)
+        return self._detach(current)
 
     def overlaps(
         self, start: int, end: int
@@ -242,23 +248,23 @@ class IntervalRecordIndex(Generic[OwnerT, PayloadT]):
         """Return records intersecting ``[start, end)`` in insertion order."""
         span = Span(start, end)
         with self._lock:
-            with self._payload_copying():
-                return tuple(
-                    self._detach(record)
-                    for record in self._records.values()
-                    if record.start < span.end and span.start < record.end
-                )
+            captured = tuple(
+                record
+                for record in self._records.values()
+                if record.start < span.end and span.start < record.end
+            )
+        return tuple(self._detach(record) for record in captured)
 
     def containing(self, point: int) -> tuple[IntervalRecord[OwnerT, PayloadT], ...]:
         """Return records containing ``point`` under half-open semantics."""
         validate_coordinate(point, "point")
         with self._lock:
-            with self._payload_copying():
-                return tuple(
-                    self._detach(record)
-                    for record in self._records.values()
-                    if record.start <= point < record.end
-                )
+            captured = tuple(
+                record
+                for record in self._records.values()
+                if record.start <= point < record.end
+            )
+        return tuple(self._detach(record) for record in captured)
 
     def at(self, point: int) -> tuple[IntervalRecord[OwnerT, PayloadT], ...]:
         """Alias for :meth:`containing` used by point-querying applications."""
@@ -276,15 +282,15 @@ class IntervalRecordIndex(Generic[OwnerT, PayloadT]):
     def snapshot(self) -> IntervalRecordSnapshot[OwnerT, PayloadT]:
         """Return a detached snapshot ordered by original insertion."""
         with self._lock:
-            with self._payload_copying():
-                records = tuple(
-                    self._detach(record) for record in self._records.values()
-                )
-            return IntervalRecordSnapshot(
-                records=records,
-                next_sequences=tuple(self._next_sequences.items()),
-                next_insertion_order=self._next_insertion_order,
-            )
+            captured = tuple(self._records.values())
+            next_sequences = tuple(self._next_sequences.items())
+            next_insertion_order = self._next_insertion_order
+        records = tuple(self._detach(record) for record in captured)
+        return IntervalRecordSnapshot(
+            records=records,
+            next_sequences=next_sequences,
+            next_insertion_order=next_insertion_order,
+        )
 
     def __len__(self) -> int:
         with self._lock:

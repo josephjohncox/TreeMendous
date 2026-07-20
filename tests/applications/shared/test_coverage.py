@@ -37,6 +37,20 @@ def test_piecewise_coverage_counts_exact_record_id_sets() -> None:
     assert clipped.maximum_count == 3
 
 
+def test_records_from_distinct_indexes_remain_distinct_coverage_identities() -> None:
+    first_index = IntervalRecordIndex[str, None](lambda value: value)
+    second_index = IntervalRecordIndex[str, None](lambda value: value)
+    first = first_index.insert("owner", 0, 2, None)
+    second = second_index.insert("owner", 0, 2, None)
+
+    records = first_index.snapshot().records + second_index.snapshot().records
+
+    assert first != second
+    segments = coverage_segments(records)
+    assert len(segments) == 1
+    assert segments[0] == CoverageSegment(0, 2, frozenset({first, second}))
+
+
 def test_half_open_touching_records_do_not_overlap() -> None:
     index = IntervalRecordIndex[str, None](lambda value: value)
     left = index.insert("a", 0, 2, None)
