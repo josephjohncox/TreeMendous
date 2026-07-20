@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 from treemendous.applications._shared.clock import Clock
@@ -51,8 +52,11 @@ class SoftwareSeatPool:
 
     An entitlement value is the maximum concurrently active seats for an owner
     and product. Omitted entitlement policy allows any owner up to product
-    capacity. The state and sample fence validator are process-local; a real
-    license server must persist checkout state and fencing high-water marks.
+    capacity. Entitlement mappings are copied into private immutable policy;
+    changing grants requires constructing or restoring a new engine. Renewals
+    remain subject to that fixed policy. The state and sample fence validator
+    are process-local; a real license server must persist checkout state and
+    fencing high-water marks.
     """
 
     def __init__(
@@ -72,9 +76,9 @@ class SoftwareSeatPool:
             capacity = require_positive(capacity, "product capacity")
             self.products[product] = capacity
             domains[product] = (inclusive_span(1, capacity, "seat domain"),)
-        self.entitlements: dict[str, dict[str, int]] | None = None
+        self._entitlements: Mapping[str, Mapping[str, int]] | None = None
         if entitlements is not None:
-            self.entitlements = {}
+            normalized_policy: dict[str, Mapping[str, int]] = {}
             for owner, grants in entitlements.items():
                 owner = require_string(owner, "entitlement owner")
                 normalized: dict[str, int] = {}
@@ -82,7 +86,8 @@ class SoftwareSeatPool:
                     if product not in self.products:
                         raise UnknownProductError(product)
                     normalized[product] = require_positive(limit, "entitlement limit")
-                self.entitlements[owner] = normalized
+                normalized_policy[owner] = MappingProxyType(normalized)
+            self._entitlements = MappingProxyType(normalized_policy)
         self._group = PoolGroup(
             domains,
             clock=clock if clock is not None else ProcessClock(),
@@ -96,25 +101,68 @@ class SoftwareSeatPool:
         if not isinstance(checkpoint, SeatPoolCheckpoint):
             raise TypeError("checkpoint must be a SeatPoolCheckpoint")
         engine = cls.__new__(cls)
-        engine.products = dict(checkpoint.products)
-        engine.entitlements = (
-            {
-                owner: dict(grants)
-                for owner, grants in checkpoint.entitlements
-            }
+        engine.products = {}
+        domains: dict[str, tuple[Span, ...]] = {}
+        for product, capacity in checkpoint.products:
+            product = require_string(product, "product")
+            if product in engine.products:
+                raise ValueError("checkpoint products must be unique")
+            capacity = require_positive(capacity, "product capacity")
+            engine.products[product] = capacity
+            domains[product] = (inclusive_span(1, capacity, "seat domain"),)
+        if not engine.products:
+            raise ValueError("checkpoint must contain at least one product")
+        if not isinstance(checkpoint.entitlement_restricted, bool):
+            raise TypeError("entitlement_restricted must be a bool")
+
+        normalized_policy: dict[str, Mapping[str, int]] = {}
+        for owner, grants in checkpoint.entitlements:
+            owner = require_string(owner, "entitlement owner")
+            if owner in normalized_policy:
+                raise ValueError("checkpoint entitlement owners must be unique")
+            normalized: dict[str, int] = {}
+            for product, limit in grants:
+                product = require_string(product, "entitlement product")
+                if product in normalized:
+                    raise ValueError("checkpoint entitlement products must be unique")
+                if product not in engine.products:
+                    raise UnknownProductError(product)
+                normalized[product] = require_positive(limit, "entitlement limit")
+            normalized_policy[owner] = MappingProxyType(normalized)
+        if not checkpoint.entitlement_restricted and normalized_policy:
+            raise ValueError("unrestricted checkpoint must not contain entitlements")
+        engine._entitlements = (
+            MappingProxyType(normalized_policy)
             if checkpoint.entitlement_restricted
             else None
         )
         engine._group = PoolGroup.restore(checkpoint.group, clock=clock)
-        if set(engine.products) != set(engine._group.pools):
-            raise ValueError("seat checkpoint products do not match its pools")
+        engine._group.require_domains(domains)
+        for product, snapshot in engine._group.snapshot().pools:
+            active_by_owner: dict[str, int] = {}
+            for lease in snapshot.leases:
+                if lease.state is LeaseState.ACTIVE:
+                    active_by_owner[lease.owner] = (
+                        active_by_owner.get(lease.owner, 0) + lease.resource.length
+                    )
+            for owner, active in active_by_owner.items():
+                try:
+                    limit = engine._limit(owner, product)
+                except EntitlementError:
+                    raise ValueError(
+                        "active seats lack a checkpoint entitlement"
+                    ) from None
+                if active > limit:
+                    raise ValueError(
+                        "active seats exceed checkpoint entitlement policy"
+                    )
         return engine
 
     def _limit(self, owner: str, product: str) -> int:
-        if self.entitlements is None:
+        if self._entitlements is None:
             return self.products[product]
         try:
-            return self.entitlements[owner][product]
+            return self._entitlements[owner][product]
         except KeyError:
             raise EntitlementError(
                 f"owner {owner!r} is not entitled to product {product!r}"
@@ -162,8 +210,14 @@ class SoftwareSeatPool:
     acquire = checkout
 
     def renew(self, handle: SeatLease, *, ttl: int) -> SeatLease:
-        """Renew a current checkout session."""
-        return self._group.renew(handle, ttl=ttl)
+        """Renew a current checkout only under the engine's fixed policy."""
+        if not isinstance(handle, NumericLease):
+            raise TypeError("handle must be a SeatLease")
+        with self._group.lock:
+            if handle.scope not in self.products:
+                raise UnknownProductError(handle.scope)
+            self._limit(handle.owner, handle.scope)
+            return self._group.renew(handle, ttl=ttl)
 
     def release(self, handle: SeatLease) -> SeatLease:
         """Return checked-out seats immediately."""
@@ -188,14 +242,14 @@ class SoftwareSeatPool:
     def checkpoint(self) -> SeatPoolCheckpoint:
         """Return product policy and lease state, excluding fence state."""
         grants: tuple[tuple[str, tuple[tuple[str, int], ...]], ...] = ()
-        if self.entitlements is not None:
+        if self._entitlements is not None:
             grants = tuple(
                 (owner, tuple(sorted(products.items())))
-                for owner, products in sorted(self.entitlements.items())
+                for owner, products in sorted(self._entitlements.items())
             )
         return SeatPoolCheckpoint(
             tuple(sorted(self.products.items())),
-            self.entitlements is not None,
+            self._entitlements is not None,
             grants,
             self._group.checkpoint(),
         )

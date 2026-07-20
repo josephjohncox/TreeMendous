@@ -59,3 +59,133 @@ def test_address_renew_release_checkpoint_and_diagnostics() -> None:
     diagnostics = restored.diagnostics().pools[0][1]
     assert diagnostics.released_leases == 1
     assert restored.snapshot().pools[0][1].available_spans
+
+
+@pytest.mark.parametrize(
+    ("cidr", "reserve_network", "reserve_broadcast", "expected"),
+    [
+        (
+            "192.0.2.0/31",
+            False,
+            False,
+            ("192.0.2.0", "192.0.2.1"),
+        ),
+        (
+            "192.0.2.7/32",
+            False,
+            False,
+            ("192.0.2.7",),
+        ),
+        ("2001:db8::/127", True, None, ("2001:db8::1",)),
+        (
+            "2001:db8::1/128",
+            False,
+            None,
+            ("2001:db8::1",),
+        ),
+    ],
+)
+def test_address_oracle_matches_small_prefix_reservation_policy(
+    cidr: str,
+    reserve_network: bool,
+    reserve_broadcast: bool | None,
+    expected: tuple[str, ...],
+) -> None:
+    clock = LogicalClock()
+    engine = NumericIPAddressPool(
+        cidr,
+        clock=clock,
+        reserve_network=reserve_network,
+        reserve_broadcast=reserve_broadcast,
+    )
+    oracle = NaiveAddressOracle(
+        cidr,
+        reserve_network=reserve_network,
+        reserve_broadcast=reserve_broadcast,
+    )
+
+    _, oracle_block = oracle.acquire(len(expected), 2)
+    lease = engine.acquire("owner", ttl=2, count=len(expected))
+
+    assert tuple(str(ipaddress.ip_address(value)) for value in oracle_block) == expected
+    assert (
+        tuple(
+            str(ipaddress.ip_address(value))
+            for value in range(lease.resource.start, lease.resource.end)
+        )
+        == expected
+    )
+
+
+@pytest.mark.parametrize("cidr", ["192.0.2.0/31", "192.0.2.7/32", "2001:db8::1/128"])
+def test_fully_reserved_small_prefix_has_no_allocatable_domain(cidr: str) -> None:
+    oracle = NaiveAddressOracle(cidr)
+    assert not oracle.free
+    with pytest.raises(ValueError, match="complete leasing domain"):
+        NumericIPAddressPool(cidr, clock=LogicalClock())
+
+
+def test_address_oracle_matches_explicit_and_broadcast_reservations() -> None:
+    reserved = ("192.0.2.2",)
+    engine = NumericIPAddressPool(
+        "192.0.2.0/29",
+        clock=LogicalClock(),
+        reserved=reserved,
+        reserve_network=False,
+        reserve_broadcast=False,
+    )
+    oracle = NaiveAddressOracle(
+        "192.0.2.0/29",
+        reserved=reserved,
+        reserve_network=False,
+        reserve_broadcast=False,
+    )
+    assert engine.diagnostics().pools[0][1].total_capacity == len(oracle.free) == 7
+
+    ipv6 = NumericIPAddressPool(
+        "2001:db8::/127",
+        clock=LogicalClock(),
+        reserve_network=False,
+        reserve_broadcast=True,
+    )
+    ipv6_oracle = NaiveAddressOracle(
+        "2001:db8::/127",
+        reserve_network=False,
+        reserve_broadcast=True,
+    )
+    assert len(ipv6_oracle.free) == 1
+    assert str(ipv6.first_address(ipv6.acquire("owner", ttl=1))) == "2001:db8::"
+
+
+def test_address_oracle_and_engine_reject_family_and_boundary_errors() -> None:
+    engine = NumericIPAddressPool(
+        "192.0.2.0/31",
+        clock=LogicalClock(),
+        reserve_network=False,
+        reserve_broadcast=False,
+    )
+    oracle = NaiveAddressOracle(
+        "192.0.2.0/31",
+        reserve_network=False,
+        reserve_broadcast=False,
+    )
+
+    with pytest.raises(ValueError, match="outside the CIDR"):
+        engine.acquire("owner", ttl=1, count=2, start_address="192.0.2.1")
+    with pytest.raises(ValueError, match="outside the CIDR"):
+        oracle.acquire(2, 1, start_address="192.0.2.1")
+    with pytest.raises(ValueError, match="inside"):
+        NumericIPAddressPool(
+            "192.0.2.0/31",
+            clock=LogicalClock(),
+            reserved=("2001:db8::1",),
+            reserve_network=False,
+            reserve_broadcast=False,
+        )
+    with pytest.raises(ValueError, match="inside"):
+        NaiveAddressOracle(
+            "192.0.2.0/31",
+            reserved=("2001:db8::1",),
+            reserve_network=False,
+            reserve_broadcast=False,
+        )

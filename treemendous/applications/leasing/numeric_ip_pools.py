@@ -84,9 +84,7 @@ class NumericIPAddressPool:
         self.network = _network(network)
         excluded: list[Span] = []
         network_number = _encoded(self.network.network_address, "network address")
-        broadcast_number = _encoded(
-            self.network.broadcast_address, "broadcast address"
-        )
+        broadcast_number = _encoded(self.network.broadcast_address, "broadcast address")
         if reserve_network:
             excluded.append(Span(network_number, network_number + 1))
         effective_broadcast = (
@@ -117,8 +115,17 @@ class NumericIPAddressPool:
         engine = cls.__new__(cls)
         engine.network = _network(checkpoint.network)
         engine._group = PoolGroup.restore(checkpoint.group, clock=clock)
-        if set(engine._group.pools) != {engine.network.with_prefixlen}:
+        scope = engine.network.with_prefixlen
+        if set(engine._group.pools) != {scope}:
             raise ValueError("address checkpoint scope does not match its network")
+        full = Span(
+            _encoded(engine.network.network_address),
+            _encoded(engine.network.broadcast_address) + 1,
+        )
+        if any(
+            not full.contains(span) for span in engine._group.pool(scope).allowed_spans
+        ):
+            raise ValueError("address checkpoint domain extends outside its network")
         return engine
 
     def acquire(
@@ -173,9 +180,7 @@ class NumericIPAddressPool:
         """Materialize elapsed address leases."""
         return self._group.expire()
 
-    def validate_fence(
-        self, handle: AddressLease, address: str | IPAddress
-    ) -> bool:
+    def validate_fence(self, handle: AddressLease, address: str | IPAddress) -> bool:
         """Fence one address using ``(scenario, CIDR, encoded-address)``."""
         parsed_address = _address(address, self.network, "address")
         encoded = _encoded(parsed_address)

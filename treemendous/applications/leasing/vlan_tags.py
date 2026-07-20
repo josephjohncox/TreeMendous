@@ -56,7 +56,9 @@ class VlanTagPool:
         scope_reserved: Mapping[str, Iterable[tuple[int, int]]] | None = None,
         clock: Clock | None = None,
     ) -> None:
-        normalized_scopes = tuple(require_string(scope, "network scope") for scope in scopes)
+        normalized_scopes = tuple(
+            require_string(scope, "network scope") for scope in scopes
+        )
         if not normalized_scopes:
             raise ValueError("at least one network scope is required")
         if len(set(normalized_scopes)) != len(normalized_scopes):
@@ -68,7 +70,9 @@ class VlanTagPool:
         scoped = {} if scope_reserved is None else dict(scope_reserved)
         unknown = set(scoped).difference(normalized_scopes)
         if unknown:
-            raise VlanScopeError(f"reserved policy names unknown scopes: {sorted(unknown)!r}")
+            raise VlanScopeError(
+                f"reserved policy names unknown scopes: {sorted(unknown)!r}"
+            )
         domain = inclusive_span(1, 4094, "VLAN domain")
         domains: dict[str, tuple[Span, ...]] = {}
         for scope in normalized_scopes:
@@ -91,6 +95,13 @@ class VlanTagPool:
             raise TypeError("checkpoint must be a VlanPoolCheckpoint")
         engine = cls.__new__(cls)
         engine._group = PoolGroup.restore(checkpoint.group, clock=clock)
+        domain = inclusive_span(1, 4094, "VLAN domain")
+        if any(
+            not domain.contains(span)
+            for pool in engine._group.pools.values()
+            for span in pool.allowed_spans
+        ):
+            raise ValueError("VLAN checkpoint domain extends outside 1..4094")
         return engine
 
     def acquire(

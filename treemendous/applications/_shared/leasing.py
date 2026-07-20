@@ -484,6 +484,45 @@ class LeasePool:
             self._commit(committed, free, now)
             return released
 
+    def transfer(
+        self,
+        handle: Lease,
+        new_owner: str,
+        *,
+        ttl: int,
+        owner: str | None = None,
+    ) -> Lease:
+        """Atomically release and exactly reacquire a lease at one clock instant."""
+        new_owner = _validate_nonempty_string(new_owner, "new_owner")
+        ttl = _validate_positive(ttl, "ttl")
+        with self._lock:
+            now = self._observe_time()
+            staged, _, _ = self._stage_expirations(now)
+            current = self._current_for(handle, staged, owner=owner)
+            released = replace(current, state=LeaseState.RELEASED)
+            committed = dict(staged)
+            committed[current.token] = released
+            allocation_free = self._build_free(committed)
+            resource = self._select_span(
+                allocation_free,
+                size=current.resource.length,
+                alignment=1,
+                exact_span=current.resource,
+            )
+            token = self._next_fencing_token
+            transferred = Lease(
+                self._pool_id,
+                new_owner,
+                resource,
+                token,
+                now,
+                now + ttl,
+            )
+            committed[token] = transferred
+            self._commit(committed, allocation_free, now)
+            self._next_fencing_token = token + 1
+            return transferred
+
     def expire(self) -> tuple[Lease, ...]:
         """Materialize clock-expired leases and return newly expired records."""
         with self._lock:

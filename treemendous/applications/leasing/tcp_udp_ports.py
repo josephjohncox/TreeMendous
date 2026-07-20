@@ -54,7 +54,9 @@ def _protocol(value: PortProtocol | str) -> PortProtocol:
 
 
 def _reserved_spans(ranges: Iterable[tuple[int, int]]) -> tuple[Span, ...]:
-    return tuple(inclusive_span(start, end, "reserved port range") for start, end in ranges)
+    return tuple(
+        inclusive_span(start, end, "reserved port range") for start, end in ranges
+    )
 
 
 class PortLeaseEngine:
@@ -73,9 +75,8 @@ class PortLeaseEngine:
         clock: Clock | None = None,
         system_ports: tuple[int, int] | None = (1, 1023),
         ephemeral_ports: tuple[int, int] | None = (49152, 65535),
-        protocol_reserved: Mapping[
-            PortProtocol | str, Iterable[tuple[int, int]]
-        ] | None = None,
+        protocol_reserved: Mapping[PortProtocol | str, Iterable[tuple[int, int]]]
+        | None = None,
     ) -> None:
         common = []
         if system_ports is not None:
@@ -109,6 +110,13 @@ class PortLeaseEngine:
         engine._group = PoolGroup.restore(checkpoint.group, clock=clock)
         if set(engine._group.pools) != {"tcp", "udp"}:
             raise ValueError("port checkpoint must contain tcp and udp pools")
+        full = inclusive_span(1, 65535, "port domain")
+        if any(
+            not full.contains(span)
+            for pool in engine._group.pools.values()
+            for span in pool.allowed_spans
+        ):
+            raise ValueError("port checkpoint domain extends outside valid ports")
         return engine
 
     def acquire(

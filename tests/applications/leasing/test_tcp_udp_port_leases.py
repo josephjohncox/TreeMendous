@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from tests.oracles.applications.leasing.tcp_udp_port_leases import NaivePortOracle
@@ -53,3 +55,24 @@ def test_port_renew_release_snapshot_checkpoint_and_restore() -> None:
     original_ids = {scope: pool.pool_id for scope, pool in engine.snapshot().pools}
     restored_ids = {scope: pool.pool_id for scope, pool in restored.snapshot().pools}
     assert restored_ids["tcp"] != original_ids["tcp"]
+
+
+def test_scoped_checkpoint_rejects_relabelled_protocol_pool() -> None:
+    clock = LogicalClock()
+    engine = PortLeaseEngine(
+        clock=clock,
+        protocol_reserved={"tcp": ((2000, 2000),)},
+    )
+    checkpoint = engine.checkpoint()
+    by_scope = {entry.scope: entry for entry in checkpoint.group.pools}
+
+    with pytest.raises(ValueError, match="domain does not match"):
+        replace(by_scope["tcp"], pool=by_scope["udp"].pool)
+
+    restored = PortLeaseEngine.from_checkpoint(checkpoint, clock=clock)
+    with pytest.raises(PortUnavailableError):
+        restored.acquire("tcp", "service", ttl=2, start_port=2000)
+    assert (
+        restored.acquire("udp", "service", ttl=2, start_port=2000).resource.start
+        == 2000
+    )

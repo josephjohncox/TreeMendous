@@ -144,20 +144,51 @@ class WarehouseBinPool:
         if not isinstance(checkpoint, BinPoolCheckpoint):
             raise TypeError("checkpoint must be a BinPoolCheckpoint")
         engine = cls.__new__(cls)
-        engine.zones = dict(checkpoint.zones)
-        engine._metadata = {
-            (item.scope, item.token): item for item in checkpoint.metadata
-        }
-        if len(engine._metadata) != len(checkpoint.metadata):
-            raise ValueError("bin metadata scope/token pairs must be unique")
-        engine._request_metadata = {
-            item.request_id: item
-            for item in checkpoint.metadata
-            if item.request_id is not None
-        }
+        engine.zones = {}
+        domains: dict[str, tuple[Span, ...]] = {}
+        for name, zone in checkpoint.zones:
+            name = require_string(name, "zone")
+            if name in engine.zones:
+                raise ValueError("checkpoint zone names must be unique")
+            if not isinstance(zone, BinZone):
+                raise TypeError("checkpoint zones must contain BinZone values")
+            engine.zones[name] = zone
+            domains[name] = (inclusive_span(zone.first_bin, zone.last_bin, "bin zone"),)
+        if not engine.zones:
+            raise ValueError("checkpoint must contain at least one bin zone")
         engine._group = PoolGroup.restore(checkpoint.group, clock=clock)
-        if set(engine.zones) != set(engine._group.pools):
-            raise ValueError("bin checkpoint zones do not match its pools")
+        engine._group.require_domains(domains)
+        history = {
+            (scope, lease.token): lease
+            for scope, snapshot in engine._group.snapshot().pools
+            for lease in snapshot.leases
+        }
+        engine._metadata = {}
+        engine._request_metadata = {}
+        for item in checkpoint.metadata:
+            if not isinstance(item, _BinMetadata):
+                raise TypeError("checkpoint contains invalid bin metadata")
+            policy = engine.zones.get(item.scope)
+            if policy is None:
+                raise ValueError("bin metadata names an unknown zone")
+            if (
+                item.size_class not in policy.size_classes
+                or item.hazard not in policy.hazards
+            ):
+                raise ValueError("bin metadata conflicts with zone policy")
+            lease = history.get((item.scope, item.token))
+            if lease is None or lease.request_id != item.request_id:
+                raise ValueError("bin metadata conflicts with lease history")
+            key = (item.scope, item.token)
+            if key in engine._metadata:
+                raise ValueError("bin metadata scope/token pairs must be unique")
+            engine._metadata[key] = item
+            if item.request_id is not None:
+                if item.request_id in engine._request_metadata:
+                    raise ValueError("bin metadata request IDs must be unique")
+                engine._request_metadata[item.request_id] = item
+        if set(engine._metadata) != set(history):
+            raise ValueError("every bin lease must have compatibility metadata")
         return engine
 
     def acquire(

@@ -8,6 +8,7 @@ from typing import Any
 from treemendous.applications._shared.clock import Clock
 from treemendous.applications._shared.leasing import (
     LeaseRequestConflictError,
+    LeaseState,
     LeaseUnavailableError,
 )
 from treemendous.applications.leasing._common import (
@@ -152,34 +153,150 @@ class DatabaseIdPool:
         """Restore state into a fresh local lineage after external takeover."""
         if not isinstance(checkpoint, DatabaseIdCheckpoint):
             raise TypeError("checkpoint must be a DatabaseIdCheckpoint")
+        namespace = require_string(checkpoint.namespace, "namespace")
+        minimum_id = validate_coordinate(checkpoint.minimum_id, "minimum_id")
+        maximum_id = validate_coordinate(checkpoint.maximum_id, "maximum_id")
+        if minimum_id > maximum_id:
+            raise ValueError("minimum_id must not exceed maximum_id")
+        next_id = validate_coordinate(checkpoint.next_monotonic_id, "next_monotonic_id")
+        if not minimum_id <= next_id <= maximum_id + 1:
+            raise ValueError("next_monotonic_id is outside the ID domain")
+        domain = Span(minimum_id, maximum_id + 1)
+
         engine = cls.__new__(cls)
-        engine.namespace = require_string(checkpoint.namespace, "namespace")
-        engine.minimum_id = checkpoint.minimum_id
-        engine.maximum_id = checkpoint.maximum_id
-        engine._next_id = checkpoint.next_monotonic_id
-        engine._reusable = list(checkpoint.reusable_spans)
-        engine._requests = {record.request_id: record for record in checkpoint.requests}
-        if len(engine._requests) != len(checkpoint.requests):
-            raise ValueError("checkpoint request IDs must be unique")
+        engine.namespace = namespace
+        engine.minimum_id = minimum_id
+        engine.maximum_id = maximum_id
+        engine._next_id = next_id
         engine._group = PoolGroup.restore(checkpoint.group, clock=clock)
-        if set(engine._group.pools) != {engine.namespace}:
-            raise ValueError("database checkpoint namespace does not match its pool")
-        leases_by_token = {
-            lease.token: lease
-            for lease in engine._group.pool(engine.namespace).snapshot().leases
+        engine._group.require_domains({namespace: (domain,)})
+        leases = engine._group.pool(namespace).snapshot().leases
+        leases_by_token = {lease.token: lease for lease in leases}
+        scoped_checkpoint = next(
+            entry for entry in checkpoint.group.pools if entry.scope == namespace
+        )
+        checkpoint_leases = {
+            lease.token: lease for lease in scoped_checkpoint.pool.leases
         }
+        if any(lease.resource.end > next_id for lease in leases):
+            raise ValueError(
+                "next_monotonic_id must follow every issued lease resource"
+            )
+
         engine._committed = {}
+        committed_spans: list[Span] = []
         for committed in checkpoint.committed:
+            if not isinstance(committed, CommittedIdBatch):
+                raise TypeError("checkpoint committed values must be batches")
+            if not isinstance(committed.source, NumericLease):
+                raise TypeError("committed source must be a DatabaseIdLease")
+            if committed.namespace != namespace or committed.source.scope != namespace:
+                raise ValueError("committed batch namespace does not match checkpoint")
+            if committed.source.lease.state is not LeaseState.ACTIVE:
+                raise ValueError(
+                    "committed source evidence must be the active revision"
+                )
+            validate_coordinate(committed.committed_at, "committed_at")
+            if committed.committed_at < committed.source.lease.acquired_at:
+                raise ValueError("committed_at cannot precede acquisition")
             restored_lease = leases_by_token.get(committed.token)
             if restored_lease is None:
                 raise ValueError("committed batch source is absent from checkpoint")
-            restored = replace(
-                committed,
-                source=NumericLease(engine.namespace, restored_lease),
+            source = committed.source.lease
+            if (
+                restored_lease.state is not LeaseState.RELEASED
+                or restored_lease.owner != source.owner
+                or restored_lease.resource != source.resource
+                or restored_lease.token != source.token
+                or restored_lease.acquired_at != source.acquired_at
+                or restored_lease.expires_at != source.expires_at
+                or restored_lease.revision != source.revision
+                or restored_lease.request_id != source.request_id
+            ):
+                raise ValueError("committed source must match released pool history")
+            if any(span.overlaps(source.resource) for span in committed_spans):
+                raise ValueError("committed ID batches must not overlap")
+            committed_spans.append(source.resource)
+            restored_source = NumericLease(
+                namespace,
+                replace(source, pool_id=restored_lease.pool_id),
             )
+            restored = replace(committed, source=restored_source)
             engine._committed[restored.token] = restored
         if len(engine._committed) != len(checkpoint.committed):
             raise ValueError("checkpoint committed tokens must be unique")
+
+        reusable = list(checkpoint.reusable_spans)
+        if any(not isinstance(span, Span) for span in reusable):
+            raise TypeError("reusable_spans must contain Span values")
+        if _merge_spans(reusable) != reusable:
+            raise ValueError("reusable_spans must be normalized and ordered")
+        active_spans = [
+            lease.resource for lease in leases if lease.state is LeaseState.ACTIVE
+        ]
+        if any(
+            active.overlaps(committed)
+            for active in active_spans
+            for committed in committed_spans
+        ):
+            raise ValueError("active leases must not overlap committed IDs")
+        for span in reusable:
+            if not domain.contains(span):
+                raise ValueError("reusable span is outside the ID domain")
+            if any(span.overlaps(block) for block in (*active_spans, *committed_spans)):
+                raise ValueError(
+                    "reusable spans must not overlap active or committed IDs"
+                )
+        elapsed_reusable = [
+            lease.resource
+            for lease in leases
+            if lease.state is LeaseState.EXPIRED
+            and checkpoint_leases[lease.token].state is LeaseState.ACTIVE
+            and lease.token not in engine._committed
+        ]
+        engine._reusable = _merge_spans([*reusable, *elapsed_reusable])
+
+        requests: dict[str, _DatabaseRequest] = {}
+        leases_by_request = {
+            lease.request_id: lease for lease in leases if lease.request_id is not None
+        }
+        pool_requests = {
+            record.request_id: record for record in scoped_checkpoint.pool.requests
+        }
+        for record in checkpoint.requests:
+            if not isinstance(record, _DatabaseRequest):
+                raise TypeError("checkpoint requests contain an invalid record")
+            require_string(record.request_id, "request_id")
+            require_string(record.owner, "request owner")
+            require_positive(record.ttl, "request ttl")
+            require_positive(record.count, "request count")
+            if not isinstance(record.reusable, bool):
+                raise TypeError("request reusable must be a bool")
+            if not isinstance(record.resource, Span) or not domain.contains(
+                record.resource
+            ):
+                raise ValueError("request resource is outside the ID domain")
+            if record.resource.length != record.count:
+                raise ValueError("request count conflicts with its resource")
+            lease = leases_by_request.get(record.request_id)
+            pool_request = pool_requests.get(record.request_id)
+            if (
+                lease is None
+                or pool_request is None
+                or lease.owner != record.owner
+                or lease.resource != record.resource
+                or pool_request.owner != record.owner
+                or pool_request.ttl != record.ttl
+                or pool_request.size != record.count
+                or pool_request.exact_span != record.resource
+            ):
+                raise ValueError("database request conflicts with lease history")
+            if record.request_id in requests:
+                raise ValueError("checkpoint request IDs must be unique")
+            requests[record.request_id] = record
+        if set(requests) != set(leases_by_request):
+            raise ValueError("database requests must agree with lease history")
+        engine._requests = requests
         return engine
 
     def _collect_expired(self) -> tuple[DatabaseIdLease, ...]:
@@ -187,9 +304,7 @@ class DatabaseIdPool:
             expired = self._group.expire()
             for handle in expired:
                 if handle.token not in self._committed:
-                    self._reusable = _merge_spans(
-                        [*self._reusable, handle.resource]
-                    )
+                    self._reusable = _merge_spans([*self._reusable, handle.resource])
             return expired
 
     def acquire(

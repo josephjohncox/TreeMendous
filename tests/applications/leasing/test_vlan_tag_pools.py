@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from tests.oracles.applications.leasing.vlan_tag_pools import NaiveVlanOracle
 from treemendous.applications._shared.clock import LogicalClock
+from treemendous.applications.leasing._common import PoolGroup
 from treemendous.applications.leasing.vlan_tags import VlanTagPool, VlanUnavailableError
+from treemendous.domain import Span
 
 
 def test_vlan_bounds_reservations_scopes_and_expiry_match_naive_model() -> None:
@@ -53,3 +57,24 @@ def test_vlan_idempotency_fencing_renew_release_and_checkpoint() -> None:
     diagnostics = restored.diagnostics().pools[0][1]
     assert diagnostics.released_leases == 1
     assert diagnostics.active_leases == 1
+
+
+def test_identical_domains_cannot_swap_scoped_pool_lineages() -> None:
+    engine = VlanTagPool(("one", "two"), clock=LogicalClock())
+    checkpoint = engine.checkpoint()
+    by_scope = {entry.scope: entry for entry in checkpoint.group.pools}
+
+    with pytest.raises(ValueError, match="lineage does not match"):
+        replace(by_scope["one"], pool=by_scope["two"].pool)
+
+
+def test_invalid_scope_is_rejected_before_pool_acquisition_mutates_state() -> None:
+    clock = LogicalClock()
+    group = PoolGroup({"edge": (Span(1, 3),)}, clock=clock)
+
+    with pytest.raises(TypeError, match="scope must be a string"):
+        group.acquire(1, "owner", ttl=2)  # type: ignore[arg-type]
+
+    snapshot = group.snapshot().pools[0][1]
+    assert not snapshot.leases
+    assert snapshot.diagnostics.next_fencing_token == 1

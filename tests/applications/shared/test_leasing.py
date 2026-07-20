@@ -21,6 +21,16 @@ from treemendous.applications._shared.leasing import (
 from treemendous.domain import Span
 
 
+class _SequenceClock:
+    def __init__(self, values: list[int]) -> None:
+        self._values = iter(values)
+        self.calls = 0
+
+    def now(self) -> int:
+        self.calls += 1
+        return next(self._values)
+
+
 def test_deterministic_allocation_across_disjoint_spans_and_alignment() -> None:
     clock = LogicalClock(10)
     pool = LeasePool((Span(-5, 0), Span(10, 20)), clock=clock)
@@ -115,6 +125,32 @@ def test_renew_release_and_expire_reject_old_foreign_and_terminal_handles() -> N
     assert not pool.expire()
     with pytest.raises(ExpiredLeaseError):
         pool.renew(expiring, ttl=1)
+
+
+def test_transfer_is_one_observation_and_failure_atomic() -> None:
+    clock = _SequenceClock([0, 1, 2, 2])
+    pool = LeasePool((0, 2), clock=clock)
+    source = pool.acquire("source", ttl=5, size=2)
+    calls_before = clock.calls
+
+    transferred = pool.transfer(source, "target", ttl=7)
+
+    assert clock.calls == calls_before + 1
+    assert transferred.resource == source.resource
+    assert transferred.owner == "target"
+    assert transferred.token == source.token + 1
+    history = pool.snapshot().leases
+    assert history[0].state is LeaseState.RELEASED
+    assert history[1] == transferred
+
+    regressing = _SequenceClock([0, 1, 0, 1])
+    failed_pool = LeasePool((0, 1), clock=regressing)
+    still_active = failed_pool.acquire("source", ttl=5)
+    with pytest.raises(RuntimeError, match="backwards"):
+        failed_pool.transfer(still_active, "target", ttl=5)
+    failed_snapshot = failed_pool.snapshot()
+    assert failed_snapshot.leases == (still_active,)
+    assert failed_snapshot.diagnostics.next_fencing_token == 2
 
 
 def test_reused_resources_always_receive_new_global_tokens() -> None:

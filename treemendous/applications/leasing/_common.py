@@ -18,7 +18,7 @@ from treemendous.applications._shared.leasing import (
     LeasePoolCheckpoint,
     LeasePoolSnapshot,
 )
-from treemendous.domain import Span, validate_coordinate
+from treemendous.domain import ManagedDomain, Span, validate_coordinate
 
 
 class ProcessClock:
@@ -130,10 +130,32 @@ class GroupSnapshot:
 
 
 @dataclass(frozen=True)
-class GroupCheckpoint:
-    """Immutable checkpoints for every process-local pool lineage."""
+class ScopedPoolCheckpoint:
+    """One pool checkpoint bound to its scope, domain, and source lineage."""
 
-    pools: tuple[tuple[str, LeasePoolCheckpoint], ...]
+    scope: str
+    source_pool_id: str
+    allowed_spans: tuple[Span, ...]
+    pool: LeasePoolCheckpoint
+
+    def __post_init__(self) -> None:
+        require_string(self.scope, "checkpoint scope")
+        if not isinstance(self.pool, LeasePoolCheckpoint):
+            raise TypeError("pool must be a LeasePoolCheckpoint")
+        domain = ManagedDomain(self.allowed_spans)
+        if domain.spans != self.allowed_spans:
+            raise ValueError("checkpoint allowed_spans must already be normalized")
+        if self.pool.allowed_spans != self.allowed_spans:
+            raise ValueError("scoped checkpoint domain does not match its pool")
+        if self.pool.pool_id != require_string(self.source_pool_id, "source_pool_id"):
+            raise ValueError("scoped checkpoint lineage does not match its pool")
+
+
+@dataclass(frozen=True)
+class GroupCheckpoint:
+    """Immutable scope-bound checkpoints for process-local pool lineages."""
+
+    pools: tuple[ScopedPoolCheckpoint, ...]
 
 
 @dataclass(frozen=True)
@@ -150,7 +172,9 @@ class PoolGroup:
     pool lineages, and callers must arrange single-writer takeover externally.
     """
 
-    def __init__(self, domains: Mapping[str, tuple[Span, ...]], *, clock: Clock) -> None:
+    def __init__(
+        self, domains: Mapping[str, tuple[Span, ...]], *, clock: Clock
+    ) -> None:
         if not domains:
             raise ValueError("at least one leasing scope is required")
         self.clock = clock
@@ -168,20 +192,34 @@ class PoolGroup:
             raise TypeError("checkpoint must be a GroupCheckpoint")
         if not checkpoint.pools:
             raise ValueError("checkpoint must contain at least one pool")
+        entries = checkpoint.pools
+        for entry in entries:
+            if not isinstance(entry, ScopedPoolCheckpoint):
+                raise TypeError(
+                    "checkpoint pools must contain ScopedPoolCheckpoint values"
+                )
+            if entry.pool.allowed_spans != entry.allowed_spans:
+                raise ValueError("scoped checkpoint domain does not match its pool")
+            if entry.pool.pool_id != entry.source_pool_id:
+                raise ValueError("scoped checkpoint lineage does not match its pool")
+        scopes = tuple(
+            require_string(entry.scope, "checkpoint scope") for entry in entries
+        )
+        if len(set(scopes)) != len(scopes):
+            raise ValueError("checkpoint pool scopes must be unique")
         group = cls.__new__(cls)
         group.clock = clock
         group.pools = {
-            scope: LeasePool.from_checkpoint(pool_checkpoint, clock=clock)
-            for scope, pool_checkpoint in checkpoint.pools
+            entry.scope: LeasePool.from_checkpoint(entry.pool, clock=clock)
+            for entry in entries
         }
-        if len(group.pools) != len(checkpoint.pools):
-            raise ValueError("checkpoint pool scopes must be unique")
         group.fences = FenceValidator()
         group.lock = RLock()
         return group
 
     def pool(self, scope: str) -> LeasePool:
-        """Return a configured pool or reject an unknown domain scope."""
+        """Return a configured pool or reject an invalid/unknown domain scope."""
+        scope = require_string(scope, "scope")
         try:
             return self.pools[scope]
         except KeyError:
@@ -219,6 +257,19 @@ class PoolGroup:
         released = self.pool(handle.scope).release(handle.lease)
         return NumericLease(handle.scope, released)
 
+    def transfer(
+        self, handle: NumericLease, new_owner: str, *, ttl: int
+    ) -> NumericLease:
+        """Atomically transfer one exact resource within its stable scope."""
+        self._require_handle(handle)
+        scope = require_string(handle.scope, "scope")
+        transferred = self.pool(scope).transfer(
+            handle.lease,
+            new_owner,
+            ttl=ttl,
+        )
+        return NumericLease(scope, transferred)
+
     @staticmethod
     def _require_handle(handle: NumericLease) -> None:
         if not isinstance(handle, NumericLease):
@@ -238,11 +289,7 @@ class PoolGroup:
         if handle.pool_id != pool.pool_id:
             raise ForeignLeaseError("lease belongs to another pool lineage")
         issued = next(
-            (
-                lease
-                for lease in pool.snapshot().leases
-                if lease.token == handle.token
-            ),
+            (lease for lease in pool.snapshot().leases if lease.token == handle.token),
             None,
         )
         if issued is None:
@@ -264,17 +311,38 @@ class PoolGroup:
     def snapshot(self) -> GroupSnapshot:
         """Capture every pool in deterministic scope order."""
         return GroupSnapshot(
-            tuple((scope, pool.snapshot()) for scope, pool in sorted(self.pools.items()))
+            tuple(
+                (scope, pool.snapshot()) for scope, pool in sorted(self.pools.items())
+            )
         )
 
     def checkpoint(self) -> GroupCheckpoint:
-        """Capture restorable pool state, excluding process-local fence state."""
+        """Capture scope-bound pool state, excluding local fence state."""
         return GroupCheckpoint(
             tuple(
-                (scope, pool.checkpoint())
+                ScopedPoolCheckpoint(
+                    scope,
+                    pool.pool_id,
+                    pool.allowed_spans,
+                    pool.checkpoint(),
+                )
                 for scope, pool in sorted(self.pools.items())
             )
         )
+
+    def require_domains(self, domains: Mapping[str, tuple[Span, ...]]) -> None:
+        """Cross-validate facade policy domains against restored pool domains."""
+        normalized = {
+            require_string(scope, "policy scope"): ManagedDomain(spans).spans
+            for scope, spans in domains.items()
+        }
+        if set(normalized) != set(self.pools):
+            raise ValueError("facade policy scopes do not match restored pools")
+        for scope, expected in normalized.items():
+            if self.pools[scope].allowed_spans != expected:
+                raise ValueError(
+                    f"restored pool domain does not match policy for {scope!r}"
+                )
 
     def diagnostics(self) -> GroupDiagnostics:
         """Return deterministic per-scope operational diagnostics."""
