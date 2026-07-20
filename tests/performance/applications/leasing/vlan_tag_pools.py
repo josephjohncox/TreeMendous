@@ -1,24 +1,64 @@
-"""Smoke benchmark for real VLAN tag acquisition and expiry."""
+"""Correctness-attested benchmark for scoped VLAN tag leasing."""
 
 from __future__ import annotations
 
-from time import perf_counter
-
-from treemendous.applications._shared.clock import LogicalClock
+from tests.performance.applications.harness import ApplicationSample
+from tests.performance.applications.leasing._shared import (
+    DEFAULT_OPERATIONS,
+    DEFAULT_SEED,
+    AdvancingClock,
+    LeasingBenchmarkAdapter,
+    build_commands,
+    clock_reads,
+    no_snapshot_extra,
+    run_prepared_benchmark,
+    validate_parameters,
+)
 from treemendous.applications.leasing.vlan_tags import VlanTagPool
 
+_SCOPE = "edge"
+_READS = {
+    "acquire": (_SCOPE,),
+    "renew": (_SCOPE,),
+    "fence": (_SCOPE,),
+    "release": (_SCOPE,),
+    "expire": (_SCOPE,),
+}
 
-def run_smoke(iterations: int = 100) -> dict[str, int | float]:
-    """Acquire and expire one real scoped VLAN tag per iteration."""
-    clock = LogicalClock()
-    engine = VlanTagPool(("edge",), clock=clock)
-    started = perf_counter()
-    for index in range(iterations):
-        engine.acquire("edge", f"controller-{index}", ttl=1)
-        clock.advance()
-        engine.expire()
-    return {"iterations": iterations, "seconds": perf_counter() - started}
+
+def run_benchmark(
+    operations: int = DEFAULT_OPERATIONS, seed: int = DEFAULT_SEED
+) -> ApplicationSample:
+    """Run a bounded deterministic VLAN lifecycle and attest all evidence."""
+    validate_parameters(operations, seed)
+    draft = build_commands(operations=operations, seed=seed, short_ttl=5, long_ttl=1)
+    advancing_reads = 1 + clock_reads(draft, _READS)
+    commands = build_commands(
+        operations=operations,
+        seed=seed,
+        short_ttl=5,
+        long_ttl=advancing_reads + 100,
+    )
+    clock = AdvancingClock(advancing_reads)
+    engine = VlanTagPool((_SCOPE,), clock=clock)
+    adapter = LeasingBenchmarkAdapter(
+        scenario_id="vlan-tag-pools",
+        primary_scope=_SCOPE,
+        scopes=(_SCOPE,),
+        domains={_SCOPE: ((1, 4095),)},
+        reads_by_action=_READS,
+        acquire=lambda owner, ttl: engine.acquire(_SCOPE, owner, ttl=ttl),
+        renew=lambda handle, ttl: engine.renew(handle, ttl=ttl),
+        release=engine.release,
+        expire=engine.expire,
+        fence=lambda handle: engine.validate_fence(handle, handle.resource.start),
+        snapshot=engine.snapshot,
+        snapshot_group=lambda snapshot: snapshot,
+        diagnostics=engine.diagnostics,
+        snapshot_extra=no_snapshot_extra,
+    )
+    return run_prepared_benchmark(commands=commands, adapter=adapter)
 
 
 if __name__ == "__main__":
-    print(run_smoke())
+    print(run_benchmark().to_dict())
