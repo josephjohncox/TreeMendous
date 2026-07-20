@@ -87,6 +87,7 @@ class RangeSet:
         domain: DomainInput | None = None,
         initially_available: bool = True,
         payload_policy: PayloadPolicy[Any] | None = None,
+        payload_cloner: Callable[[Any], Any] = deepcopy,
     ) -> None:
         self._adapter = adapter
         self._domain = (
@@ -98,6 +99,9 @@ class RangeSet:
         self._payload_activity_lock = Lock()
         self._payload_activity = 0
         self._payload_policy = payload_policy
+        if not callable(payload_cloner):
+            raise TypeError("payload_cloner must be callable")
+        self._payload_cloner = payload_cloner
         self._owned_payload_identity: Any = None
         self._payload_segments: list[IntervalResult] | None = (
             [] if payload_policy is not None else None
@@ -112,7 +116,7 @@ class RangeSet:
             # All user-controlled cloning, keying, and folding succeeds before
             # the caller-supplied backend is touched.
             with self._payload_processing():
-                self._owned_payload_identity = payload_policy.clone(
+                self._owned_payload_identity = self._clone_payload(
                     self._policy_identity()
                 )
                 if initially_available and self._domain is not None:
@@ -188,9 +192,9 @@ class RangeSet:
         return None
 
     def _clone_payload(self, data: Any) -> Any:
-        policy = self._payload_policy
-        assert policy is not None
-        return policy.clone(data)
+        if self._payload_policy is None:
+            raise RuntimeError("payload cloning requires an explicit payload policy")
+        return self._payload_cloner(data)
 
     def _clone_segments(
         self, segments: Iterable[IntervalResult]
