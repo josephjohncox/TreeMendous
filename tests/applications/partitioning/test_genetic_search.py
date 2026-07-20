@@ -162,6 +162,38 @@ def test_restore_requires_generation_application_event_kind() -> None:
         )
 
 
+def test_restore_accepts_abandoned_attempt_before_completed_generation() -> None:
+    failing = True
+
+    def transient_fitness(value: str) -> float:
+        if failing:
+            raise RuntimeError("transient fitness failure")
+        return _fitness(value)
+
+    engine = GeneticSearchEngine(
+        ("00", "11"),
+        transient_fitness,
+        generations=1,
+        clock=LogicalClock(),
+    )
+    with pytest.raises(ValueError, match="fitness evaluation failed"):
+        engine.step()
+    failing = False
+    engine.step()
+    checkpoint = engine.checkpoint()
+
+    restored = GeneticSearchEngine.from_checkpoint(
+        checkpoint,
+        fitness=_fitness,
+        clock=LogicalClock(),
+    )
+
+    assert restored.snapshot().generation == 1
+    event_kinds = tuple(event.kind for event in checkpoint.runtime.events.events)
+    expected_kinds = ("abandoned", "generation")
+    assert event_kinds == expected_kinds
+
+
 def test_restore_rejects_contradictory_application_and_runtime_progress() -> None:
     population = ("00", "11")
     engine = GeneticSearchEngine(population, _fitness, generations=2)

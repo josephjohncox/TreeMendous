@@ -333,8 +333,14 @@ class GeneticSearchEngine:
         )
         if any(event.kind != "generation" for event in generation_events):
             raise ClaimInvariantError("runtime generation event kind is inconsistent")
-        if tuple(event.sequence for event in generation_events) != tuple(
-            range(1, checkpoint.generation + 1)
+        generation_sequences = tuple(event.sequence for event in generation_events)
+        if any(
+            left >= right
+            for left, right in zip(
+                generation_sequences,
+                generation_sequences[1:],
+                strict=False,
+            )
         ):
             raise ClaimInvariantError("runtime generation event order is inconsistent")
 
