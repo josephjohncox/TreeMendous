@@ -302,17 +302,16 @@ class ContiguousAllocator:
         self,
         handle: AllocationHandle,
         *,
-        owner: Hashable | None = None,
+        owner: Hashable,
     ) -> None:
-        """Free a live handle, rejecting stale, forged, foreign, or wrong-owner use."""
+        """Free an owner's live handle, rejecting stale or foreign use."""
         if not isinstance(handle, AllocationHandle):
             raise TypeError("handle must be an AllocationHandle")
-        if owner is not None:
-            owner = _hashable(owner, "owner")
+        owner = _hashable(owner, "owner")
         with self._lock:
             if handle.allocator_id != self._allocator_id:
                 raise ForeignAllocationError("allocation belongs to another allocator")
-            if owner is not None and owner != handle.owner:
+            if owner != handle.owner:
                 raise ForeignAllocationError("allocation belongs to another owner")
             record = self._records.get(handle.allocation_id)
             if record is None or record.handle != handle:
@@ -405,7 +404,9 @@ class ContiguousAllocator:
                 (owner, key): allocation_id
                 for owner, key, allocation_id in checkpoint.idempotency
             }
-            self._next_allocation_id = checkpoint.next_allocation_id
+            self._next_allocation_id = max(
+                self._next_allocation_id, checkpoint.next_allocation_id
+            )
 
     @staticmethod
     def _validate_alignment(alignment: int) -> int:

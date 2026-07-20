@@ -13,11 +13,15 @@ class RingSequenceError(Exception):
 
 
 class AmbiguousSequenceError(RingSequenceError):
-    """Raised when two epochs are equally close at half the modulus."""
+    """Raised when a modular value lacks enough information to select an epoch."""
 
 
 class SequenceBeforeOriginError(RingSequenceError):
     """Raised when an observation unwraps before the tracking origin."""
+
+
+class RangeBudgetExceededError(RingSequenceError):
+    """Raised when an observation would exceed the received-range budget."""
 
 
 @dataclass(frozen=True)
@@ -36,6 +40,7 @@ class RingSequenceSnapshot:
     """Immutable received, contiguous, and missing sequence geometry."""
 
     modulus: int
+    max_ranges: int
     origin: int | None
     reference: int | None
     received_ranges: tuple[Span, ...]
@@ -48,6 +53,7 @@ class RingSequenceCheckpoint:
     """Complete state for restoring a ring sequence tracker."""
 
     modulus: int
+    max_ranges: int
     origin: int | None
     reference: int | None
     highest_received: int | None
@@ -55,23 +61,32 @@ class RingSequenceCheckpoint:
 
 
 class RingSequenceTracker:
-    """Unwrap and track modular sequence numbers using a nearest-epoch rule.
+    """Unwrap modular values and retain bounded received-range geometry.
 
-    Each observation must be within strictly less than half a modulus of the
-    current high-water reference.  Modular values exactly half a modulus away
-    are rejected because past and future epochs are equally plausible.  If
-    ``initial_sequence`` is omitted, the first observation establishes both
+    Before the first wrap, observations use the nearest-epoch rule and reject
+    exact half-modulus ambiguity.  After entering a nonzero epoch, callers must
+    identify every observation's epoch explicitly so delayed old values cannot
+    be silently reclassified.  ``max_ranges`` bounds retained fragmentation.
+    If ``initial_sequence`` is omitted, the first observation establishes both
     the origin and epoch zero.
     """
 
-    def __init__(self, modulus: int, *, initial_sequence: int | None = None) -> None:
+    def __init__(
+        self,
+        modulus: int,
+        *,
+        initial_sequence: int | None = None,
+        max_ranges: int = 1024,
+    ) -> None:
         validate_coordinate(modulus, "modulus")
         if modulus < 2:
             raise ValueError("modulus must be at least two")
+        self._validate_max_ranges(max_ranges)
         if initial_sequence is not None:
             self._validate_sequence_for_modulus(initial_sequence, modulus)
 
         self._modulus = modulus
+        self._max_ranges = max_ranges
         self._origin = initial_sequence
         self._reference = initial_sequence
         self._highest_received: int | None = None
@@ -81,6 +96,10 @@ class RingSequenceTracker:
     @property
     def modulus(self) -> int:
         return self._modulus
+
+    @property
+    def max_ranges(self) -> int:
+        return self._max_ranges
 
     @property
     def origin(self) -> int | None:
@@ -107,17 +126,25 @@ class RingSequenceTracker:
         with self._lock:
             return self._missing_ranges()
 
-    def unwrap(self, sequence: int) -> int:
-        """Return the uniquely nearest unwrapped value without recording it."""
-        self._validate_sequence(sequence)
-        with self._lock:
-            return self._unwrap(sequence)
+    def unwrap(self, sequence: int, *, epoch: int | None = None) -> int:
+        """Return an unwrapped value without recording it.
 
-    def observe(self, sequence: int) -> SequenceObservation:
+        After the tracker enters a nonzero epoch, ``epoch`` is required so an
+        old delayed value cannot be silently interpreted as a new packet.
+        """
+        self._validate_sequence(sequence)
+        self._validate_epoch(epoch)
+        with self._lock:
+            return self._unwrap(sequence, epoch)
+
+    def observe(
+        self, sequence: int, *, epoch: int | None = None
+    ) -> SequenceObservation:
         """Record a sequence number and return its unwrapped epoch information."""
         self._validate_sequence(sequence)
+        self._validate_epoch(epoch)
         with self._lock:
-            unwrapped = self._unwrap(sequence)
+            unwrapped = self._unwrap(sequence, epoch)
             origin = self._origin if self._origin is not None else unwrapped
             if unwrapped < origin:
                 raise SequenceBeforeOriginError(
@@ -125,6 +152,10 @@ class RingSequenceTracker:
                 )
 
             received, duplicate = self._with_point(self._received, unwrapped)
+            if len(received) > self._max_ranges:
+                raise RangeBudgetExceededError(
+                    f"received range budget of {self._max_ranges} would be exceeded"
+                )
             highest = (
                 unwrapped
                 if self._highest_received is None
@@ -150,6 +181,7 @@ class RingSequenceTracker:
         with self._lock:
             return RingSequenceSnapshot(
                 modulus=self._modulus,
+                max_ranges=self._max_ranges,
                 origin=self._origin,
                 reference=self._reference,
                 received_ranges=self._received,
@@ -162,6 +194,7 @@ class RingSequenceTracker:
         with self._lock:
             return RingSequenceCheckpoint(
                 modulus=self._modulus,
+                max_ranges=self._max_ranges,
                 origin=self._origin,
                 reference=self._reference,
                 highest_received=self._highest_received,
@@ -173,11 +206,17 @@ class RingSequenceTracker:
         if not isinstance(checkpoint, RingSequenceCheckpoint):
             raise TypeError("checkpoint must be a RingSequenceCheckpoint")
         with self._lock:
-            self._validate_checkpoint(checkpoint)
+            received = self._validate_checkpoint(checkpoint)
             self._origin = checkpoint.origin
             self._reference = checkpoint.reference
             self._highest_received = checkpoint.highest_received
-            self._received = checkpoint.received_ranges
+            self._received = received
+
+    @staticmethod
+    def _validate_max_ranges(max_ranges: int) -> None:
+        validate_coordinate(max_ranges, "max_ranges")
+        if max_ranges <= 0:
+            raise ValueError("max_ranges must be greater than zero")
 
     @staticmethod
     def _validate_sequence_for_modulus(sequence: int, modulus: int) -> None:
@@ -188,10 +227,24 @@ class RingSequenceTracker:
     def _validate_sequence(self, sequence: int) -> None:
         self._validate_sequence_for_modulus(sequence, self._modulus)
 
-    def _unwrap(self, sequence: int) -> int:
+    @staticmethod
+    def _validate_epoch(epoch: int | None) -> None:
+        if epoch is None:
+            return
+        validate_coordinate(epoch, "epoch")
+        if epoch < 0:
+            raise ValueError("epoch must be nonnegative")
+
+    def _unwrap(self, sequence: int, epoch: int | None) -> int:
         reference = self._reference
+        if epoch is not None:
+            return epoch * self._modulus + sequence
         if reference is None:
             return sequence
+        if reference >= self._modulus:
+            raise AmbiguousSequenceError(
+                "epoch is required after the sequence has wrapped"
+            )
         reference_modular = reference % self._modulus
         forward = (sequence - reference_modular) % self._modulus
         if forward * 2 == self._modulus:
@@ -249,18 +302,30 @@ class RingSequenceTracker:
             cursor = span.end
         return tuple(missing)
 
-    def _validate_checkpoint(self, checkpoint: RingSequenceCheckpoint) -> None:
+    def _validate_checkpoint(
+        self, checkpoint: RingSequenceCheckpoint
+    ) -> tuple[Span, ...]:
         if checkpoint.modulus != self._modulus:
             raise ValueError("checkpoint modulus does not match tracker modulus")
+        self._validate_max_ranges(checkpoint.max_ranges)
+        if checkpoint.max_ranges != self._max_ranges:
+            raise ValueError("checkpoint range budget does not match tracker policy")
         origin = checkpoint.origin
         reference = checkpoint.reference
         highest = checkpoint.highest_received
-        ranges = checkpoint.received_ranges
+        try:
+            ranges = tuple(span for span in checkpoint.received_ranges)
+        except TypeError as error:
+            raise TypeError("checkpoint received_ranges must be iterable") from error
+        if any(not isinstance(span, Span) for span in ranges):
+            raise TypeError("checkpoint received ranges must contain only Span values")
+        if len(ranges) > self._max_ranges:
+            raise ValueError("checkpoint exceeds the received range budget")
 
         if origin is None:
             if reference is not None or highest is not None or ranges:
                 raise ValueError("uninitialized checkpoint contains sequence state")
-            return
+            return ranges
         validate_coordinate(origin, "checkpoint origin")
         if not 0 <= origin < self._modulus:
             raise ValueError("checkpoint origin is outside the modular domain")
@@ -280,7 +345,8 @@ class RingSequenceTracker:
         if not ranges:
             if highest is not None or reference != origin:
                 raise ValueError("empty checkpoint has inconsistent high-water state")
-            return
+            return ranges
         expected_highest = ranges[-1].end - 1
         if highest != expected_highest or reference != max(origin, expected_highest):
             raise ValueError("checkpoint high-water state is inconsistent")
+        return ranges

@@ -76,15 +76,18 @@ def test_idempotency_is_owner_scoped_and_request_sensitive() -> None:
     assert replacement.allocation_id != original.allocation_id
 
 
-def test_free_rejects_stale_foreign_and_wrong_owner_handles() -> None:
+def test_free_requires_owner_and_rejects_cross_owner_snapshot_handles() -> None:
     allocator = ContiguousAllocator((0, 10))
     foreign_allocator = ContiguousAllocator((0, 10))
     handle = allocator.allocate(2, owner="owner")
+    exposed_handle = allocator.snapshot().allocations[0]
 
+    with pytest.raises(TypeError, match="owner"):
+        allocator.free(exposed_handle)
     with pytest.raises(ForeignAllocationError, match="another allocator"):
-        foreign_allocator.free(handle)
+        foreign_allocator.free(handle, owner="owner")
     with pytest.raises(ForeignAllocationError, match="another owner"):
-        allocator.free(handle, owner="intruder")
+        allocator.free(exposed_handle, owner="intruder")
     allocator.free(handle, owner="owner")
     with pytest.raises(StaleAllocationError, match="stale"):
         allocator.free(handle, owner="owner")
@@ -112,7 +115,7 @@ def test_reserved_holes_snapshots_and_fragmentation_diagnostics() -> None:
     assert snapshot.diagnostics.fragmentation == pytest.approx(1 / 3)
 
 
-def test_checkpoint_restore_revives_checkpoint_state_and_stales_later_handles() -> None:
+def test_checkpoint_restore_revives_state_without_reissuing_handle_ids() -> None:
     allocator = ContiguousAllocator((0, 20), reserved=(Span(10, 12),))
     retained = allocator.allocate(
         3, owner="owner", alignment=2, idempotency_key="retained"
@@ -130,9 +133,14 @@ def test_checkpoint_restore_revives_checkpoint_state_and_stales_later_handles() 
         )
         == retained
     )
+    replacement = allocator.allocate(2, owner="later")
+    assert replacement.allocation_id > later.allocation_id
+    assert replacement != later
     with pytest.raises(StaleAllocationError):
-        allocator.free(later)
-    allocator.free(retained)
+        allocator.free(later, owner="later")
+    expected_restored_allocations = (retained, replacement)
+    assert allocator.snapshot().allocations == expected_restored_allocations
+    allocator.free(retained, owner="owner")
 
 
 def test_checkpoint_validation_is_failure_atomic() -> None:
