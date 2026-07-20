@@ -1,7 +1,21 @@
-"""Correctness-checked smoke workload for deterministic fuzzing."""
+"""Attested benchmark for deterministic generated-input fuzzing."""
 
-from tests.oracles.applications.partitioning.fuzzing import generated, signature
-from treemendous.applications.partitioning.fuzzing import FuzzingEngine
+from __future__ import annotations
+
+from tests.oracles.applications.partitioning.fuzzing import expected_crashes
+from tests.performance.applications.harness import (
+    ApplicationOutcome,
+    ApplicationSample,
+    run_application_case,
+)
+from tests.performance.applications.partitioning._common import validate_case
+from treemendous.applications.partitioning.fuzzing import Crash, FuzzingEngine
+
+_DEFAULT_OPERATIONS = 320
+_MAX_OPERATIONS = 2_000
+_DEFAULT_SEED = 11
+_MAX_INPUT_SIZE = 16
+_SHARD_SIZE = 29
 
 
 def _target(data: bytes) -> None:
@@ -9,12 +23,80 @@ def _target(data: bytes) -> None:
         raise RuntimeError("five")
 
 
+def _crash_tuple(crash: Crash) -> tuple[str, int, bytes, str, str]:
+    return (
+        crash.signature,
+        crash.ordinal,
+        crash.input,
+        crash.exception_type,
+        crash.message,
+    )
+
+
+def run_benchmark(
+    operations: int = _DEFAULT_OPERATIONS, seed: int = _DEFAULT_SEED
+) -> ApplicationSample:
+    """Run deterministic cases, including one real abandoned-claim retry."""
+    validate_case(operations, seed, maximum=_MAX_OPERATIONS)
+    engine = FuzzingEngine(
+        _target,
+        cases=operations,
+        seed=seed,
+        max_input_size=_MAX_INPUT_SIZE,
+    )
+
+    def execute() -> tuple[Crash, ...]:
+        return engine.run(shard_size=_SHARD_SIZE, fail_first_claim=True)
+
+    def observe(raw: tuple[Crash, ...]) -> ApplicationOutcome:
+        snapshot = engine.snapshot()
+        crashes = tuple(_crash_tuple(crash) for crash in raw)
+        state_crashes = tuple(_crash_tuple(crash) for crash in snapshot.crashes)
+        successful_claims = (operations + _SHARD_SIZE - 1) // _SHARD_SIZE
+        return ApplicationOutcome(
+            results=crashes,
+            final_state={
+                "executed_ordinals": snapshot.executed_ordinals,
+                "crashes": state_crashes,
+                "retries": snapshot.retries,
+            },
+            counters={
+                "target_calls": len(snapshot.executed_ordinals),
+                "successful_claims": successful_claims,
+                "abandoned_claims": snapshot.retries,
+                "unique_crashes": len(snapshot.crashes),
+                "run_calls": 1,
+            },
+        )
+
+    def oracle() -> ApplicationOutcome:
+        crashes = expected_crashes(operations, seed, _MAX_INPUT_SIZE)
+        successful_claims = (operations + _SHARD_SIZE - 1) // _SHARD_SIZE
+        return ApplicationOutcome(
+            results=crashes,
+            final_state={
+                "executed_ordinals": tuple(range(operations)),
+                "crashes": crashes,
+                "retries": 1,
+            },
+            counters={
+                "target_calls": operations,
+                "successful_claims": successful_claims,
+                "abandoned_claims": 1,
+                "unique_crashes": len(crashes),
+                "run_calls": 1,
+            },
+        )
+
+    return run_application_case(
+        scenario_id="partitioning.fuzzing",
+        operations=operations,
+        execute=execute,
+        observe=observe,
+        oracle=oracle,
+    )
+
+
 def run_smoke() -> int:
-    engine = FuzzingEngine(_target, cases=400, seed=11, max_input_size=16)
-    crashes = engine.run(shard_size=29, fail_first_claim=True)
-    if any(engine.input_for(i) != generated(11, i, 16) for i in range(400)):
-        raise AssertionError("fuzz input mapping differs from oracle")
-    expected = {signature(RuntimeError("five"))}
-    if {item.signature for item in crashes} != expected:
-        raise AssertionError("fuzz crash signatures differ from oracle")
-    return len(engine.snapshot().executed_ordinals)
+    """Run the default attested workload and return its operation count."""
+    return run_benchmark().operations

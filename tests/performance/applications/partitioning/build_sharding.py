@@ -1,19 +1,95 @@
-"""Correctness-checked smoke workload for build DAG sharding."""
+"""Attested benchmark for weighted build-DAG sharding."""
 
-from tests.oracles.applications.partitioning.build_sharding import is_dependency_order
+from __future__ import annotations
+
+import random
+
+from tests.oracles.applications.partitioning.build_sharding import expected_plan
+from tests.performance.applications.harness import (
+    ApplicationOutcome,
+    ApplicationSample,
+    run_application_case,
+)
+from tests.performance.applications.partitioning._common import validate_case
 from treemendous.applications.partitioning.build_sharding import (
     BuildShardingEngine,
     BuildTask,
 )
 
+_DEFAULT_OPERATIONS = 96
+_MAX_OPERATIONS = 512
+_DEFAULT_SEED = 17
+
+
+def run_benchmark(
+    operations: int = _DEFAULT_OPERATIONS, seed: int = _DEFAULT_SEED
+) -> ApplicationSample:
+    """Execute and attest one bounded weighted build plan."""
+    validate_case(operations, seed, maximum=_MAX_OPERATIONS)
+    randomizer = random.Random(seed)
+    task_specs = tuple(
+        (
+            f"task-{index:04}",
+            tuple(
+                f"task-{dependency:04}"
+                for dependency in (index - 1, index - 3)
+                if dependency >= 0
+            ),
+            randomizer.randrange(1, 10),
+        )
+        for index in range(operations)
+    )
+    shard_count = min(11, operations)
+    tasks = tuple(BuildTask(*spec) for spec in task_specs)
+    engine = BuildShardingEngine(tasks, shard_count=shard_count)
+
+    def execute() -> tuple[str, ...]:
+        return engine.run()
+
+    def observe(raw: tuple[str, ...]) -> ApplicationOutcome:
+        snapshot = engine.snapshot()
+        shards = tuple(
+            (shard.shard_id, shard.tasks, shard.weight) for shard in snapshot.shards
+        )
+        return ApplicationOutcome(
+            results=raw,
+            final_state={
+                "topological_order": snapshot.topological_order,
+                "shards": shards,
+                "completed": snapshot.completed,
+            },
+            counters={
+                "tasks_completed": len(snapshot.completed),
+                "shards_executed": len(snapshot.shards),
+                "run_calls": 1,
+            },
+        )
+
+    def oracle() -> ApplicationOutcome:
+        order, shards = expected_plan(task_specs, shard_count)
+        return ApplicationOutcome(
+            results=order,
+            final_state={
+                "topological_order": order,
+                "shards": shards,
+                "completed": order,
+            },
+            counters={
+                "tasks_completed": len(order),
+                "shards_executed": len(shards),
+                "run_calls": 1,
+            },
+        )
+
+    return run_application_case(
+        scenario_id="partitioning.build_sharding",
+        operations=operations,
+        execute=execute,
+        observe=observe,
+        oracle=oracle,
+    )
+
 
 def run_smoke() -> int:
-    tasks = tuple(BuildTask(f"task-{i:03}", (() if i == 0 else (f"task-{i - 1:03}",)), (i % 7) + 1) for i in range(100))
-    engine = BuildShardingEngine(tasks, shard_count=11)
-    order = engine.run()
-    dependencies = {task.name: task.dependencies for task in tasks}
-    if not is_dependency_order(order, dependencies):
-        raise AssertionError("build shard order violates dependency oracle")
-    if tuple(name for shard in engine.shards for name in shard.tasks) != order:
-        raise AssertionError("build shards are not contiguous")
-    return len(order)
+    """Run the default attested workload and return its operation count."""
+    return run_benchmark().operations
