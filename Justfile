@@ -119,14 +119,11 @@ run-examples: install-dev
     #!/usr/bin/env bash
     set -euo pipefail
     root="$PWD"
-    examples=(
-        examples/basic_rangeset.py
-        examples/multidimensional/core/linear_box_index.py
-    )
+    examples=()
     while IFS= read -r example; do
         examples+=("$example")
     done < <(
-        find examples/applications -type f -name '*.py' -print | LC_ALL=C sort
+        find examples -type f -name '*.py' -print | LC_ALL=C sort
     )
     for example in "${examples[@]}"; do
         echo "==> $example"
