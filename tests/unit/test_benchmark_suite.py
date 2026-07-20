@@ -7,6 +7,11 @@ import json
 
 import pytest
 
+from tests.performance.application_workloads import (
+    APPLICATION_SPECS,
+    application_scenarios,
+    qualify_application_scenarios,
+)
 from tests.performance.benchmark_suite import SCHEMA, write_artifacts
 from tests.performance.payload_benchmark import qualify_payload_backends
 from tests.performance.profiles import benchmark_profile
@@ -42,6 +47,50 @@ def test_smoke_profile_covers_canonical_geometry_operations_and_real_use_cases()
     assert len(dimensions) == 4
 
 
+def test_application_matrix_covers_fifty_distinct_interval_tasks():
+    required = {
+        "distributed-document-search",
+        "distributed-regex-scan",
+        "distributed-cluster-scheduling",
+        "distributed-genetic-search",
+        "genomic-annotation-overlap",
+        "heap-free-space",
+        "tcp-udp-port-leases",
+    }
+    ids = {spec.id for spec in APPLICATION_SPECS}
+    scenarios = application_scenarios(scale=4, operations=20)
+
+    assert len(APPLICATION_SPECS) == 50
+    assert len(ids) == len(APPLICATION_SPECS)
+    assert required <= ids
+    assert {spec.category for spec in APPLICATION_SPECS} == {
+        "distributed_partition",
+        "scheduling_reservation",
+        "overlap_catalog",
+        "allocation_churn",
+        "resource_leasing",
+    }
+    assert {spec.family for spec in APPLICATION_SPECS} == {
+        "partition",
+        "scheduling",
+        "catalog",
+        "allocator",
+        "lease",
+    }
+    assert len(scenarios) == 50
+    assert all(len(workload.operations) == 20 for _, workload in scenarios)
+
+
+def test_all_application_scenarios_match_the_oracle():
+    reports = qualify_application_scenarios(("py_boundary",), scale=2, operations=8)
+
+    assert len(reports) == 50
+    for report in reports:
+        assert report["application"]["id"]
+        assert len(report["validation"]["state_checksum"]) == 64
+        assert report["results"]["py_boundary"]["execution_ns"] > 0
+
+
 def test_every_payload_policy_is_qualified_with_real_operations():
     reports = qualify_payload_backends(("py_boundary",), scale=8, operations=35, seed=9)
 
@@ -70,6 +119,7 @@ def test_artifacts_are_atomic_human_readable_and_checksum_verified(tmp_path):
         "environment": {"commit": "abc123"},
         "sampled_reports": [],
         "qualification_reports": [],
+        "application_reports": [],
         "payload_reports": [],
     }
     output = tmp_path / "run.json"

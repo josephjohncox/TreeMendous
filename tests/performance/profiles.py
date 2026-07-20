@@ -22,6 +22,8 @@ class BenchmarkProfile:
     samples: int
     warmups: int
     processes: int
+    application_scale: int
+    application_operations: int
     payload_scale: int
     payload_operations: int
     sampled_workloads: tuple[BenchmarkWorkload, ...]
@@ -37,6 +39,8 @@ def benchmark_profile(name: str) -> BenchmarkProfile:
             samples=20,
             warmups=1,
             processes=2,
+            application_scale=8,
+            application_operations=40,
             payload_scale=32,
             payload_operations=100,
             sampled_workloads=(
@@ -61,6 +65,8 @@ def benchmark_profile(name: str) -> BenchmarkProfile:
             samples=20,
             warmups=2,
             processes=2,
+            application_scale=16,
+            application_operations=100,
             payload_scale=64,
             payload_operations=200,
             sampled_workloads=(
@@ -86,6 +92,8 @@ def benchmark_profile(name: str) -> BenchmarkProfile:
             samples=20,
             warmups=2,
             processes=2,
+            application_scale=32,
+            application_operations=200,
             payload_scale=128,
             payload_operations=500,
             sampled_workloads=(

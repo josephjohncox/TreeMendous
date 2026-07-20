@@ -92,6 +92,7 @@ Details and probe behavior are in [Backends](docs/backends.md).
 - [Backend catalog](docs/backends.md)
 - [Building optional backends](docs/building.md)
 - [Benchmark methodology](docs/benchmarking.md)
+- [Interval workload and use-case matrix](docs/use-cases.md)
 - [Contributing and quality gates](docs/contributing.md)
 - [Release process](docs/releasing.md)
 - [Tracked executable example](examples/basic_rangeset.py)

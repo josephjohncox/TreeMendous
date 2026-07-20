@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from tests.performance.application_workloads import qualify_application_scenarios
 from tests.performance.harness import (
     benchmark_backends,
     environment_metadata,
@@ -20,7 +21,7 @@ from tests.performance.profiles import BenchmarkProfile, benchmark_profile
 from treemendous import BackendRegistry
 from treemendous.backends.types import Available, Maturity
 
-SCHEMA = "treemendous-validated-benchmark-suite-v2"
+SCHEMA = "treemendous-validated-benchmark-suite-v3"
 PROFILE_NAMES = ("smoke", "standard", "large")
 SECTION_NAMES = (
     "all",
@@ -29,6 +30,7 @@ SECTION_NAMES = (
     "qualification-catalog",
     "qualification-lease",
     "qualification-scheduling",
+    "applications",
     "payload",
 )
 
@@ -144,6 +146,20 @@ def run_profile(
         )
         qualifications.append(qualify_backends(backend_ids, workload))
 
+    application_reports: list[dict[str, Any]] = []
+    if section in {"all", "applications"}:
+        print(
+            "qualify: 50 application scenarios "
+            f"({profile.application_operations:,} operations each, "
+            f"{len(backend_ids)} backends)",
+            flush=True,
+        )
+        application_reports = qualify_application_scenarios(
+            backend_ids,
+            scale=profile.application_scale,
+            operations=profile.application_operations,
+        )
+
     payload_reports: list[dict[str, Any]] = []
     if section in {"all", "payload"}:
         print(
@@ -168,6 +184,8 @@ def run_profile(
             "samples": profile.samples,
             "warmups": profile.warmups,
             "processes": profile.processes,
+            "application_scale": profile.application_scale,
+            "application_operations": profile.application_operations,
             "payload_scale": profile.payload_scale,
             "payload_operations": profile.payload_operations,
         },
@@ -176,11 +194,12 @@ def run_profile(
         "ci_provenance": _ci_provenance(),
         "interpretation": (
             "sampled reports are local directional measurements with complete "
-            "oracle validation; qualification reports are single-run scale gates "
-            "and must not be used to rank backends"
+            "oracle validation; qualification and application reports are "
+            "single-run semantic gates and must not be used to rank backends"
         ),
         "sampled_reports": sampled,
         "qualification_reports": qualifications,
+        "application_reports": application_reports,
         "payload_reports": payload_reports,
     }
 
@@ -235,6 +254,22 @@ def _markdown(report: dict[str, Any], digest: str) -> str:
                 f"{result['execution_ns'] / 1e9:.3f} s | "
                 f"{rate:,.0f} | `{state}` |"
             )
+    lines.extend(
+        [
+            "",
+            "## Application scenario matrix",
+            "",
+            "| Category | Application | Family | Operations | Backends | State |",
+            "|---|---|---:|---:|---:|---:|",
+        ]
+    )
+    for item in report["application_reports"]:
+        application = item["application"]
+        lines.append(
+            f"| {application['category']} | {application['title']} | "
+            f"{application['family']} | {item['dataset']['timed_operations']:,} | "
+            f"{len(item['results'])} | `{item['validation']['state_checksum'][:12]}` |"
+        )
     lines.extend(
         [
             "",

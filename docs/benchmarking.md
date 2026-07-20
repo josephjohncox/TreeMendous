@@ -31,7 +31,8 @@ just benchmark-smoke build/benchmarks/smoke-$(git rev-parse --short HEAD).json
 
 ## What is exercised
 
-The traces model four plausible uses rather than random method calls:
+The sampled traces model four core workload shapes rather than random method
+calls:
 
 - **Fragmented allocator churn:** repeated release, reserve, lookup, atomic
   allocation, impossible fits, and invalid requests over alternating free and
@@ -55,6 +56,13 @@ property-based payload law suite remains the independent check for algebraic
 laws; the benchmark rejects any cross-backend state or query divergence under
 load.
 
+A separate application matrix qualifies 50 concrete tasks across distributed
+partition claiming, scheduling/reservation, overlap catalogs, allocation churn,
+and numeric resource leasing. This includes distributed document search,
+distributed regex scanning, distributed cluster scheduling, and distributed
+genetic search. See the [use-case matrix](use-cases.md) for exact range semantics
+and explicit non-goals.
+
 ## Profiles
 
 | Profile | Purpose | Sampled scale | Load qualification |
@@ -63,10 +71,12 @@ load.
 | `standard` | Weekly engineering run | Up to 128 initial ranges and 1,100 operations, 20 independent samples | 10,000-range catalog, 2,000-shard lease pool, 25,000 scheduled jobs |
 | `large` | Manual production-scale qualification | Up to 128 initial ranges and 1,100 operations, 20 independent samples | 25,000-range catalog, 5,000-shard lease pool, 50,000 scheduled jobs |
 
-The large profile separates interval cardinality from operation count where a
-linear-scan backend would otherwise create a meaningless cross product. It
-qualifies high-cardinality state and high-volume operation loads independently,
-using workloads that resemble actual service behavior.
+Every profile also executes all 50 application scenarios against all stable
+backends: 40 operations per scenario in smoke, 100 in standard, and 200 in
+large. The large profile separates interval cardinality from operation count
+where a linear-scan backend would otherwise create a meaningless cross product.
+It qualifies high-cardinality state and high-volume operation loads
+independently, using workloads that resemble actual service behavior.
 
 ## Correctness before timing
 
@@ -104,7 +114,7 @@ files for 30 days.
 
 `.github/workflows/benchmarks.yml` runs the standard profile weekly and accepts
 manual `standard` or `large` dispatches. Long profiles are split into sampled,
-catalog, lease, scheduling, and payload jobs so each section produces an
+catalog, lease, scheduling, applications, and payload jobs so each section produces an
 independently useful artifact and one slow workload cannot erase completed
 results. The same sections are available locally:
 

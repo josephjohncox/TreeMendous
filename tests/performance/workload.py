@@ -112,6 +112,54 @@ def immutable_query_workload(
     )
 
 
+def overlap_query_workload(
+    *,
+    interval_count: int = 64,
+    query_count: int = 500,
+    seed: int = 42,
+) -> BenchmarkWorkload:
+    """Query overlaps in an immutable annotation or lock catalog."""
+    if interval_count <= 0 or query_count <= 0:
+        raise ValueError("interval and query counts must be positive")
+    extent = interval_count * 4
+    setup = tuple(
+        Operation("add", start=index * 4, end=index * 4 + 2)
+        for index in range(interval_count)
+    )
+    rng = random.Random(seed)
+    operations: list[Operation] = []
+    for index in range(query_count):
+        start = rng.randrange(extent)
+        end = min(extent, start + rng.randint(1, min(32, extent - start)))
+        if index == query_count - 1:
+            operations.append(Operation("snapshot"))
+        elif index == query_count - 2:
+            operations.append(Operation("stats"))
+        elif index % 5:
+            operations.append(Operation("overlaps", start=start, end=end))
+        else:
+            operations.append(
+                Operation(
+                    "first_fit",
+                    length=rng.randint(1, min(4, extent)),
+                    not_before=start,
+                )
+            )
+    return BenchmarkWorkload(
+        "immutable-overlap-catalog",
+        ((0, extent),),
+        setup,
+        tuple(operations),
+        extent,
+        (
+            ("plausible_use", "annotation, lock, or event overlap lookup"),
+            ("updates", "none during timed phase"),
+            ("query_mix", "80% overlaps, 20% first_fit plus checkpoints"),
+            ("read_surface", "overlaps, first_fit, snapshot, stats"),
+        ),
+    )
+
+
 def scheduling_workload(
     *,
     cores: int,

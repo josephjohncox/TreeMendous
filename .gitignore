@@ -179,6 +179,7 @@ docs/*
 !docs/backends.md
 !docs/building.md
 !docs/benchmarking.md
+!docs/use-cases.md
 !docs/contributing.md
 !docs/releasing.md
 examples/*

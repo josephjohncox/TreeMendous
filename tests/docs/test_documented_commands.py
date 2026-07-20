@@ -7,6 +7,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from tests.performance.application_workloads import APPLICATION_SPECS
 from treemendous.backends import CATALOG_BY_ID
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -17,6 +18,7 @@ DOCUMENTS = (
     ROOT / "docs/backends.md",
     ROOT / "docs/building.md",
     ROOT / "docs/benchmarking.md",
+    ROOT / "docs/use-cases.md",
     ROOT / "docs/contributing.md",
     ROOT / "docs/releasing.md",
 )
@@ -54,6 +56,21 @@ def test_every_documented_just_command_exists() -> None:
         )
     assert documented
     assert documented - recipes == set()
+
+
+def test_documented_application_matrix_matches_executable_scenarios() -> None:
+    documented = set(
+        re.findall(
+            r"^\| `([^`]+)` \|",
+            (ROOT / "docs/use-cases.md").read_text(),
+            re.MULTILINE,
+        )
+    )
+    expected = {spec.id for spec in APPLICATION_SPECS}
+    assert documented == expected, (
+        f"use-case matrix drift: missing={expected - documented}, "
+        f"unknown={documented - expected}"
+    )
 
 
 def test_documented_backend_tables_match_catalog() -> None:
