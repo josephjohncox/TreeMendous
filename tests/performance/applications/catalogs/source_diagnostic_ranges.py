@@ -42,7 +42,7 @@ def _record(record: DiagnosticRecord) -> tuple[Any, ...]:
         diagnostic.diagnostic_id,
         diagnostic.file,
         diagnostic.version,
-        int(diagnostic.severity),
+        diagnostic.severity.value,
         diagnostic.message,
     )
 
@@ -74,7 +74,7 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
             message="warning",
         )
         rows.append(
-            (diagnostic_id, "main.py", 1, int(Severity.WARNING), start, start + 8)
+            (diagnostic_id, "main.py", 1, Severity.WARNING.value, start, start + 8)
         )
 
     commands = tuple(random.randrange(500) for _ in range(operations))
@@ -99,7 +99,7 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
 
     def oracle() -> ApplicationOutcome:
         ids = tuple(
-            query(rows, "main.py", 1, start, start + 20, int(Severity.INFO))
+            query(rows, "main.py", 1, start, start + 20, Severity.INFO.value)
             for start in commands
         )
         results = tuple(tuple(by_id[item_id] for item_id in result) for result in ids)
@@ -113,7 +113,7 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
         )
 
     return run_application_case(
-        scenario_id="catalog-source-diagnostic-query",
+        scenario_id="source-diagnostic-ranges",
         operations=operations,
         execute=execute,
         observe=observe,

@@ -82,29 +82,37 @@ def _actual_result(result: Invalidation) -> dict[str, Any]:
     }
 
 
+def _bounds(record: tuple[Any, ...]) -> tuple[int, int]:
+    left = record[3]
+    right = record[4]
+    if isinstance(left, bool) or not isinstance(left, int):
+        raise TypeError("record start evidence must be an integer")
+    if isinstance(right, bool) or not isinstance(right, int):
+        raise TypeError("record end evidence must be an integer")
+    return left, right
+
+
 def _expected_result(
     records: tuple[tuple[Any, ...], ...], start: int, end: int
 ) -> dict[str, Any]:
-    points = sorted(
-        {start, end}
-        | {
-            max(start, int(record[3]))
-            for record in records
-            if int(record[3]) < end and start < int(record[4])
-        }
-        | {
-            min(end, int(record[4]))
-            for record in records
-            if int(record[3]) < end and start < int(record[4])
-        }
-    )
+    clipped: list[tuple[tuple[Any, ...], int, int]] = []
+    points = {start, end}
+    for record in records:
+        left, right = _bounds(record)
+        if left < end and start < right:
+            clipped_left = max(start, left)
+            clipped_right = min(end, right)
+            clipped.append((record, clipped_left, clipped_right))
+            points.update((clipped_left, clipped_right))
+
+    ordered_points = sorted(points)
     segments: list[tuple[int, int, tuple[tuple[Any, ...], ...]]] = []
-    for left, right in zip(points, points[1:], strict=False):
+    for left, right in zip(ordered_points, ordered_points[1:], strict=False):
         identities = tuple(
             sorted(
                 tuple(record[:3])
-                for record in records
-                if int(record[3]) < right and left < int(record[4])
+                for record, record_left, record_right in clipped
+                if record_left < right and left < record_right
             )
         )
         if not identities:
@@ -171,7 +179,7 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
         )
 
     return run_application_case(
-        scenario_id="catalog-video-edit-invalidation",
+        scenario_id="video-edit-regions",
         operations=operations,
         execute=execute,
         observe=observe,

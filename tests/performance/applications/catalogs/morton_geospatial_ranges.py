@@ -100,7 +100,7 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
         )
 
     return run_application_case(
-        scenario_id="catalog-morton-geospatial-search",
+        scenario_id="morton-geospatial-ranges",
         operations=operations,
         execute=execute,
         observe=observe,

@@ -104,7 +104,7 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
         )
 
     return run_application_case(
-        scenario_id="catalog-subtitle-active-cues",
+        scenario_id="subtitle-cue-ranges",
         operations=operations,
         execute=execute,
         observe=observe,

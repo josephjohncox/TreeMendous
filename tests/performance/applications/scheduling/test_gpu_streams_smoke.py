@@ -76,26 +76,34 @@ def run_benchmark(
             return engine.cancel(command.owner, command.reservation_id)  # type: ignore[arg-type]
         return engine.schedule(command.owner, **command.arguments)
 
+    resource_pairs = {
+        "compute": ("compute-gpu", "compute-stream", "device:0", "stream:0:0"),
+        "graphics": ("graphics-gpu", "graphics-stream", "device:1", "stream:1:0"),
+    }
+    public_names = {
+        device_resource: (device, stream)
+        for device, stream, device_resource, _ in resource_pairs.values()
+    }
+
     def reserve_record(command: SchedulingCommand):
         arguments = command.arguments
         kind = arguments["compatibility"]
-        device = f"{kind}-gpu"
-        stream = f"{kind}-stream"
+        _, _, device_resource, stream_resource = resource_pairs[kind]
         start = arguments["dependency_ready_times"]["input"]
         return expected_reservation(
             owner=command.owner,
             start=start,
             end=start + 1,
             requirements=(
-                (f"device:{device}", {"memory": 1, "slots": 1}),
-                (f"stream:{device}:{stream}", {"units": 1}),
+                (device_resource, {"memory": 1, "slots": 1}),
+                (stream_resource, {"units": 1}),
             ),
             request_id=arguments["request_id"],
         )
 
     def result_record(_command: SchedulingCommand, record):
-        device = record["requirements"][0][0].removeprefix("device:")
-        stream = record["requirements"][1][0].split(":", maxsplit=2)[2]
+        device_resource = record["requirements"][0][0]
+        device, stream = public_names[device_resource]
         return {"device": device, "stream": stream, "reservation": record}
 
     def oracle():
@@ -103,10 +111,10 @@ def run_benchmark(
             operations=operations,
             commands=prepared,
             resources={
-                "device:compute-gpu": {"memory": 8, "slots": 2},
-                "stream:compute-gpu:compute-stream": {"units": 1},
-                "device:graphics-gpu": {"memory": 8, "slots": 2},
-                "stream:graphics-gpu:graphics-stream": {"units": 1},
+                "device:0": {"memory": 8, "slots": 2},
+                "stream:0:0": {"units": 1},
+                "device:1": {"memory": 8, "slots": 2},
+                "stream:1:0": {"units": 1},
             },
             reserve_record=reserve_record,
             result_record=result_record,

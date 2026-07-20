@@ -127,10 +127,7 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
         ("overlap", random.randrange(800)) if index % 2 == 0 else ("critical", 0)
         for index in range(operations)
     )
-    overlap_rows = [
-        (trace_id, span_id, parent or "", start, end)
-        for trace_id, span_id, parent, start, end in rows
-    ]
+    overlap_rows: list[TraceRow] = list(rows)
     expected_state = _state(catalog)
     by_id = {row[7]: row for row in expected_state["records"]}
 
@@ -187,7 +184,7 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
         )
 
     return run_application_case(
-        scenario_id="catalog-distributed-trace-queries",
+        scenario_id="distributed-trace-spans",
         operations=operations,
         execute=execute,
         observe=observe,

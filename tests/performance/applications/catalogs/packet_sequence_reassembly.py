@@ -84,6 +84,16 @@ def _result(result: ReassemblyResult) -> dict[str, Any]:
     }
 
 
+def _record_overlaps(record: tuple[Any, ...], start: int, end: int) -> bool:
+    left = record[3]
+    right = record[4]
+    if isinstance(left, bool) or not isinstance(left, int):
+        raise TypeError("record start evidence must be an integer")
+    if isinstance(right, bool) or not isinstance(right, int):
+        raise TypeError("record end evidence must be an integer")
+    return left < end and start < right
+
+
 def _gaps(missing: tuple[int, ...]) -> tuple[tuple[int, int], ...]:
     if not missing:
         return ()
@@ -140,7 +150,7 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
             selected = tuple(
                 record
                 for record in expected_records
-                if int(record[3]) < end and start < int(record[4])
+                if _record_overlaps(record, start, end)
             )
             results.append(
                 {
@@ -169,7 +179,7 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
         )
 
     return run_application_case(
-        scenario_id="catalog-packet-sequence-reassembly",
+        scenario_id="packet-sequence-reassembly",
         operations=operations,
         execute=execute,
         observe=observe,

@@ -168,7 +168,7 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
         )
 
     return run_application_case(
-        scenario_id="catalog-timeseries-alert-evaluation",
+        scenario_id="timeseries-alert-windows",
         operations=operations,
         execute=execute,
         observe=observe,

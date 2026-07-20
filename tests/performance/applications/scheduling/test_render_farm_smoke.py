@@ -139,11 +139,20 @@ def run_benchmark(
                 }
                 reservations[command.owner] = reservation
             else:
-                assignment = {**assignments[command.owner], "status": "cancelled"}
-                reservations[command.owner] = {
+                cancelled_reservation = {
                     **reservations[command.owner],
                     "status": "cancelled",
                 }
+                prior = assignments[command.owner]
+                assignment = {
+                    **prior,
+                    "status": "cancelled",
+                    "placement": {
+                        **prior["placement"],
+                        "reservation": cancelled_reservation,
+                    },
+                }
+                reservations[command.owner] = cancelled_reservation
             assignments[command.owner] = assignment
             results.append(assignment)
         reservation_state = expected_snapshot(
