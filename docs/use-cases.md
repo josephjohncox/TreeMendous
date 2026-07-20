@@ -1,10 +1,12 @@
 # Interval workload and use-case matrix
 
 Tree-Mendous manages one-dimensional integer half-open ranges. It can represent
-which coordinates are free, claimed, annotated, reserved, or overlapping. It
-does not implement the surrounding search engine, regular-expression engine,
-scheduler, genetic algorithm, database, network controller, or distributed
-consensus protocol.
+which coordinates are free, claimed, annotated, reserved, or overlapping. The
+50 names below are application-shaped benchmark traces, not application
+engines. At this revision, **0/50** are implemented as real reusable engines.
+Tree-Mendous does not yet implement the surrounding search engine,
+regular-expression engine, scheduler, genetic algorithm, database, network
+controller, or distributed consensus protocol.
 
 For distributed applications, Tree-Mendous can be the deterministic range-state
 component inside one coordinator or a replicated state machine. The surrounding
@@ -12,10 +14,75 @@ system must still provide durable storage, fencing tokens, leases, consensus,
 idempotency, worker liveness, and recovery. Sharing an in-memory `RangeSet`
 between unrelated processes is not a distributed protocol.
 
+<!-- BEGIN GENERATED SCENARIO STATUS -->
+## Application implementation status
+
+Current completion: **0/50** real engines.
+A benchmark trace is not implementation evidence. An entry becomes
+`COMPLETE` only when its engine, example, independent oracle, benchmark,
+and scenario documentation are all registered.
+
+| Scenario | Family | Category | Status | Engine | Example | Oracle | Benchmark | Docs |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `distributed-document-search` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
+| `distributed-regex-scan` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
+| `distributed-genetic-search` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
+| `distributed-graph-search` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
+| `distributed-sat-search` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
+| `distributed-fuzzing` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
+| `distributed-hyperparameter-search` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
+| `distributed-log-replay` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
+| `distributed-build-sharding` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
+| `map-reduce-input-splits` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
+| `distributed-web-crawl` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
+| `distributed-index-merge` | `partition` | `distributed_partition` | `PLANNED` | missing | missing | missing | missing | missing |
+| `distributed-cluster-scheduling` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
+| `gpu-stream-scheduling` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
+| `render-farm-frames` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
+| `ci-runner-reservations` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
+| `meeting-room-booking` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
+| `airline-gate-assignment` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
+| `operating-room-booking` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
+| `laboratory-equipment-booking` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
+| `fleet-charging-windows` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
+| `radio-spectrum-timeslots` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
+| `warehouse-dock-appointments` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
+| `maintenance-window-planning` | `scheduling` | `scheduling_reservation` | `PLANNED` | missing | missing | missing | missing | missing |
+| `genomic-annotation-overlap` | `catalog` | `overlap_catalog` | `PLANNED` | missing | missing | missing | missing | missing |
+| `source-diagnostic-ranges` | `catalog` | `overlap_catalog` | `PLANNED` | missing | missing | missing | missing | missing |
+| `filesystem-byte-locks` | `catalog` | `overlap_catalog` | `PLANNED` | missing | missing | missing | missing | missing |
+| `database-key-range-locks` | `catalog` | `overlap_catalog` | `PLANNED` | missing | missing | missing | missing | missing |
+| `packet-sequence-reassembly` | `catalog` | `overlap_catalog` | `PLANNED` | missing | missing | missing | missing | missing |
+| `subtitle-cue-ranges` | `catalog` | `overlap_catalog` | `PLANNED` | missing | missing | missing | missing | missing |
+| `video-edit-regions` | `catalog` | `overlap_catalog` | `PLANNED` | missing | missing | missing | missing | missing |
+| `timeseries-alert-windows` | `catalog` | `overlap_catalog` | `PLANNED` | missing | missing | missing | missing | missing |
+| `distributed-trace-spans` | `catalog` | `overlap_catalog` | `PLANNED` | missing | missing | missing | missing | missing |
+| `morton-geospatial-ranges` | `catalog` | `overlap_catalog` | `PLANNED` | missing | missing | missing | missing | missing |
+| `heap-free-space` | `allocator` | `allocation_churn` | `PLANNED` | missing | missing | missing | missing | missing |
+| `disk-block-allocation` | `allocator` | `allocation_churn` | `PLANNED` | missing | missing | missing | missing | missing |
+| `virtual-address-space` | `allocator` | `allocation_churn` | `PLANNED` | missing | missing | missing | missing | missing |
+| `database-page-allocation` | `allocator` | `allocation_churn` | `PLANNED` | missing | missing | missing | missing | missing |
+| `object-store-multipart-ranges` | `allocator` | `allocation_churn` | `PLANNED` | missing | missing | missing | missing | missing |
+| `cdn-byte-range-cache` | `allocator` | `allocation_churn` | `PLANNED` | missing | missing | missing | missing | missing |
+| `gpu-memory-arena` | `allocator` | `allocation_churn` | `PLANNED` | missing | missing | missing | missing | missing |
+| `ring-buffer-sequences` | `allocator` | `allocation_churn` | `PLANNED` | missing | missing | missing | missing | missing |
+| `tcp-udp-port-leases` | `lease` | `resource_leasing` | `PLANNED` | missing | missing | missing | missing | missing |
+| `numeric-ip-address-pools` | `lease` | `resource_leasing` | `PLANNED` | missing | missing | missing | missing | missing |
+| `database-id-pools` | `lease` | `resource_leasing` | `PLANNED` | missing | missing | missing | missing | missing |
+| `software-license-seats` | `lease` | `resource_leasing` | `PLANNED` | missing | missing | missing | missing | missing |
+| `warehouse-bin-ranges` | `lease` | `resource_leasing` | `PLANNED` | missing | missing | missing | missing | missing |
+| `game-world-region-ids` | `lease` | `resource_leasing` | `PLANNED` | missing | missing | missing | missing | missing |
+| `vlan-tag-pools` | `lease` | `resource_leasing` | `PLANNED` | missing | missing | missing | missing | missing |
+| `phone-extension-pools` | `lease` | `resource_leasing` | `PLANNED` | missing | missing | missing | missing | missing |
+<!-- END GENERATED SCENARIO STATUS -->
+
 The benchmark suite executes the following 50 application-shaped scenarios
-against every stable backend. Each trace is accepted only when its complete
-state, query results, mutation accounting, snapshots, statistics, and overlap
-observations match the independent oracle.
+against every stable backend. These are deliberately generic range-operation
+qualifications mapped onto plausible names; they are not factories for the
+named applications and cannot mark a manifest entry complete. Each trace is
+accepted only when its complete state, query results, mutation accounting,
+snapshots, statistics, and overlap observations match the independent range
+oracle.
 
 ## Distributed partition claiming
 
@@ -95,8 +162,10 @@ lawful payload model.
 
 Coordinates must already be integers with a meaningful total order. Floating
 timestamps should be converted to fixed units. Database strings need a stable
-order-preserving integer encoding. Morton or Hilbert ranges approximate spatial
-queries; Tree-Mendous is not a multidimensional spatial index.
+order-preserving integer encoding. Morton or Hilbert ranges remain approximate
+when modeled through one-dimensional `RangeSet`; the separate experimental
+`treemendous.multidimensional.BoxIndex` preserves exact axis-aligned boxes but
+is not a completed application engine for this catalog.
 
 ## Allocation and free-space churn
 
@@ -156,9 +225,9 @@ deterministic across processes if results are replicated.
 ## What this matrix does not prove
 
 No finite suite proves every possible use case. This matrix establishes that the
-shared range operations work across five application families, 50 concrete
-scenarios, all explicit payload policies, and every stable backend. It does not
-establish:
+shared range operations work across five operation families, 50 labeled
+application-shaped traces, all explicit payload policies, and every stable
+backend. It does not establish:
 
 - generic interval-multimap semantics that preserve every overlapping record or
   duplicate identity; `RangeSet` canonicalizes geometry and folds payloads;

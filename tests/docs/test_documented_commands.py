@@ -5,10 +5,11 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from tests.docs.inventory import tracked_markdown
-from tests.performance.application_workloads import APPLICATION_SPECS
+from treemendous.applications import SCENARIO_SPECS
 from treemendous.backends import CATALOG_BY_ID
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -49,7 +50,7 @@ def test_every_documented_just_command_exists() -> None:
     assert documented - recipes == set()
 
 
-def test_documented_application_matrix_matches_executable_scenarios() -> None:
+def test_documented_application_matrix_matches_scenario_manifest() -> None:
     documented = set(
         re.findall(
             r"^\| `([^`]+)` \|",
@@ -57,11 +58,22 @@ def test_documented_application_matrix_matches_executable_scenarios() -> None:
             re.MULTILINE,
         )
     )
-    expected = {spec.id for spec in APPLICATION_SPECS}
+    expected = {spec.id for spec in SCENARIO_SPECS}
     assert documented == expected, (
         f"use-case matrix drift: missing={expected - documented}, "
         f"unknown={documented - expected}"
     )
+
+
+def test_generated_scenario_status_is_current() -> None:
+    completed = subprocess.run(
+        [sys.executable, "scripts/generate_scenario_catalog.py", "--check"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_documented_backend_tables_match_catalog() -> None:

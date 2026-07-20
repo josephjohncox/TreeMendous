@@ -5,7 +5,7 @@
 - [Backend support](backends.md)
 - [Building optional backends](building.md)
 - [Benchmark methodology](benchmarking.md)
-- [Interval workload and use-case matrix](use-cases.md)
+- [Application-shaped workloads and implementation status](use-cases.md)
 - [Experimental multidimensional `BoxIndex` semantics](theory/box_index_denotation.md)
 - [Contributing and quality gates](contributing.md)
 - [Release process](releasing.md)

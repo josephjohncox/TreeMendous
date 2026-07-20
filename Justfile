@@ -94,7 +94,11 @@ benchmark-batch backend="metal_boundary_summary": install-dev
 check-layout: install-dev
     uv run pytest tests/packaging/test_repository_layout.py -q
 
-check: install-dev check-layout
+check-scenarios: install-dev
+    uv run python scripts/generate_scenario_catalog.py --check
+    uv run pytest tests/applications/test_registry.py -q
+
+check: install-dev check-layout check-scenarios
     uv run ruff check .
     uv run ruff format --check .
     uv run mypy treemendous
