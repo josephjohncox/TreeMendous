@@ -15,6 +15,10 @@ def test_optimized_boundary_summary_optional_results_are_python_values() -> None
     assert first_fit is not None and list(first_fit) == [0, 10]
     assert best_fit is not None and list(best_fit) == [0, 10]
     assert largest is not None and list(largest) == [40, 100]
+    summary = manager.get_summary()
+    assert summary.total_free_length == 80
+    assert summary.interval_count == 2
+    assert summary.largest_interval_length == 60
     assert manager.find_interval(100, 1) is None
 
     fragmented = module.BoundarySummaryManager()
