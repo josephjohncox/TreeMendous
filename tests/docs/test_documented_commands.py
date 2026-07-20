@@ -5,23 +5,15 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
-from tests.performance.application_workloads import APPLICATION_SPECS
+from tests.docs.inventory import tracked_markdown
+from treemendous.applications import SCENARIO_SPECS
 from treemendous.backends import CATALOG_BY_ID
 
 ROOT = Path(__file__).resolve().parents[2]
-DOCUMENTS = (
-    ROOT / "README.md",
-    ROOT / "docs/getting-started.md",
-    ROOT / "docs/api.md",
-    ROOT / "docs/backends.md",
-    ROOT / "docs/building.md",
-    ROOT / "docs/benchmarking.md",
-    ROOT / "docs/use-cases.md",
-    ROOT / "docs/contributing.md",
-    ROOT / "docs/releasing.md",
-)
+DOCUMENTS = (ROOT / "README.md", *tracked_markdown(ROOT))
 
 
 def _just_recipes() -> set[str]:
@@ -58,7 +50,7 @@ def test_every_documented_just_command_exists() -> None:
     assert documented - recipes == set()
 
 
-def test_documented_application_matrix_matches_executable_scenarios() -> None:
+def test_documented_application_matrix_matches_scenario_manifest() -> None:
     documented = set(
         re.findall(
             r"^\| `([^`]+)` \|",
@@ -66,11 +58,56 @@ def test_documented_application_matrix_matches_executable_scenarios() -> None:
             re.MULTILINE,
         )
     )
-    expected = {spec.id for spec in APPLICATION_SPECS}
+    expected = {spec.id for spec in SCENARIO_SPECS}
     assert documented == expected, (
         f"use-case matrix drift: missing={expected - documented}, "
         f"unknown={documented - expected}"
     )
+
+
+def test_generated_scenario_status_is_current() -> None:
+    completed = subprocess.run(
+        [sys.executable, "scripts/generate_scenario_catalog.py", "--check"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_completed_catalog_has_no_stale_zero_of_fifty_claim() -> None:
+    assert len(SCENARIO_SPECS) == 50
+    assert all(spec.status.value == "complete" for spec in SCENARIO_SPECS)
+    text = (ROOT / "docs/use-cases.md").read_text(encoding="utf-8")
+    assert re.search(r"(?<!\d)0\s*/\s*50(?!\d)", text) is None
+
+
+def test_generated_status_links_every_registered_evidence_file() -> None:
+    document = ROOT / "docs/use-cases.md"
+    text = document.read_text(encoding="utf-8")
+    _, remainder = text.split("<!-- BEGIN GENERATED SCENARIO STATUS -->", 1)
+    block, _ = remainder.split("<!-- END GENERATED SCENARIO STATUS -->", 1)
+    actual_targets = re.findall(r"\[[^]]+\]\(([^)]+)\)", block)
+
+    expected_targets: list[str] = []
+    for spec in SCENARIO_SPECS:
+        assert spec.engine is not None
+        module_name, separator, _ = spec.engine.partition(":")
+        assert separator == ":"
+        expected_targets.append(f"../{module_name.replace('.', '/')}.py")
+        for field_name in ("example", "oracle", "benchmark", "docs"):
+            reference = getattr(spec, field_name)
+            assert reference is not None
+            expected_targets.append(
+                reference.removeprefix("docs/")
+                if reference.startswith("docs/")
+                else f"../{reference}"
+            )
+
+    assert sorted(actual_targets) == sorted(expected_targets)
+    for target in actual_targets:
+        assert (document.parent / target).resolve().is_file(), target
 
 
 def test_documented_backend_tables_match_catalog() -> None:

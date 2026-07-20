@@ -114,7 +114,10 @@ The resulting endpoint segments preserve the exact overlap:
 ### Ordered payloads
 
 `OrderedPayloadPolicy` uses an associative but order-sensitive operation.
-Overlapping writes are combined in insertion order.
+Active events are folded in deterministic `(start, end, event_key)` order, not
+in insertion order. Supply `event_key_fn` when application payloads need an
+explicit stable ordering key; insertion permutations then produce the same
+pointwise result.
 
 ```python
 from treemendous import OrderedPayloadPolicy
@@ -124,6 +127,17 @@ policy = OrderedPayloadPolicy(
     identity=tuple(),
 )
 ```
+
+Payload algebra and payload ownership are separate concerns. `RangeSet` uses
+`copy.deepcopy` at storage, callback, and observation boundaries by default.
+Pass `payload_cloner=` to `RangeSet`, `BackendRegistry.create`, or
+`create_range_set` when an application needs a different cloning strategy. A
+custom cloner for mutable payloads must return a semantically detached value;
+an alias-preserving cloner deliberately opts out of isolation. Policy `bottom`
+and `identity` values are cloned and owned when the `RangeSet` is constructed,
+so later caller mutation cannot alter default additions. Stable backend
+adapters must make each individual geometry mutation failure-atomic; callbacks
+and payload staging complete before that mutation is invoked.
 
 ## Backend registry
 

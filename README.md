@@ -1,8 +1,10 @@
 # Tree-Mendous
 
 Tree-Mendous is a Python library for managing available integer ranges with
-interchangeable Python and native CPU backends. The API models
-half-open ranges: `[start, end)` includes `start` and excludes `end`.
+interchangeable Python and native CPU backends. It also ships 50 concrete,
+process-local application engines for partitioning, scheduling, overlap
+catalogs, allocation, and numeric leasing. The range API models half-open
+ranges: `[start, end)` includes `start` and excludes `end`.
 
 ## Install
 
@@ -63,6 +65,17 @@ assert cpus.first_fit(2, not_before=0).data == "cpu"
 See [API and payload policies](docs/api.md) for join and ordered policies.
 All raw backends store geometry only.
 
+## Application engines
+
+The application registry is an explicit namespace and is not re-exported from
+the stable `treemendous` root. Use
+`treemendous.applications.create_application` for scenario-ID dispatch, or
+import a concrete type from its scenario module. The
+[application index](docs/applications.md) documents all five packages, every
+engine and example, shared kernels, guarantees, and process-local boundaries.
+The [use-case matrix](docs/use-cases.md) distinguishes these 50 engines from the
+separate 50 legacy generic backend traces.
+
 ## Backend maturity
 
 Availability is probed at runtime; an explicit unavailable or invalid backend
@@ -92,10 +105,14 @@ Details and probe behavior are in [Backends](docs/backends.md).
 - [Backend catalog](docs/backends.md)
 - [Building optional backends](docs/building.md)
 - [Benchmark methodology](docs/benchmarking.md)
-- [Interval workload and use-case matrix](docs/use-cases.md)
+- [Concrete application engine index](docs/applications.md)
+- [Application status and legacy workload matrix](docs/use-cases.md)
+- [Family-grouped executable examples](examples/README.md)
+- [Experimental multidimensional `BoxIndex` semantics](docs/theory/box_index_denotation.md)
 - [Contributing and quality gates](docs/contributing.md)
 - [Release process](docs/releasing.md)
-- [Tracked executable example](examples/basic_rangeset.py)
+- [Stable executable example](examples/basic_rangeset.py)
+- [Experimental multidimensional example](examples/multidimensional/core/linear_box_index.py)
 
 ## Development
 
@@ -106,9 +123,13 @@ just build
 ```
 
 `just check` enforces Ruff lint and formatting, mypy, branch coverage, docs
-contracts, and bytecode/artifact-policy sanity. `just benchmark-smoke`,
-`just benchmark-standard`, and `just benchmark-large` run validated workload
-profiles and write JSON, Markdown, and checksum artifacts. See
-[Benchmarking](docs/benchmarking.md) and [Contributing](docs/contributing.md).
+contracts, and bytecode/artifact-policy sanity. The generic backend suites are
+`just benchmark-smoke`, `just benchmark-standard`, and `just benchmark-large`.
+The concrete engine suites are `just benchmark-applications-smoke` and
+`just benchmark-applications-standard`. `just benchmark` runs both standard
+suites, and `just run-examples` executes all 50 application examples plus the
+basic and multidimensional examples. All benchmark recipes write JSON,
+Markdown, and checksum artifacts. See [Benchmarking](docs/benchmarking.md) and
+[Contributing](docs/contributing.md).
 
 License: BSD-3-Clause.

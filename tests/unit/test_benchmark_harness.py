@@ -42,6 +42,79 @@ from treemendous import IntervalResult, Span, create_range_set
 pytestmark = pytest.mark.unit
 
 
+class _WrongOverlapTarget:
+    def __init__(self, target):
+        self._target = target
+
+    def __getattr__(self, name):
+        return getattr(self._target, name)
+
+    def overlaps(self, span):
+        return (IntervalResult(90, 91),)
+
+
+class _NoOpAddTarget:
+    def __init__(self, target):
+        self._target = target
+
+    def __getattr__(self, name):
+        return getattr(self._target, name)
+
+    def add(self, span):
+        return SimpleNamespace(changed_length=0, changed=(), fully_covered=False)
+
+
+class _WrongCoveredTarget:
+    def __init__(self, target):
+        self._target = target
+
+    def __getattr__(self, name):
+        return getattr(self._target, name)
+
+    def add(self, span):
+        mutation = self._target.add(span)
+        return SimpleNamespace(
+            changed=mutation.changed,
+            changed_length=mutation.changed_length,
+            fully_covered=not mutation.fully_covered,
+        )
+
+
+class _RedirectedMutationTarget:
+    def __init__(self, target):
+        self._target = target
+
+    def __getattr__(self, name):
+        return getattr(self._target, name)
+
+    def add(self, span):
+        return self._target.add(Span(span.start + 20, span.end + 20))
+
+    def discard(self, span):
+        return self._target.discard(Span(span.start + 20, span.end + 20))
+
+
+class _SharedMutationTarget:
+    def __init__(self, target):
+        self._target = target
+        self._result = SimpleNamespace(
+            changed=(), changed_length=0, fully_covered=False
+        )
+
+    def __getattr__(self, name):
+        return getattr(self._target, name)
+
+    def add(self, span):
+        mutation = self._target.add(span)
+        self._result.changed = mutation.changed
+        self._result.changed_length = mutation.changed_length
+        self._result.fully_covered = mutation.fully_covered
+        if span.start == 0:
+            self._result.changed = ()
+            self._result.changed_length = 0
+        return self._result
+
+
 class _DivergentQueryTarget:
     def __init__(self, target):
         self._target = target
@@ -136,8 +209,11 @@ def test_indexed_oracle_preserves_initial_domain_and_mutation_accounting():
     assert oracle.total == 14
     expected_fit = (20, 24)
     assert oracle.first_fit(4, not_before=0) == expected_fit
-    assert oracle.overlaps(1, 3)
-    assert not oracle.overlaps(3, 4)
+    overlap = oracle.overlaps(1, 3)
+    no_overlap = oracle.overlaps(3, 4)
+    expected_overlap = ((0, 2),)
+    assert overlap == expected_overlap
+    assert not no_overlap
 
 
 def test_load_qualification_reports_real_lease_operations_and_checksums():
@@ -154,6 +230,136 @@ def test_load_qualification_reports_real_lease_operations_and_checksums():
     assert {"allocate", "cancel", "overlaps", "snapshot", "stats"} <= set(
         result["operation_latency_descriptive"]
     )
+
+
+def test_wrong_nonempty_overlap_geometry_is_rejected() -> None:
+    workload = BenchmarkWorkload(
+        "wrong-overlap",
+        ((0, 100),),
+        (
+            Operation("add", start=10, end=20),
+            Operation("add", start=30, end=40),
+        ),
+        (Operation("overlaps", start=15, end=35),),
+        100,
+    )
+    target = create_range_set(
+        workload.domain,
+        backend="py_boundary",
+        initially_available=False,
+    )
+
+    with pytest.raises(AssertionError, match="benchmark validation failed"):
+        validate_target(_WrongOverlapTarget(target), workload, name="wrong-overlap")
+
+
+def test_timed_instance_mutation_divergence_is_rejected(monkeypatch) -> None:
+    workload = BenchmarkWorkload(
+        "timed-mutation-divergence",
+        ((0, 100),),
+        (),
+        (Operation("add", start=10, end=20),),
+        100,
+    )
+    correct = create_range_set(
+        workload.domain,
+        backend="py_boundary",
+        initially_available=False,
+    )
+    divergent = _NoOpAddTarget(
+        create_range_set(
+            workload.domain,
+            backend="py_boundary",
+            initially_available=False,
+        )
+    )
+    targets = iter((correct, divergent))
+    monkeypatch.setattr(harness, "_new_backend", lambda *args: next(targets))
+
+    with pytest.raises(AssertionError, match="timed-instance validation failed"):
+        run_validated_sample("py_boundary", workload)
+
+
+@pytest.mark.parametrize(
+    "wrapper,operations",
+    [
+        (
+            _WrongCoveredTarget,
+            (Operation("add", start=0, end=10),),
+        ),
+        (
+            _RedirectedMutationTarget,
+            (
+                Operation("add", start=0, end=10),
+                Operation("discard", start=0, end=10),
+            ),
+        ),
+        (
+            _SharedMutationTarget,
+            (
+                Operation("add", start=0, end=10),
+                Operation("add", start=20, end=30),
+            ),
+        ),
+    ],
+)
+def test_timed_mutation_evidence_is_exact_and_point_in_time(
+    monkeypatch, wrapper, operations
+) -> None:
+    workload = BenchmarkWorkload(
+        "exact-mutation-evidence",
+        ((0, 100),),
+        (),
+        operations,
+        100,
+    )
+    correct = create_range_set(
+        workload.domain,
+        backend="py_boundary",
+        initially_available=False,
+    )
+    divergent = wrapper(
+        create_range_set(
+            workload.domain,
+            backend="py_boundary",
+            initially_available=False,
+        )
+    )
+    targets = iter((correct, divergent))
+    monkeypatch.setattr(harness, "_new_backend", lambda *args: next(targets))
+
+    with pytest.raises(AssertionError, match="timed-instance validation failed"):
+        run_validated_sample("py_boundary", workload)
+
+
+def test_timed_instance_wrong_overlap_is_rejected(monkeypatch) -> None:
+    workload = BenchmarkWorkload(
+        "timed-overlap-divergence",
+        ((0, 100),),
+        (
+            Operation("add", start=10, end=20),
+            Operation("add", start=30, end=40),
+        ),
+        (Operation("overlaps", start=15, end=35),),
+        100,
+    )
+    correct = create_range_set(
+        workload.domain,
+        backend="py_boundary",
+        initially_available=False,
+    )
+    divergent = _WrongOverlapTarget(
+        create_range_set(
+            workload.domain,
+            backend="py_boundary",
+            initially_available=False,
+        )
+    )
+    targets = iter((correct, divergent))
+    monkeypatch.setattr(harness, "_new_backend", lambda *args: next(targets))
+
+    with pytest.raises(AssertionError, match="timed-instance validation failed"):
+        run_validated_sample("py_boundary", workload)
 
 
 def test_divergent_query_is_rejected_before_timing_can_be_reported():
@@ -194,8 +400,8 @@ def test_checksum_serialization_delay_is_excluded_from_execution_timing(
     workload = BenchmarkWorkload(
         "timing-isolation",
         ((0, 100),),
-        (),
         (Operation("add", start=0, end=10),),
+        (Operation("overlaps", start=0, end=10),),
         100,
     )
     clock = [0]
@@ -214,6 +420,46 @@ def test_checksum_serialization_delay_is_excluded_from_execution_timing(
     assert sample.execution_ns == 0
     assert sample.validation_ns >= 1_000_000_000
     assert sample.summary.actual_interval_count == 1
+    overlap_latencies = dict(sample.operation_latency_ns)["overlaps"]
+    assert len(overlap_latencies) == 1
+    assert overlap_latencies[0] == 0
+
+
+def test_pre_call_preparation_is_excluded_from_execution_timing(monkeypatch) -> None:
+    clock = [0]
+    canonical_span = harness.Span
+
+    def costly_span(start: int, end: int):
+        clock[0] += 100
+        return canonical_span(start, end)
+
+    class Target:
+        def __getattribute__(self, name):
+            if name == "add":
+                clock[0] += 75
+            return object.__getattribute__(self, name)
+
+        def add(self, span):
+            return SimpleNamespace(changed=(), changed_length=0, fully_covered=False)
+
+    monkeypatch.setattr(harness.time, "perf_counter_ns", lambda: clock[0])
+    monkeypatch.setattr(harness, "Span", costly_span)
+
+    _, latencies, execution_ns = harness._capture_public_operations(
+        Target(),
+        (Operation("add", start=0, end=1),),
+    )
+
+    assert execution_ns == 0
+    assert latencies == {"add": [0]}
+    assert clock[0] == 175
+
+    _, cancel_latencies, cancel_execution_ns = harness._capture_public_operations(
+        Target(),
+        (Operation("cancel", job_id=99),),
+    )
+    assert cancel_execution_ns == 0
+    assert cancel_latencies == {}
 
 
 def test_statistics_use_robust_summary_and_confidence_interval():
@@ -347,7 +593,7 @@ def test_accelerator_runtime_probe_forces_synchronized_summary(monkeypatch):
 
 
 def test_multiprocess_harness_initializes_warmups_in_sampling_worker(monkeypatch):
-    workload = fragmented_workload(interval_count=2, operation_count=2)
+    workload = fragmented_workload(interval_count=2, operation_count=8)
     initialized = []
 
     class InlineExecutor:
@@ -376,7 +622,7 @@ def test_multiprocess_harness_initializes_warmups_in_sampling_worker(monkeypatch
     assert initialized[0][1] == 3
     assert report["methodology"]["independent_runs"] == 20
     assert (
-        "separate equivalent validation replay"
+        "sum of declared public-call durations"
         in report["methodology"]["execution_timing"]
     )
     assert "validation_overhead" in report["results"]["py_boundary"]

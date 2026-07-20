@@ -1,10 +1,13 @@
-# Benchmarking and scale qualification
+# Benchmarking and bounded load evidence
 
-Tree-Mendous has reproducible benchmark profiles rather than ad hoc timing
-scripts. Every profile runs the public `RangeSet` API, rejects semantic drift,
-and writes durable JSON, Markdown, and SHA-256 artifacts.
+Tree-Mendous has two application-related benchmark suites with different jobs.
+The generic suite qualifies `RangeSet` behavior and stable backends. The
+concrete suite executes the 50 registered application engines. A result from one
+suite is not evidence for the other.
 
 ## Commands
+
+Generic geometry and backend profiles:
 
 ```bash
 just benchmark-smoke
@@ -12,111 +15,134 @@ just benchmark-standard
 just benchmark-large
 ```
 
-`just benchmark` is an alias for the standard profile. Each command builds the
-stable native CPU extension and requires all six stable CPU backends. Results
-are written under `build/benchmarks/`:
-
-```text
-smoke.json
-smoke.md
-smoke.json.sha256
-```
-
-Pass a different output path as the recipe argument when retaining several
-local runs:
+Concrete application profiles:
 
 ```bash
-just benchmark-smoke build/benchmarks/smoke-$(git rev-parse --short HEAD).json
+just benchmark-applications-smoke
+just benchmark-applications-standard
 ```
 
-## What is exercised
+`just benchmark` runs both standard suites. `just run-examples` executes the 50
+application examples plus the basic and multidimensional examples from an
+unrelated working directory.
 
-The sampled traces model four core workload shapes rather than random method
-calls:
+Every command writes canonical JSON, a Markdown summary, and a SHA-256 sidecar
+under `build/benchmarks/`. The default smoke outputs are:
 
-- **Fragmented allocator churn:** repeated release, reserve, lookup, atomic
-  allocation, impossible fits, and invalid requests over alternating free and
-  occupied spans.
-- **Immutable capacity catalog:** large read-mostly sets with `first_fit`,
-  `overlaps`, `snapshot`, and `stats` checkpoints.
-- **Bounded compute scheduling:** short, medium, and long jobs with release
-  coordinates, exclusive deadlines, occupancy pressure, cancellation, success
-  by class, and Jain fairness.
-- **Sharded lease pools:** port, ID, address, or seat leases across isolated
-  pools, including block allocations and duplicate or stale cancellations.
+```text
+build/benchmarks/smoke.json
+build/benchmarks/smoke.md
+build/benchmarks/smoke.json.sha256
+build/benchmarks/applications-smoke.json
+build/benchmarks/applications-smoke.md
+build/benchmarks/applications-smoke.json.sha256
+```
 
-Separate payload traces exercise every explicit policy:
+Pass an output path as the recipe argument to retain several runs:
 
-- uniform tenant labels with payload predicates;
-- commutative/idempotent access or ownership overlays;
-- coordinate/event-key ordered booking overlays.
+```bash
+just benchmark-applications-smoke \
+  build/benchmarks/applications-smoke-$(git rev-parse --short HEAD).json
+```
 
-The payload layer is replayed through every stable geometry backend. The
-property-based payload law suite remains the independent check for algebraic
-laws; the benchmark rejects any cross-backend state or query divergence under
-load.
+## Generic backend trace suite
 
-A separate application matrix qualifies 50 concrete tasks across distributed
-partition claiming, scheduling/reservation, overlap catalogs, allocation churn,
-and numeric resource leasing. This includes distributed document search,
-distributed regex scanning, distributed cluster scheduling, and distributed
-genetic search. See the [use-case matrix](use-cases.md) for exact range semantics
-and explicit non-goals.
+`tests.performance.benchmark_suite` exercises the public `RangeSet` API. The
+`just benchmark-smoke`, `just benchmark-standard`, and `just benchmark-large`
+recipes build the native CPU extension and require all six stable CPU backends.
+The suite covers four core workload shapes:
 
-## Profiles
+- fragmented allocator churn with reserve, release, lookup, allocation, and
+  impossible-fit cases;
+- immutable read-heavy catalogs with fit, overlap, snapshot, and statistics
+  checkpoints;
+- bounded scheduling traces with release coordinates, deadlines, cancellation,
+  occupancy pressure, success counts, and Jain fairness;
+- sharded numeric lease-pool traces with block allocation and stale or duplicate
+  cancellation.
 
-| Profile | Purpose | Sampled scale | Load qualification |
-| --- | --- | --- | --- |
-| `smoke` | Required PR/build check | 32–128 initial ranges and 200–1,100 operations per workload, 20 independent samples | 500-range catalog, 250-shard lease pool, all payload policies |
-| `standard` | Weekly engineering run | Up to 128 initial ranges and 1,100 operations, 20 independent samples | 10,000-range catalog, 2,000-shard lease pool, 25,000 scheduled jobs |
-| `large` | Manual production-scale qualification | Up to 128 initial ranges and 1,100 operations, 20 independent samples | 25,000-range catalog, 5,000-shard lease pool, 50,000 scheduled jobs |
+A payload section separately replays uniform, join, and ordered payload policies
+through every stable geometry backend.
 
-Every profile also executes all 50 application scenarios against all stable
-backends: 40 operations per scenario in smoke, 100 in standard, and 200 in
-large. The large profile separates interval cardinality from operation count
-where a linear-scan backend would otherwise create a meaningless cross product.
-It qualifies high-cardinality state and high-volume operation loads
-independently, using workloads that resemble actual service behavior.
+The generic suite also has an `applications` section containing 50 legacy
+application-labeled traces. Each label maps to one of the generic workload
+constructors above. For example, `distributed-document-search` runs a generic
+lease-pool-style range trace; it does not construct or search a document index.
+These traces compare backend range semantics and do not contribute application
+completion evidence. The [legacy workload matrix](use-cases.md#legacy-generic-backend-qualification-traces)
+records each label and its range interpretation.
 
-## Correctness before timing
+### Generic profiles
 
-For geometry workloads, the harness owns an independent sorted-list oracle with
-its own span type, validation, binary-search index, mutation implementation, and
-accounting. It does not import production interval algorithms. Before a timing
-sample is accepted, an equivalent replay must match:
+| Profile | Purpose | Sampled scale | Bounded load observations | Legacy traces |
+| --- | --- | --- | --- | ---: |
+| `smoke` | Required PR/build semantic check | 32 to 128 initial ranges and 200 to 1,100 operations per workload, 20 samples | 500-range catalog and 250-shard lease pool | 40 operations for each of 50 labels |
+| `standard` | Weekly engineering run | Up to 128 initial ranges and 1,100 operations, 20 samples | 10,000-range catalog, 2,000-shard lease pool, and 25,000 scheduled jobs | 100 operations for each label |
+| `large` | Manual high-cardinality observation | Up to 128 initial ranges and 1,100 operations, 20 samples | 25,000-range catalog, 5,000-shard lease pool, and 50,000 scheduled jobs | 200 operations for each label |
 
-- every fit, allocation, overlap, snapshot, and statistics observation;
-- every successful mutation, no-op, expected error, touched interval count, and
-  changed length;
-- the complete normalized final state and total availability;
-- scheduling success by class and fairness;
-- state and query SHA-256 checksums.
+The large profile is a bounded synthetic observation. It does not define
+production capacity or a supported deployment envelope. The profile separates
+interval cardinality from operation count where combining both would produce an
+unhelpful cross product for a linear-scan backend.
 
-The timed replay contains only the declared public operations. Accounting,
-normalization, serialization, checksums, and divergence rejection occur in a
-separate replay and are reported as validation overhead.
+For generic geometry workloads, the harness uses an independent sorted-list
+oracle with its own span type, validation, index, mutation implementation, and
+accounting. Before a timing sample is accepted, replay must match all fit,
+allocation, overlap, snapshot, statistics, mutation, and final-state evidence.
+Normalization, checksums, and divergence rejection occur outside the timed
+replay.
 
-Sampled measurements use at least 20 independent runs, warmups inside each
-sampling worker, deterministically randomized backend order, medians, median
-absolute deviation, and a 95% run-level bootstrap interval for the median.
-Per-operation invocation distributions are descriptive and do not pretend that
-calls from one trace are independent samples.
+The sampled generic measurements use at least 20 independent runs, warmups,
+deterministically randomized backend order, medians, median absolute deviation,
+and a run-level bootstrap interval for the median. The single timed replay used
+for each large qualification is only a load observation. No profile enforces a
+wall-clock regression threshold.
 
-Large-scale qualification deliberately uses one timed replay after complete
-validation. Its elapsed time and operations/second are load observations, not a
-basis for ranking backends or enforcing a performance threshold.
+## Concrete application suite
 
-## Durable CI runs
+`tests.performance.application_benchmark_suite` is separate. It iterates the
+canonical `SCENARIO_SPECS`, imports the exact benchmark module registered for
+each complete scenario, and calls its `run_benchmark` function. Each module
+constructs and executes the named engine, then compares that same timed engine
+instance with the scenario's independent oracle. All 50 engines participate.
 
-Every pull request and `main` build runs the smoke profile after building the
-native CPU backend. GitHub Actions uploads the JSON, Markdown, and checksum
-files for 30 days.
+The concrete suite records result, final-state, counter, and combined evidence
+checksums. A sample is rejected if the application outcome differs from its
+oracle, identifies the wrong scenario, reports a different operation count, or
+fails validation. Repeated samples for one scenario must produce identical
+semantic checksums for the fixed seed.
 
-`.github/workflows/benchmarks.yml` runs the standard profile weekly and accepts
-manual `standard` or `large` dispatches. Long profiles are split into sampled,
-catalog, lease, scheduling, applications, and payload jobs so each section produces an
-independently useful artifact and one slow workload cannot erase completed
-results. The same sections are available locally:
+Only the scenario's application execution is timed. Setup, state observation,
+canonicalization, checksums, and independent oracle work run after the timing
+interval. This design attests the instance that was timed without counting the
+validation machinery as application work.
+
+| Profile | Operations per engine | Samples per engine | Seed | Engines |
+| --- | ---: | ---: | ---: | ---: |
+| `smoke` | 8 | 1 | 42 | 50 |
+| `standard` | 64 | 5 | 42 | 50 |
+
+There is no concrete `large` application profile. Operation counts have
+scenario-specific meaning, and elapsed times are not comparable across unlike
+engines. The suite defines no performance threshold, service-level objective,
+or production capacity claim. It also does not replay every application engine
+through every stable geometry backend; backend cross-checking belongs to the
+generic suite.
+
+## CI and durable artifacts
+
+Pull requests and `main` builds run the generic smoke profile after building the
+native CPU extension. Those JSON, Markdown, and checksum artifacts are retained
+for 30 days.
+
+The weekly benchmark workflow runs the generic standard sections and the
+concrete application standard suite. Generic sections are sampled,
+qualification catalog, qualification lease, qualification scheduling, legacy
+applications, and payload. The concrete job writes
+`applications-standard.json` and its companion files. Weekly artifacts are
+retained for 90 days.
+
+A generic section can be run directly:
 
 ```bash
 uv run python -m tests.performance.benchmark_suite \
@@ -124,12 +150,18 @@ uv run python -m tests.performance.benchmark_suite \
   --require-all-stable
 ```
 
-Artifacts are retained for 90 days and include the commit,
-Python/runtime/platform metadata, GitHub run provenance, exact profile and
-section, backend list, dimensions, validation evidence, and methodology.
+A concrete subset can be selected by repeating `--scenario`:
 
-Benchmark jobs fail on semantic divergence, unavailable stable backends,
-incomplete artifact writes, or checksum failures. They do **not** fail because
-a wall-clock number changed. Comparing performance across different hosted
-runners, CPU governors, compiler versions, or concurrent load would produce a
-false regression signal.
+```bash
+uv run python -m tests.performance.application_benchmark_suite \
+  --profile smoke \
+  --scenario distributed-document-search \
+  --scenario heap-free-space \
+  --output build/benchmarks/applications-subset.json
+```
+
+Artifacts include the commit, runtime and platform metadata, exact profile,
+scenario or workload dimensions, validation evidence, and methodology. Jobs
+fail on semantic divergence, missing required backends, invalid application
+samples, incomplete writes, or checksum failures. They do not fail merely
+because a wall-clock value changed.

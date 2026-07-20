@@ -128,6 +128,49 @@ def _checksum(value: object) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _changed_geometry(
+    before: tuple[tuple[int, int], ...],
+    start: int,
+    end: int,
+    *,
+    adding: bool,
+) -> tuple[tuple[int, int], ...]:
+    if not adding:
+        return tuple(
+            (max(interval_start, start), min(interval_end, end))
+            for interval_start, interval_end in before
+            if interval_start < end and start < interval_end
+        )
+    cursor = start
+    changed: list[tuple[int, int]] = []
+    for interval_start, interval_end in before:
+        if interval_end <= cursor:
+            continue
+        if interval_start >= end:
+            break
+        if interval_start > cursor:
+            changed.append((cursor, min(interval_start, end)))
+        cursor = max(cursor, interval_end)
+        if cursor >= end:
+            break
+    if cursor < end:
+        changed.append((cursor, end))
+    return tuple(changed)
+
+
+def _fully_covered(before: tuple[tuple[int, int], ...], start: int, end: int) -> bool:
+    cursor = start
+    for interval_start, interval_end in before:
+        if interval_end <= cursor:
+            continue
+        if interval_start > cursor:
+            return False
+        cursor = max(cursor, interval_end)
+        if cursor >= end:
+            return True
+    return False
+
+
 def _changed_components(
     before: tuple[tuple[int, int], ...], start: int, end: int
 ) -> int:
@@ -210,6 +253,7 @@ def _observe_scalar(
     implementation = factory()
     _setup(implementation, workload)
     successes = no_ops = errors = touched_intervals = touched_length = 0
+    queries: list[tuple[str, int | str | None, int | str | None]] = []
     for operation in workload.operations:
         assert operation.start is not None and operation.end is not None
         before = _state(implementation)
@@ -235,6 +279,19 @@ def _observe_scalar(
             )
         after_total = _total(implementation)
         changed = abs(after_total - before_total)
+        changed_geometry = _changed_geometry(
+            before,
+            operation.start,
+            operation.end,
+            adding=operation.kind == "add",
+        )
+        queries.append(
+            (
+                f"{operation.kind}:mutation",
+                1 if _fully_covered(before, operation.start, operation.end) else 0,
+                _checksum((changed_geometry, changed)),
+            )
+        )
         if operation.kind == "discard":
             touched = sum(
                 interval_start < operation.end and interval_end > operation.start
@@ -250,7 +307,7 @@ def _observe_scalar(
             no_ops += 1
 
     state = _state(implementation)
-    query_results: tuple[tuple[str, int | str | None, int | str | None], ...] = ()
+    query_results = tuple(queries)
     return ReplaySummary(
         requested_operations=len(workload.operations),
         successful_operations=successes,

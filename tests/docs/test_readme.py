@@ -12,16 +12,31 @@ from pathlib import Path
 
 import pytest
 
+from tests.docs.inventory import tracked_markdown
+
 ROOT = Path(__file__).resolve().parents[2]
 README = ROOT / "README.md"
-MAINTAINED_DOCS = (
-    ROOT / "docs/getting-started.md",
-    ROOT / "docs/api.md",
-    ROOT / "docs/backends.md",
-    ROOT / "docs/building.md",
-    ROOT / "docs/benchmarking.md",
-    ROOT / "docs/contributing.md",
-    ROOT / "docs/releasing.md",
+MAINTAINED_DOCS = tracked_markdown(ROOT)
+RUNNABLE_EXAMPLES = (
+    (ROOT / "examples/basic_rangeset.py", "allocated [9, 11)"),
+    (
+        ROOT / "examples/multidimensional/core/linear_box_index.py",
+        ("matches=2 handles=1,2 updated=primary-updated removed=secondary remaining=1"),
+    ),
+    (
+        ROOT / "examples/multidimensional/core/fixed_box_indexes.py",
+        "\n".join(
+            (
+                "BoxIndex2D: matches=2 handles=1,2 algorithm=axis_projection",
+                "BoxIndex3D: matches=2 handles=1,2 algorithm=axis_projection",
+                "BoxIndex4D: matches=2 handles=1,2 algorithm=axis_projection",
+            )
+        ),
+    ),
+    (
+        ROOT / "examples/multidimensional/core/bounded_box_index.py",
+        "matches=2 handles=1,2 grid=(4, 4, 4) postings=9",
+    ),
 )
 
 
@@ -46,8 +61,12 @@ def test_readme_python_blocks_execute_from_unrelated_cwd(tmp_path: Path) -> None
         )
 
 
-def test_tracked_example_executes_from_unrelated_cwd(tmp_path: Path) -> None:
-    example = ROOT / "examples/basic_rangeset.py"
+@pytest.mark.parametrize("example,expected_output", RUNNABLE_EXAMPLES)
+def test_tracked_examples_execute_from_unrelated_cwd(
+    tmp_path: Path,
+    example: Path,
+    expected_output: str,
+) -> None:
     completed = subprocess.run(
         [sys.executable, str(example)],
         cwd=tmp_path,
@@ -57,7 +76,7 @@ def test_tracked_example_executes_from_unrelated_cwd(tmp_path: Path) -> None:
         text=True,
     )
     assert completed.returncode == 0, completed.stderr
-    assert completed.stdout.strip() == "allocated [9, 11)"
+    assert completed.stdout.strip() == expected_output
 
 
 def test_maintained_relative_links_resolve() -> None:

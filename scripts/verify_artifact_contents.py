@@ -12,6 +12,8 @@ from pathlib import Path, PurePosixPath
 NATIVE_SUFFIXES = {".so", ".pyd", ".dll", ".dylib"}
 GENERATED_SUFFIXES = {
     *NATIVE_SUFFIXES,
+    ".pyc",
+    ".pyo",
     ".o",
     ".obj",
     ".a",
@@ -21,12 +23,18 @@ GENERATED_SUFFIXES = {
 }
 WHEEL_FORBIDDEN_GENERATED_SUFFIXES = {".o", ".obj", ".a", ".lib", ".air"}
 SOURCE_SUFFIXES = {".cpp", ".h", ".cu", ".mm", ".metal"}
+LOCAL_METADATA_NAMES = {".context.md", ".gitrepo"}
 REQUIRED_SDIST = {
     "MANIFEST.in",
     "pyproject.toml",
     "setup.py",
     "setup_gpu.py",
     "setup_metal.py",
+    "docs/README.md",
+    "docs/theory/box_index_denotation.md",
+    "examples/README.md",
+    "examples/basic_rangeset.py",
+    "examples/multidimensional/core/linear_box_index.py",
     "treemendous/cpp/interval_types.h",
     "treemendous/cpp/boundary_bindings.cpp",
     "treemendous/cpp/gpu/boundary_summary_gpu.cu",
@@ -96,7 +104,13 @@ def artifact_paths(inputs: list[Path]) -> list[Path]:
 
 def verify_sdist(path: Path) -> dict[str, object]:
     names = _normalized_sdist_names(path)
-    generated = sorted(name for name in names if _suffix(name) in GENERATED_SUFFIXES)
+    generated = sorted(
+        name
+        for name in names
+        if _suffix(name) in GENERATED_SUFFIXES
+        or PurePosixPath(name).name in LOCAL_METADATA_NAMES
+        or "__pycache__" in PurePosixPath(name).parts
+    )
     missing = sorted(REQUIRED_SDIST - names)
     if generated or missing:
         raise ArtifactPolicyError(

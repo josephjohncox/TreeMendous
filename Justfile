@@ -14,7 +14,8 @@ build: install-dev
     uv run python scripts/verify_artifact_contents.py dist
 
 clean-cpp:
-    rm -rf build/ treemendous/cpp/*.so treemendous/__pycache__ treemendous/basic/__pycache__ treemendous/cpp/__pycache__
+    find build -mindepth 1 -maxdepth 1 ! -name benchmarks -exec rm -rf {} + 2>/dev/null || true
+    rm -rf treemendous/cpp/*.so treemendous/__pycache__ treemendous/basic/__pycache__ treemendous/cpp/__pycache__
 
 build-cpp: install-dev clean-cpp
     uv run python setup.py build_ext --inplace
@@ -62,6 +63,12 @@ benchmark-smoke output="build/benchmarks/smoke.json": build-cpp
 benchmark-standard output="build/benchmarks/standard.json": build-cpp
     uv run python -m tests.performance.benchmark_suite --profile standard --require-all-stable --output "{{output}}"
 
+benchmark-applications-smoke output="build/benchmarks/applications-smoke.json": install-dev
+    uv run python -m tests.performance.application_benchmark_suite --profile smoke --output "{{output}}"
+
+benchmark-applications-standard output="build/benchmarks/applications-standard.json": install-dev
+    uv run python -m tests.performance.application_benchmark_suite --profile standard --output "{{output}}"
+
 benchmark-large output="build/benchmarks/large.json": build-cpp
     uv run python -m tests.performance.benchmark_suite --profile large --require-all-stable --output "{{output}}"
 
@@ -77,7 +84,7 @@ test-metal: install-dev
 test-metal-quick: install-dev
     uv run python tests/performance/metal_benchmark.py --operations 100 --intervals 16
 
-benchmark: benchmark-standard
+benchmark: benchmark-standard benchmark-applications-standard
 
 benchmark-gpu-large: install-dev
     uv run python tests/performance/gpu_benchmark.py --intervals 10000 --operations 5000
@@ -91,7 +98,14 @@ benchmark-gpu-focused: install-dev
 benchmark-batch backend="metal_boundary_summary": install-dev
     uv run python tests/performance/batch_operations_benchmark.py --backend {{backend}}
 
-check: install-dev
+check-layout: install-dev
+    uv run pytest tests/packaging/test_repository_layout.py -q
+
+check-scenarios: install-dev
+    uv run python scripts/generate_scenario_catalog.py --check
+    uv run pytest tests/applications/test_registry.py -q
+
+check: install-dev check-layout check-scenarios
     uv run ruff check .
     uv run ruff format --check .
     uv run mypy treemendous
@@ -103,7 +117,19 @@ validate: test check
     @echo "Tree-Mendous validation complete"
 
 run-examples: install-dev
-    uv run python examples/basic_rangeset.py
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="$PWD"
+    examples=()
+    while IFS= read -r example; do
+        examples+=("$example")
+    done < <(
+        find examples -type f -name '*.py' -print | LC_ALL=C sort
+    )
+    for example in "${examples[@]}"; do
+        echo "==> $example"
+        (cd /tmp && uv run --project "$root" python "$root/$example")
+    done
 
 version:
     @python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])"

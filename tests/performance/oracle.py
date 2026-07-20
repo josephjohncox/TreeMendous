@@ -38,11 +38,15 @@ class _OracleSpan:
 
 @dataclass(frozen=True)
 class OracleMutation:
-    """Observable mutation evidence produced by the reference model."""
+    """Exact observable mutation evidence produced by the reference model."""
 
+    changed: tuple[tuple[int, int], ...]
     changed_length: int
-    touched_intervals: int
     fully_covered: bool
+
+    @property
+    def touched_intervals(self) -> int:
+        return len(self.changed)
 
 
 class RangeOracle:
@@ -144,15 +148,15 @@ class RangeOracle:
         )
 
         cursor = start
-        changed_components = 0
+        changed: list[tuple[int, int]] = []
         for current_start, current_end in self._intervals[merge_left:merge_right]:
             if current_end <= start or current_start >= end:
                 continue
             if current_start > cursor:
-                changed_components += 1
+                changed.append((cursor, min(current_start, end)))
             cursor = max(cursor, min(current_end, end))
         if cursor < end:
-            changed_components += 1
+            changed.append((cursor, end))
 
         removed = sum(
             current_end - current_start
@@ -163,7 +167,7 @@ class RangeOracle:
         self._starts[merge_left:merge_right] = [merge_start]
         changed_length = merge_end - merge_start - removed
         self._total += changed_length
-        return OracleMutation(changed_length, changed_components, fully_covered)
+        return OracleMutation(tuple(changed), changed_length, fully_covered)
 
     def discard(self, start: int, end: int) -> OracleMutation:
         span = _OracleSpan(start, end)
@@ -180,14 +184,15 @@ class RangeOracle:
             replacement.append((affected[0][0], start))
         if affected and affected[-1][1] > end:
             replacement.append((end, affected[-1][1]))
-        changed_length = sum(
-            max(0, min(current_end, end) - max(current_start, start))
+        changed = tuple(
+            (max(current_start, start), min(current_end, end))
             for current_start, current_end in affected
         )
+        changed_length = sum(part_end - part_start for part_start, part_end in changed)
         self._intervals[left:right] = replacement
         self._starts[left:right] = [part_start for part_start, _ in replacement]
         self._total -= changed_length
-        return OracleMutation(changed_length, len(affected), fully_covered)
+        return OracleMutation(changed, changed_length, fully_covered)
 
     def first_fit(
         self, length: int, *, not_before: int, not_after: int | None = None
@@ -216,8 +221,14 @@ class RangeOracle:
             return None, None
         return found, self.discard(*found)
 
-    def overlaps(self, start: int, end: int) -> bool:
+    def overlaps(self, start: int, end: int) -> tuple[tuple[int, int], ...]:
         span = _OracleSpan(start, end)
         self._validate_domain(span)
         index = self._first_intersection(start)
-        return index < len(self._intervals) and self._intervals[index][0] < end
+        matches: list[tuple[int, int]] = []
+        for interval_start, interval_end in self._intervals[index:]:
+            if interval_start >= end:
+                break
+            if start < interval_end:
+                matches.append((interval_start, interval_end))
+        return tuple(matches)

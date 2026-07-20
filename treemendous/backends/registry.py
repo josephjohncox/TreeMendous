@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import lru_cache
 from types import MappingProxyType
@@ -71,6 +72,7 @@ class BackendRegistry:
         backend: str | None = None,
         request: BackendRequest = BackendRequest(),
         payload_policy: PayloadPolicy[Any] | None = None,
+        payload_cloner: Callable[[Any], Any] = deepcopy,
         initially_available: bool = True,
     ) -> RangeSet:
         spec = self._resolve(backend, request)
@@ -79,6 +81,7 @@ class BackendRegistry:
             BackendAdapter(implementation),
             domain=domain,
             payload_policy=payload_policy,
+            payload_cloner=payload_cloner,
             initially_available=initially_available,
         )
 
@@ -114,6 +117,7 @@ def create_range_set(
     backend: str | None = None,
     request: BackendRequest = BackendRequest(),
     payload_policy: PayloadPolicy[Any] | None = None,
+    payload_cloner: Callable[[Any], Any] = deepcopy,
     initially_available: bool = True,
 ) -> RangeSet:
     """Construct a canonical range set from the discovered default registry."""
@@ -122,5 +126,6 @@ def create_range_set(
         backend=backend,
         request=request,
         payload_policy=payload_policy,
+        payload_cloner=payload_cloner,
         initially_available=initially_available,
     )

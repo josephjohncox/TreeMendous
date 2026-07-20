@@ -171,18 +171,9 @@ cython_debug/
 .codebase-index/
 .pi-subagents/
 
-# External docs/examples repositories remain local-only. The small maintained
-# user contract below is intentionally tracked in this repository.
-docs/*
-!docs/getting-started.md
-!docs/api.md
-!docs/backends.md
-!docs/building.md
-!docs/benchmarking.md
-!docs/use-cases.md
-!docs/contributing.md
-!docs/releasing.md
-examples/*
-!examples/basic_rangeset.py
+# Authored documentation and examples are monorepo-owned. Legacy local
+# git-subrepo metadata is retained only as ignored host state.
+docs/.gitrepo
+examples/.gitrepo
 
 # Development symlinks (created by setup-dev-links.sh)

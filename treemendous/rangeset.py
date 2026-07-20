@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from itertools import pairwise
-from threading import RLock
+from threading import Lock, RLock
 from typing import Any
 
 from treemendous.backends.adapters import BackendAdapter
@@ -61,6 +62,17 @@ def _subtract_geometry(
     return tuple(changed)
 
 
+def _intersect_geometry(
+    sources: Iterable[IntervalResult], target: Span
+) -> tuple[Span, ...]:
+    """Return normalized geometry in *sources* intersecting ``target``."""
+    return tuple(
+        Span(max(source.start, target.start), min(source.end, target.end))
+        for source in sources
+        if source.start < target.end and target.start < source.end
+    )
+
+
 class RangeSet:
     """A normalized free-range set backed by an explicit adapter.
 
@@ -75,6 +87,7 @@ class RangeSet:
         domain: DomainInput | None = None,
         initially_available: bool = True,
         payload_policy: PayloadPolicy[Any] | None = None,
+        payload_cloner: Callable[[Any], Any] = deepcopy,
     ) -> None:
         self._adapter = adapter
         self._domain = (
@@ -83,7 +96,13 @@ class RangeSet:
             else (ManagedDomain(domain) if domain is not None else None)
         )
         self._lock = RLock()
+        self._payload_activity_lock = Lock()
+        self._payload_activity = 0
         self._payload_policy = payload_policy
+        if not callable(payload_cloner):
+            raise TypeError("payload_cloner must be callable")
+        self._payload_cloner = payload_cloner
+        self._owned_payload_identity: Any = None
         self._payload_segments: list[IntervalResult] | None = (
             [] if payload_policy is not None else None
         )
@@ -91,20 +110,37 @@ class RangeSet:
             [] if isinstance(self._payload_policy, OrderedPayloadPolicy) else None
         )
 
+        staged_payloads = self._payload_segments
+        staged_events = self._ordered_events
+        if payload_policy is not None:
+            # All user-controlled cloning, keying, and folding succeeds before
+            # the caller-supplied backend is touched.
+            with self._payload_processing():
+                policy_identity = self._policy_identity()
+                if policy_identity is not _MISSING:
+                    self._owned_payload_identity = self._clone_payload(policy_identity)
+                if initially_available and self._domain is not None:
+                    initial_data = self._payload_identity()
+                    if staged_events is not None:
+                        staged_events = [
+                            self._ordered_event(span, self._clone_payload(initial_data))
+                            for span in self._domain.spans
+                        ]
+                        staged_payloads = self._fold_ordered_events(staged_events)
+                    else:
+                        staged_payloads = [
+                            IntervalResult(
+                                span.start,
+                                span.end,
+                                data=self._clone_payload(initial_data),
+                            )
+                            for span in self._domain.spans
+                        ]
         if initially_available and self._domain is not None:
-            initial_data = self._payload_identity()
             for span in self._domain.spans:
                 self._adapter.release(span.start, span.end)
-                if self._ordered_events is not None:
-                    self._ordered_events.append(
-                        self._ordered_event(span, deepcopy(initial_data))
-                    )
-                elif self._payload_segments is not None:
-                    self._payload_segments.append(
-                        IntervalResult(span.start, span.end, data=initial_data)
-                    )
-            if self._ordered_events is not None:
-                self._payload_segments = self._fold_ordered_events(self._ordered_events)
+        self._payload_segments = staged_payloads
+        self._ordered_events = staged_events
 
     @property
     def domain(self) -> ManagedDomain | None:
@@ -114,12 +150,72 @@ class RangeSet:
     def payload_policy(self) -> PayloadPolicy[Any] | None:
         return self._payload_policy
 
-    def _payload_identity(self) -> Any:
+    @contextmanager
+    def _payload_processing(self) -> Iterator[None]:
+        """Expose arbitrary payload activity to mutators on every thread."""
+        with self._payload_activity_lock:
+            self._payload_activity += 1
+        try:
+            yield
+        finally:
+            with self._payload_activity_lock:
+                self._payload_activity -= 1
+
+    def _payload_is_active(self) -> bool:
+        with self._payload_activity_lock:
+            return self._payload_activity > 0
+
+    @contextmanager
+    def _mutation(self) -> Iterator[None]:
+        """Acquire mutation ownership without waiting behind payload callbacks."""
+        while True:
+            if self._payload_is_active():
+                raise RuntimeError(
+                    "RangeSet mutation is not allowed during payload processing"
+                )
+            if self._lock.acquire(timeout=0.01):
+                break
+        try:
+            if self._payload_is_active():
+                raise RuntimeError(
+                    "RangeSet mutation is not allowed during payload processing"
+                )
+            yield
+        finally:
+            self._lock.release()
+
+    def _policy_identity(self) -> Any:
         if isinstance(self._payload_policy, JoinPayloadPolicy):
             return self._payload_policy.bottom
         if isinstance(self._payload_policy, OrderedPayloadPolicy):
             return self._payload_policy.identity
-        return None
+        return _MISSING
+
+    def _clone_payload(self, data: Any) -> Any:
+        if self._payload_policy is None:
+            raise RuntimeError("payload cloning requires an explicit payload policy")
+        return self._payload_cloner(data)
+
+    def _clone_segments(
+        self, segments: Iterable[IntervalResult]
+    ) -> list[IntervalResult]:
+        return [
+            IntervalResult(item.start, item.end, data=self._clone_payload(item.data))
+            for item in segments
+        ]
+
+    def _clone_events(self, events: Iterable[_OrderedEvent]) -> list[_OrderedEvent]:
+        return [
+            _OrderedEvent(
+                event.span,
+                self._clone_payload(event.data),
+                deepcopy(event.order_key),
+            )
+            for event in events
+        ]
+
+    def _payload_identity(self) -> Any:
+        return self._clone_payload(self._owned_payload_identity)
 
     def _validate_domain(self, span: Span) -> None:
         if self._domain is not None and not self._domain.contains(span):
@@ -143,7 +239,8 @@ class RangeSet:
     def intervals(self) -> tuple[IntervalResult, ...]:
         with self._lock:
             if self._payload_segments is not None:
-                return tuple(self._payload_segments)
+                with self._payload_processing():
+                    return tuple(self._clone_segments(self._payload_segments))
             return self._geometry_intervals()
 
     def _covered(
@@ -211,11 +308,15 @@ class RangeSet:
             )
             if not active:
                 continue
-            data = deepcopy(policy.identity)
+            data = self._payload_identity()
             for event in active:
-                restricted = policy.restrict(deepcopy(event.data), event.span, target)
-                data = policy.combine(deepcopy(data), restricted)
-            result.append(IntervalResult(start, end, data=data))
+                restricted = policy.restrict(
+                    self._clone_payload(event.data), event.span, target
+                )
+                data = policy.combine(
+                    self._clone_payload(data), self._clone_payload(restricted)
+                )
+            result.append(IntervalResult(start, end, data=self._clone_payload(data)))
         return self._merge_payload_segments(result)
 
     def _payload_after_add(
@@ -243,14 +344,18 @@ class RangeSet:
                 continue
             target = Span(start, end)
             if old is not None and in_new:
-                old_data = policy.restrict(old.data, old.span, target)
-                new_data = policy.restrict(payload, span, target)
-                data = policy.combine(old_data, new_data)
+                old_data = policy.restrict(
+                    self._clone_payload(old.data), old.span, target
+                )
+                new_data = policy.restrict(self._clone_payload(payload), span, target)
+                data = policy.combine(
+                    self._clone_payload(old_data), self._clone_payload(new_data)
+                )
             elif old is not None:
-                data = policy.restrict(old.data, old.span, target)
+                data = policy.restrict(self._clone_payload(old.data), old.span, target)
             else:
-                data = policy.restrict(payload, span, target)
-            result.append(IntervalResult(start, end, data=data))
+                data = policy.restrict(self._clone_payload(payload), span, target)
+            result.append(IntervalResult(start, end, data=self._clone_payload(data)))
         return self._merge_payload_segments(result)
 
     def _payload_after_discard(
@@ -269,7 +374,13 @@ class RangeSet:
                     IntervalResult(
                         target.start,
                         target.end,
-                        data=policy.restrict(segment.data, segment.span, target),
+                        data=self._clone_payload(
+                            policy.restrict(
+                                self._clone_payload(segment.data),
+                                segment.span,
+                                target,
+                            )
+                        ),
                     )
                 )
             if segment.end > span.end:
@@ -278,91 +389,124 @@ class RangeSet:
                     IntervalResult(
                         target.start,
                         target.end,
-                        data=policy.restrict(segment.data, segment.span, target),
+                        data=self._clone_payload(
+                            policy.restrict(
+                                self._clone_payload(segment.data),
+                                segment.span,
+                                target,
+                            )
+                        ),
                     )
                 )
         return self._merge_payload_segments(result)
 
     def add(self, span: Span, payload: Any = _MISSING) -> MutationResult:
         self._validate_domain(span)
-        with self._lock:
+        with self._mutation():
             if payload is not _MISSING and self._payload_policy is None:
                 raise ValueError("payload requires an explicit payload policy")
             before = self._geometry_intervals()
             covered = self._covered(span, before)
-            prospective_payloads = None
-            prospective_events = None
+            changed = _subtract_geometry(
+                (IntervalResult(span.start, span.end),), before
+            )
+            committed_payloads = None
+            committed_events = None
             if self._payload_segments is not None:
-                actual_payload = deepcopy(
-                    self._payload_identity() if payload is _MISSING else payload
-                )
-                # Deep copies isolate committed mutable values from arbitrary
-                # user callbacks until all policy work has succeeded.
-                if self._ordered_events is not None:
-                    prospective_events = deepcopy(self._ordered_events)
-                    prospective_events.append(self._ordered_event(span, actual_payload))
-                    prospective_payloads = self._fold_ordered_events(prospective_events)
-                else:
-                    prospective_payloads = self._payload_after_add(
-                        deepcopy(self._payload_segments), span, actual_payload
+                with self._payload_processing():
+                    actual_payload = (
+                        self._payload_identity()
+                        if payload is _MISSING
+                        else self._clone_payload(payload)
                     )
+                    if self._ordered_events is not None:
+                        prospective_events = self._clone_events(self._ordered_events)
+                        prospective_events.append(
+                            self._ordered_event(span, actual_payload)
+                        )
+                        prospective_payloads = self._fold_ordered_events(
+                            prospective_events
+                        )
+                        committed_events = self._clone_events(prospective_events)
+                    else:
+                        prospective_payloads = self._payload_after_add(
+                            self._clone_segments(self._payload_segments),
+                            span,
+                            actual_payload,
+                        )
+                    committed_payloads = self._clone_segments(prospective_payloads)
+            # Stable adapters guarantee each geometry mutation is atomic. It is
+            # deliberately the final fallible external call before commit.
             self._adapter.release(span.start, span.end)
-            after = self._geometry_intervals()
-            if prospective_payloads is not None:
-                self._payload_segments = prospective_payloads
-            if prospective_events is not None:
-                self._ordered_events = prospective_events
-            changed = _subtract_geometry(after, before)
-            changed_length = sum(part.length for part in changed)
-            return MutationResult(changed, changed_length, covered)
+            if committed_payloads is not None:
+                self._payload_segments = committed_payloads
+            if committed_events is not None:
+                self._ordered_events = committed_events
+            return MutationResult(
+                changed,
+                sum(part.length for part in changed),
+                covered,
+            )
 
     def discard(self, span: Span, *, require_covered: bool = False) -> MutationResult:
         self._validate_domain(span)
-        with self._lock:
+        with self._mutation():
             before = self._geometry_intervals()
             covered = self._covered(span, before)
             if require_covered and not covered:
                 return MutationResult((), 0, False)
-            prospective_events = None
-            if self._ordered_events is not None:
-                prospective_events = []
-                for event in deepcopy(self._ordered_events):
-                    if not event.span.overlaps(span):
-                        prospective_events.append(event)
-                        continue
-                    for start, end in (
-                        (event.span.start, min(event.span.end, span.start)),
-                        (max(event.span.start, span.end), event.span.end),
-                    ):
-                        if start < end:
-                            target = Span(start, end)
-                            policy = self._payload_policy
-                            assert isinstance(policy, OrderedPayloadPolicy)
-                            prospective_events.append(
-                                _OrderedEvent(
-                                    target,
-                                    policy.restrict(
-                                        deepcopy(event.data), event.span, target
-                                    ),
-                                    event.order_key,
-                                )
-                            )
-                prospective_payloads = self._fold_ordered_events(prospective_events)
-            elif self._payload_segments is not None:
-                prospective_payloads = self._payload_after_discard(
-                    deepcopy(self._payload_segments), span
-                )
-            else:
-                prospective_payloads = None
+            changed = _intersect_geometry(before, span)
+            committed_events = None
+            committed_payloads = None
+            if self._payload_segments is not None:
+                with self._payload_processing():
+                    prospective_events = None
+                    if self._ordered_events is not None:
+                        prospective_events = []
+                        for event in self._clone_events(self._ordered_events):
+                            if not event.span.overlaps(span):
+                                prospective_events.append(event)
+                                continue
+                            for start, end in (
+                                (event.span.start, min(event.span.end, span.start)),
+                                (max(event.span.start, span.end), event.span.end),
+                            ):
+                                if start < end:
+                                    target = Span(start, end)
+                                    policy = self._payload_policy
+                                    assert isinstance(policy, OrderedPayloadPolicy)
+                                    restricted = policy.restrict(
+                                        self._clone_payload(event.data),
+                                        event.span,
+                                        target,
+                                    )
+                                    prospective_events.append(
+                                        _OrderedEvent(
+                                            target,
+                                            self._clone_payload(restricted),
+                                            deepcopy(event.order_key),
+                                        )
+                                    )
+                        prospective_payloads = self._fold_ordered_events(
+                            prospective_events
+                        )
+                        committed_events = self._clone_events(prospective_events)
+                    else:
+                        prospective_payloads = self._payload_after_discard(
+                            self._clone_segments(self._payload_segments), span
+                        )
+                    committed_payloads = self._clone_segments(prospective_payloads)
+            # See add(): adapter mutations must themselves be failure-atomic.
             self._adapter.reserve(span.start, span.end)
-            after = self._geometry_intervals()
-            if prospective_payloads is not None:
-                self._payload_segments = prospective_payloads
-            if prospective_events is not None:
-                self._ordered_events = prospective_events
-            changed = _subtract_geometry(before, after)
-            changed_length = sum(part.length for part in changed)
-            return MutationResult(changed, changed_length, covered)
+            if committed_payloads is not None:
+                self._payload_segments = committed_payloads
+            if committed_events is not None:
+                self._ordered_events = committed_events
+            return MutationResult(
+                changed,
+                sum(part.length for part in changed),
+                covered,
+            )
 
     def first_fit(
         self,
@@ -395,44 +539,52 @@ class RangeSet:
                         return IntervalResult(start, end)
                 return None
 
-            # Payload queries scan runs of adjacent accepted segments.  A result
-            # crossing equal payloads returns that value; a heterogeneous result
-            # returns the tuple of crossed segment values in coordinate order.
-            run_start: int | None = None
-            run_end: int | None = None
-            run_parts: list[tuple[int, int, Any]] = []
-            for interval in self._payload_segments:
-                start = max(not_before, interval.start)
-                end = (
-                    interval.end if not_after is None else min(interval.end, not_after)
-                )
-                accepted = end > start and (
-                    payload_predicate is None or payload_predicate(interval.data)
-                )
-                if not accepted:
-                    run_start = run_end = None
-                    run_parts = []
-                    continue
-                if run_end != start:
-                    run_start = start
-                    run_parts = []
-                run_end = end
-                run_parts.append((start, end, interval.data))
-                assert run_start is not None
-                result_end = run_start + length
-                if result_end <= run_end:
-                    values = [
-                        data
-                        for part_start, part_end, data in run_parts
-                        if part_start < result_end and run_start < part_end
-                    ]
-                    data = (
-                        values[0]
-                        if all(value == values[0] for value in values[1:])
-                        else tuple(values)
+            # Payload queries scan runs of adjacent accepted segments.  The
+            # complete scan is guarded because predicates, deepcopy, equality,
+            # and repr/order hooks can execute arbitrary user code.
+            with self._payload_processing():
+                run_start: int | None = None
+                run_end: int | None = None
+                run_parts: list[tuple[int, int, Any]] = []
+                for interval in self._payload_segments:
+                    start = max(not_before, interval.start)
+                    end = (
+                        interval.end
+                        if not_after is None
+                        else min(interval.end, not_after)
                     )
-                    return IntervalResult(run_start, result_end, data=data)
-            return None
+                    predicate_data = self._clone_payload(interval.data)
+                    accepted = end > start and (
+                        payload_predicate is None or payload_predicate(predicate_data)
+                    )
+                    if not accepted:
+                        run_start = run_end = None
+                        run_parts = []
+                        continue
+                    if run_end != start:
+                        run_start = start
+                        run_parts = []
+                    run_end = end
+                    run_parts.append((start, end, self._clone_payload(interval.data)))
+                    assert run_start is not None
+                    result_end = run_start + length
+                    if result_end <= run_end:
+                        values = [
+                            data
+                            for part_start, part_end, data in run_parts
+                            if part_start < result_end and run_start < part_end
+                        ]
+                        data = (
+                            values[0]
+                            if all(value == values[0] for value in values[1:])
+                            else tuple(values)
+                        )
+                        return IntervalResult(
+                            run_start,
+                            result_end,
+                            data=self._clone_payload(data),
+                        )
+                return None
 
     def allocate(
         self,
@@ -442,7 +594,7 @@ class RangeSet:
         not_after: int | None = None,
         payload_predicate: Callable[[Any], bool] | None = None,
     ) -> IntervalResult | None:
-        with self._lock:
+        with self._mutation():
             result = self.first_fit(
                 length,
                 not_before=not_before,

@@ -11,25 +11,22 @@ recursive-include treemendous *.py
 recursive-include treemendous/cpp *.cpp *.h *.cu *.mm *.metal
 recursive-include tests *.py
 recursive-include scripts *.py
+recursive-include docs *
+recursive-include examples *
 
-# Generated/host-specific files are forbidden in sdists.
+# Generated/host-specific exclusions must follow every recursive include.
 global-exclude *.py[cod]
 global-exclude *.so *.pyd *.dll *.dylib
 global-exclude *.o *.obj *.a *.lib
 global-exclude *.air *.metallib
 global-exclude .DS_Store
+global-exclude .context.md
+global-exclude .gitrepo
 global-exclude *~
 prune build
 prune dist
 prune wheelhouse
 prune .venv
 prune treemendous.egg-info
-include docs/getting-started.md
-include docs/api.md
-include docs/backends.md
-include docs/building.md
-include docs/benchmarking.md
-include docs/use-cases.md
-include docs/contributing.md
-include docs/releasing.md
-include examples/basic_rangeset.py
+prune docs/_build
+recursive-exclude * __pycache__/*

@@ -100,7 +100,9 @@ module = [
   "treemendous.policies",
   "treemendous.protocols",
   "treemendous.rangeset",
+  "treemendous.applications.*",
   "treemendous.backends.*",
+  "treemendous.multidimensional.*",
 ]
 disallow_untyped_defs = true
 disallow_any_generics = true

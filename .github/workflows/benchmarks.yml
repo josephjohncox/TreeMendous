@@ -65,3 +65,29 @@ jobs:
           path: build/benchmarks/
           if-no-files-found: error
           retention-days: 90
+
+  concrete-applications:
+    name: concrete applications / standard
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      # actions/checkout v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      # astral-sh/setup-uv v6
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --extra quality --extra test
+      - name: Run all correctness-attested application benchmarks
+        run: |
+          uv run python -m tests.performance.application_benchmark_suite \
+            --profile standard \
+            --output build/benchmarks/applications-standard.json
+      # actions/upload-artifact v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: benchmark-concrete-applications-${{ github.run_id }}
+          path: build/benchmarks/
+          if-no-files-found: error
+          retention-days: 90

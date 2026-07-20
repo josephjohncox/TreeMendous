@@ -56,6 +56,8 @@ def _cpu_extension_names() -> set[str]:
         ".lib",
         ".air",
         ".metallib",
+        ".pyc",
+        ".pyo",
     ],
 )
 def test_sdist_policy_rejects_generated_host_artifacts(
@@ -65,6 +67,21 @@ def test_sdist_policy_rejects_generated_host_artifacts(
     leaked = f"treemendous/cpp/leaked{suffix}"
     _sdist(artifact, REQUIRED_SDIST | {leaked})
     with pytest.raises(ArtifactPolicyError, match=rf"leaked{suffix}"):
+        verify_sdist(artifact)
+
+
+@pytest.mark.parametrize(
+    "leaked",
+    [
+        "docs/.context.md",
+        "examples/.gitrepo",
+        "examples/__pycache__/helper.py",
+    ],
+)
+def test_sdist_policy_rejects_local_metadata(tmp_path: Path, leaked: str) -> None:
+    artifact = tmp_path / "treemendous-0.tar.gz"
+    _sdist(artifact, REQUIRED_SDIST | {leaked})
+    with pytest.raises(ArtifactPolicyError, match=leaked.rsplit("/", 1)[-1]):
         verify_sdist(artifact)
 
 
