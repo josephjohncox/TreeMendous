@@ -20,7 +20,9 @@ probe passes.
 | `cpp_boundary` | C++ CPU | 64-bit | Core geometry |
 
 `cpp_boundary` is present only when its compiled extension is importable and
-passes the stable semantic contract.
+passes the stable semantic contract. The [one-dimensional algorithm guide](theory/one_dimensional_interval_algorithms.md)
+explains the boundary maps, augmented trees, operation bounds, fragmentation
+costs, and native-versus-Python performance mechanisms.
 
 ## Experimental backends
 

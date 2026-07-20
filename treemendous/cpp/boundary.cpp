@@ -18,58 +18,93 @@ public:
     void release_interval(Coordinate start, Coordinate end) {
         treemendous::validate_span(start, end);
 
-        // Work against a complete prospective state. Any checked length or
-        // aggregate failure must leave both the map and cached total unchanged.
-        auto prospective = intervals;
-        auto it = prospective.lower_bound(start);
-        if (it != prospective.begin()) {
-            auto previous = std::prev(it);
-            if (previous->second >= start) {
-                start = previous->first;
-                end = std::max(end, previous->second);
-                prospective.erase(previous);
-            }
+        auto first = intervals.lower_bound(start);
+        if (first != intervals.begin()) {
+            auto previous = std::prev(first);
+            if (previous->second >= start) first = previous;
         }
-        it = prospective.lower_bound(start);
-        while (it != prospective.end() && it->first <= end) {
-            end = std::max(end, it->second);
-            it = prospective.erase(it);
+        if (first != intervals.end() && first->first <= start && end <= first->second) {
+            return;
         }
-        prospective[start] = end;
 
-        const Measure prospective_total = checked_total(prospective);
-        intervals.swap(prospective);
+        Coordinate merged_start = start;
+        Coordinate merged_end = end;
+        Measure removed = 0;
+        auto last = first;
+        while (last != intervals.end() && last->first <= merged_end) {
+            merged_start = std::min(merged_start, last->first);
+            merged_end = std::max(merged_end, last->second);
+            removed = treemendous::checked_add(
+                removed, treemendous::checked_length(last->first, last->second));
+            ++last;
+        }
+
+        const Measure merged_length = treemendous::checked_length(merged_start, merged_end);
+        const Measure retained = total_available_length - removed;
+        const Measure prospective_total = treemendous::checked_add(retained, merged_length);
+
+        // Allocate a new node, when needed, before erasing committed nodes.
+        // Integer assignment and map erasure are then the no-throw commit phase.
+        auto replacement = intervals.find(merged_start);
+        if (replacement == intervals.end()) {
+            intervals.emplace(merged_start, merged_end);
+            intervals.erase(first, last);
+        } else {
+            replacement->second = merged_end;
+            intervals.erase(std::next(replacement), last);
+        }
         total_available_length = prospective_total;
     }
 
     void reserve_interval(Coordinate start, Coordinate end) {
         treemendous::validate_span(start, end);
 
-        auto prospective = intervals;
-        auto it = prospective.lower_bound(start);
-        if (it != prospective.begin()) {
-            auto previous = std::prev(it);
-            if (previous->second > start) it = previous;
-        }
-        std::vector<Coordinate> erase;
-        std::vector<std::pair<Coordinate, Coordinate>> add;
-        while (it != prospective.end() && it->first < end) {
-            const Coordinate current_start = it->first;
-            const Coordinate current_end = it->second;
-            if (std::max(start, current_start) < std::min(end, current_end)) {
-                erase.push_back(current_start);
-                if (current_start < start) add.emplace_back(current_start, start);
-                if (current_end > end) add.emplace_back(end, current_end);
-            }
-            ++it;
-        }
-        for (const Coordinate key : erase) prospective.erase(key);
-        for (const auto& [part_start, part_end] : add) {
-            prospective[part_start] = part_end;
+        auto first = intervals.lower_bound(start);
+        if (first != intervals.begin()) {
+            auto previous = std::prev(first);
+            if (previous->second > start) first = previous;
         }
 
-        const Measure prospective_total = checked_total(prospective);
-        intervals.swap(prospective);
+        Measure removed = 0;
+        bool retain_left = false;
+        bool retain_right = false;
+        Coordinate right_end = end;
+        auto last = first;
+        while (last != intervals.end() && last->first < end) {
+            const Coordinate overlap_start = std::max(start, last->first);
+            const Coordinate overlap_end = std::min(end, last->second);
+            if (overlap_start < overlap_end) {
+                removed = treemendous::checked_add(
+                    removed, treemendous::checked_length(overlap_start, overlap_end));
+                if (last->first < start) retain_left = true;
+                if (last->second > end) {
+                    retain_right = true;
+                    right_end = last->second;
+                }
+            }
+            ++last;
+        }
+        if (removed == 0) return;
+
+        const Measure prospective_total = total_available_length - removed;
+
+        // A right split needs one new node. Allocate it before changing or
+        // erasing any committed node so allocation failure remains atomic.
+        auto right = intervals.end();
+        if (retain_right) {
+            auto [position, inserted] = intervals.emplace(end, right_end);
+            if (!inserted) throw std::logic_error("canonical interval split collision");
+            right = position;
+        }
+        auto current = first;
+        while (current != last) {
+            if ((retain_left && current == first) || current == right) {
+                ++current;
+            } else {
+                current = intervals.erase(current);
+            }
+        }
+        if (retain_left) first->second = start;
         total_available_length = prospective_total;
     }
 
@@ -105,14 +140,6 @@ public:
     }
 
 private:
-    static Measure checked_total(const std::map<Coordinate, Coordinate>& values) {
-        Measure total = 0;
-        for (const auto& [start, end] : values) {
-            total = treemendous::checked_add(total, treemendous::checked_length(start, end));
-        }
-        return total;
-    }
-
     std::map<Coordinate, Coordinate> intervals;
     Measure total_available_length;
 };

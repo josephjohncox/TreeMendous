@@ -2,13 +2,35 @@
 // Same optimizations as boundary_optimized.cpp
 
 #include <vector>
-#include <optional>
 #include <iostream>
 #include <algorithm>
-#include <cmath>
 #include <numeric>
-#include <iomanip>
 #include <climits>
+
+struct NoValue {};
+constexpr NoValue kNoValue{};
+
+template<typename T>
+class OptionalValue {
+public:
+    OptionalValue() = default;
+    OptionalValue(NoValue) {}
+    OptionalValue(const T& value) : present_(true), value_(value) {}
+
+    OptionalValue& operator=(const T& value) {
+        present_ = true;
+        value_ = value;
+        return *this;
+    }
+
+    bool has_value() const { return present_; }
+    T& value() { return value_; }
+    const T& value() const { return value_; }
+
+private:
+    bool present_ = false;
+    T value_{};
+};
 
 // ============================================================================
 // OPTIMIZATION FLAGS (default ON, except flat_map)
@@ -149,7 +171,8 @@ struct IntervalResult {
     int end;
     int length;
     void* data = nullptr;
-    
+
+    IntervalResult() : start(0), end(0), length(0) {}
     IntervalResult(int s, int e) : start(s), end(e), length(e - s) {}
     IntervalResult(int s, int e, int len) : start(s), end(e), length(len) {}
 };
@@ -189,8 +212,8 @@ struct BoundarySummary {
 // ============================================================================
 class BoundarySummaryManagerOptimized {
 public:
-    BoundarySummaryManagerOptimized() : operation_count_(0), cache_hits_(0), summary_dirty_(true),
-                                        managed_start_(-1), managed_end_(-1) {
+    BoundarySummaryManagerOptimized() : summary_dirty_(true), cache_hits_(0),
+                                        managed_start_(-1), managed_end_(-1), operation_count_(0) {
 #if TREE_MENDOUS_PREALLOCATE_VECTORS && TREE_MENDOUS_USE_FLAT_MAP
         // Pre-allocate space for flat_map (boost::flat_map supports reserve)
         intervals_.reserve(64);
@@ -280,35 +303,28 @@ public:
         }
     }
     
-    std::optional<IntervalResult> find_interval(int start, int length) {
-        auto it = intervals_.lower_bound(start);
-        
-        if (it != intervals_.end()) [[likely]] {
-            int s = it->first;
-            int e = it->second;
-            if (s <= start && e - start >= length) [[likely]] {
-                return IntervalResult(start, start + length);
-            } else if (s > start && e - s >= length) {
-                return IntervalResult(s, s + length);
+    OptionalValue<IntervalResult> find_interval(int start, int length) {
+        if (length <= 0) return kNoValue;
+
+        auto it = intervals_.upper_bound(start);
+        if (it != intervals_.begin()) {
+            auto previous = std::prev(it);
+            int allocation_start = std::max(start, previous->first);
+            if (allocation_start < previous->second &&
+                previous->second - allocation_start >= length) {
+                return IntervalResult(allocation_start, allocation_start + length);
             }
         }
-        
-        if (it != intervals_.begin()) [[likely]] {
-            --it;
-            int s = it->first;
-            int e = it->second;
-            if (s <= start && e - start >= length) {
-                return IntervalResult(start, start + length);
-            } else if (start < s && e - s >= length) {
-                return IntervalResult(s, s + length);
+        for (; it != intervals_.end(); ++it) {
+            if (it->second - it->first >= length) {
+                return IntervalResult(it->first, it->first + length);
             }
         }
-        
-        return std::nullopt;
+        return kNoValue;
     }
     
-    std::optional<IntervalResult> find_best_fit(int length, bool prefer_early = true) {
-        std::optional<IntervalResult> best_candidate;
+    OptionalValue<IntervalResult> find_best_fit(int length, bool prefer_early = true) {
+        OptionalValue<IntervalResult> best_candidate;
         int best_fit_size = INT_MAX;
         int best_start = INT_MAX;
         
@@ -332,11 +348,11 @@ public:
         return best_candidate;
     }
     
-    std::optional<IntervalResult> find_largest_available() {
+    OptionalValue<IntervalResult> find_largest_available() {
         BoundarySummary summary = get_summary();
         
         if (summary.largest_interval_length == 0) [[unlikely]] {
-            return std::nullopt;
+            return kNoValue;
         }
         
         for (const auto& [start, end] : intervals_) {
@@ -345,7 +361,7 @@ public:
             }
         }
         
-        return std::nullopt;
+        return kNoValue;
     }
     
     BoundarySummary get_summary() {
@@ -443,7 +459,7 @@ public:
 private:
     IntervalMap<int, int> intervals_;
     
-    mutable std::optional<BoundarySummary> cached_summary_;
+    mutable OptionalValue<BoundarySummary> cached_summary_;
     mutable bool summary_dirty_;
     mutable int cache_hits_;
     

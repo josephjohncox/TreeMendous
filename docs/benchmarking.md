@@ -26,6 +26,25 @@ just benchmark-applications-standard
 application examples plus the basic and multidimensional examples from an
 unrelated working directory.
 
+## Performance layers are not interchangeable
+
+Tree-Mendous has three distinct timing boundaries:
+
+1. A **raw geometry kernel** calls an internal Python or C++ implementation
+   directly. This isolates its data structure and language boundary but omits
+   the stable API contract.
+2. A **canonical backend benchmark** calls `RangeSet`. It includes domain
+   validation, locking, exact mutation evidence, canonical result objects,
+   cache publication, and any payload work.
+3. A **concrete application benchmark** times one domain action. That action can
+   include identity checks, idempotency, event records, retries, normalization,
+   and several `RangeSet` calls.
+
+A raw C++ mutation rate is not a `RangeSet` throughput claim, and a `RangeSet`
+operation rate is not an application-engine throughput claim. Reports must name
+the layer. Comparisons are valid only when the workload, operation definition,
+state cardinality, fragmentation, validation boundary, and sample method match.
+
 Every command writes canonical JSON, a Markdown summary, and a SHA-256 sidecar
 under `build/benchmarks/`. The default smoke outputs are:
 

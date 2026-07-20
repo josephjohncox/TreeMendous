@@ -54,57 +54,27 @@ class EarliestIntervalTree(IntervalTree[EarliestIntervalNode]):
     def _find_interval(
         self, node: EarliestIntervalNode | None, start: int, length: int
     ) -> EarliestIntervalNode | None:
-        if not node:
+        if node is None or node.max_length < length or node.max_end <= start:
             return None
 
-        # Check if this interval can satisfy the request
-        # Case 1: start is within the interval and there's enough space
-        if node.start <= start < node.end and (node.end - start) >= length:
-            # This interval works, but check if there's an earlier one
-            left_candidate = self._find_interval(
-                cast(EarliestIntervalNode | None, node.left), start, length
-            )
-            return left_candidate if left_candidate else node
+        left_candidate = self._find_interval(
+            cast(EarliestIntervalNode | None, node.left), start, length
+        )
+        if left_candidate is not None:
+            return left_candidate
 
-        # Case 2: start is before this interval and interval is large enough
-        elif start <= node.start and (node.end - node.start) >= length:
-            # This interval works, but check if there's an earlier one
-            left_candidate = self._find_interval(
-                cast(EarliestIntervalNode | None, node.left), start, length
-            )
-            return left_candidate if left_candidate else node
+        allocation_start = max(start, node.start)
+        if allocation_start + length <= node.end:
+            return node
 
-        # Case 3: start is after this interval's end
-        elif start >= node.end:
-            return self._find_interval(
-                cast(EarliestIntervalNode | None, node.right), start, length
-            )
-
-        # Case 4: start is before this interval's start but interval is too small
-        elif start < node.start:
-            # Check both subtrees
-            left_candidate = self._find_interval(
-                cast(EarliestIntervalNode | None, node.left), start, length
-            )
-            if left_candidate:
-                return left_candidate
-            return self._find_interval(
-                cast(EarliestIntervalNode | None, node.right), start, length
-            )
-
-        # Case 5: start is within interval but not enough space remaining
-        else:
-            # Check right subtree for intervals starting after this one
-            return self._find_interval(
-                cast(EarliestIntervalNode | None, node.right), start, length
-            )
+        return self._find_interval(
+            cast(EarliestIntervalNode | None, node.right), start, length
+        )
 
     def _insert(
         self, node: EarliestIntervalNode | None, new_node: EarliestIntervalNode
     ) -> EarliestIntervalNode:
-        node = super()._insert(node, new_node)
-        node.update_stats()  # Update the earliest-specific stats
-        return node
+        return super()._insert(node, new_node)
 
 
 # Example usage:

@@ -3,6 +3,8 @@
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
 
+#include <chrono>
+
 #include "treap.cpp"  // Include the treap implementation
 
 namespace py = pybind11;
@@ -46,12 +48,9 @@ PYBIND11_MODULE(treap, m) {
              py::arg("start"), py::arg("end"),
              "Remove interval from available space")
         .def("find_interval", [](IntervalTreap& self, int start, int length) -> py::object {
-            auto result = self.find_interval(start, length);
-            if (result.has_value()) {
-                return py::make_tuple(result->first, result->second);
-            } else {
-                return py::none();
-            }
+            const auto result = self.find_interval(start, length);
+            if (result.first == result.second) return py::none();
+            return py::make_tuple(result.first, result.second);
         }, py::arg("start"), py::arg("length"),
            "Find available interval of given length")
         .def("get_intervals", &IntervalTreap::get_intervals,
@@ -68,8 +67,11 @@ PYBIND11_MODULE(treap, m) {
              "Get expected height for current size")
         
         // Treap-specific operations
-        .def("sample_random_interval", &IntervalTreap::sample_random_interval,
-             "Sample random interval uniformly")
+        .def("sample_random_interval", [](IntervalTreap& self) -> py::object {
+            const auto result = self.sample_random_interval();
+            if (result.first == result.second) return py::none();
+            return py::make_tuple(result.first, result.second);
+        }, "Sample random interval uniformly")
         .def("split", &IntervalTreap::split,
              py::arg("key"),
              "Split treap at given key into two treaps")

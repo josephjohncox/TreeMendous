@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from copy import deepcopy
@@ -47,9 +48,9 @@ def _subtract_geometry(
     changed: list[Span] = []
     for source in sources:
         cursor = source.start
-        for blocker in blocked:
-            if blocker.end <= cursor:
-                continue
+        first = bisect_right(blocked, cursor, key=lambda item: item.end)
+        for index in range(first, len(blocked)):
+            blocker = blocked[index]
             if blocker.start >= source.end:
                 break
             if blocker.start > cursor:
@@ -66,11 +67,64 @@ def _intersect_geometry(
     sources: Iterable[IntervalResult], target: Span
 ) -> tuple[Span, ...]:
     """Return normalized geometry in *sources* intersecting ``target``."""
-    return tuple(
-        Span(max(source.start, target.start), min(source.end, target.end))
-        for source in sources
-        if source.start < target.end and target.start < source.end
+    ordered = tuple(sources)
+    first = bisect_right(ordered, target.start, key=lambda item: item.end)
+    intersections: list[Span] = []
+    for index in range(first, len(ordered)):
+        source = ordered[index]
+        if source.start >= target.end:
+            break
+        intersections.append(
+            Span(max(source.start, target.start), min(source.end, target.end))
+        )
+    return tuple(intersections)
+
+
+def _normalize_geometry(
+    intervals: Iterable[IntervalResult],
+) -> tuple[IntervalResult, ...]:
+    """Return sorted, merged geometry detached from backend result shapes."""
+    normalized: list[IntervalResult] = []
+    for item in sorted(intervals, key=lambda interval: (interval.start, interval.end)):
+        if normalized and item.start <= normalized[-1].end:
+            previous = normalized[-1]
+            normalized[-1] = IntervalResult(previous.start, max(previous.end, item.end))
+        else:
+            normalized.append(IntervalResult(item.start, item.end))
+    return tuple(normalized)
+
+
+def _geometry_after_add(
+    intervals: tuple[IntervalResult, ...], span: Span
+) -> tuple[IntervalResult, ...]:
+    """Insert one span into normalized geometry without rebuilding entries."""
+    merged_start = span.start
+    merged_end = span.end
+    left = bisect_left(intervals, span.start, key=lambda item: item.end)
+    right = left
+    while right < len(intervals) and intervals[right].start <= merged_end:
+        merged_start = min(merged_start, intervals[right].start)
+        merged_end = max(merged_end, intervals[right].end)
+        right += 1
+    return (
+        *intervals[:left],
+        IntervalResult(merged_start, merged_end),
+        *intervals[right:],
     )
+
+
+def _geometry_after_discard(
+    intervals: tuple[IntervalResult, ...], span: Span
+) -> tuple[IntervalResult, ...]:
+    left = bisect_right(intervals, span.start, key=lambda item: item.end)
+    right = bisect_left(intervals, span.end, key=lambda item: item.start)
+    replacements: list[IntervalResult] = []
+    for interval in intervals[left:right]:
+        if interval.start < span.start:
+            replacements.append(IntervalResult(interval.start, span.start))
+        if interval.end > span.end:
+            replacements.append(IntervalResult(span.end, interval.end))
+    return (*intervals[:left], *replacements, *intervals[right:])
 
 
 class RangeSet:
@@ -139,6 +193,10 @@ class RangeSet:
         if initially_available and self._domain is not None:
             for span in self._domain.spans:
                 self._adapter.release(span.start, span.end)
+        self._geometry_cache = _normalize_geometry(self._adapter.intervals())
+        self._total_free = sum(
+            interval.end - interval.start for interval in self._geometry_cache
+        )
         self._payload_segments = staged_payloads
         self._ordered_events = staged_events
 
@@ -168,6 +226,10 @@ class RangeSet:
     @contextmanager
     def _mutation(self) -> Iterator[None]:
         """Acquire mutation ownership without waiting behind payload callbacks."""
+        if self._payload_policy is None:
+            with self._lock:
+                yield
+            return
         while True:
             if self._payload_is_active():
                 raise RuntimeError(
@@ -222,19 +284,7 @@ class RangeSet:
             raise ValueError("span must be contained in the managed domain")
 
     def _geometry_intervals(self) -> tuple[IntervalResult, ...]:
-        normalized: list[IntervalResult] = []
-        for item in sorted(
-            self._adapter.intervals(),
-            key=lambda interval: (interval.start, interval.end),
-        ):
-            if normalized and item.start <= normalized[-1].end:
-                previous = normalized[-1]
-                normalized[-1] = IntervalResult(
-                    previous.start, max(previous.end, item.end)
-                )
-            else:
-                normalized.append(IntervalResult(item.start, item.end))
-        return tuple(normalized)
+        return self._geometry_cache
 
     def intervals(self) -> tuple[IntervalResult, ...]:
         with self._lock:
@@ -247,11 +297,10 @@ class RangeSet:
         self, span: Span, intervals: tuple[IntervalResult, ...] | None = None
     ) -> bool:
         cursor = span.start
-        for interval in (
-            intervals if intervals is not None else self._geometry_intervals()
-        ):
-            if interval.end <= cursor:
-                continue
+        available = intervals if intervals is not None else self._geometry_intervals()
+        first = bisect_right(available, cursor, key=lambda item: item.end)
+        for index in range(first, len(available)):
+            interval = available[index]
             if interval.start > cursor:
                 return False
             cursor = max(cursor, interval.end)
@@ -406,10 +455,15 @@ class RangeSet:
             if payload is not _MISSING and self._payload_policy is None:
                 raise ValueError("payload requires an explicit payload policy")
             before = self._geometry_intervals()
-            covered = self._covered(span, before)
             changed = _subtract_geometry(
                 (IntervalResult(span.start, span.end),), before
             )
+            covered = not changed
+            changed_length = sum(part.length for part in changed)
+            committed_geometry = (
+                before if not changed else _geometry_after_add(before, span)
+            )
+            committed_total = self._total_free + changed_length
             committed_payloads = None
             committed_events = None
             if self._payload_segments is not None:
@@ -438,24 +492,27 @@ class RangeSet:
             # Stable adapters guarantee each geometry mutation is atomic. It is
             # deliberately the final fallible external call before commit.
             self._adapter.release(span.start, span.end)
+            self._geometry_cache = committed_geometry
+            self._total_free = committed_total
             if committed_payloads is not None:
                 self._payload_segments = committed_payloads
             if committed_events is not None:
                 self._ordered_events = committed_events
-            return MutationResult(
-                changed,
-                sum(part.length for part in changed),
-                covered,
-            )
+            return MutationResult(changed, changed_length, covered)
 
     def discard(self, span: Span, *, require_covered: bool = False) -> MutationResult:
         self._validate_domain(span)
         with self._mutation():
             before = self._geometry_intervals()
-            covered = self._covered(span, before)
+            changed = _intersect_geometry(before, span)
+            changed_length = sum(part.length for part in changed)
+            covered = changed_length == span.length
             if require_covered and not covered:
                 return MutationResult((), 0, False)
-            changed = _intersect_geometry(before, span)
+            committed_geometry = (
+                before if not changed else _geometry_after_discard(before, span)
+            )
+            committed_total = self._total_free - changed_length
             committed_events = None
             committed_payloads = None
             if self._payload_segments is not None:
@@ -498,15 +555,13 @@ class RangeSet:
                     committed_payloads = self._clone_segments(prospective_payloads)
             # See add(): adapter mutations must themselves be failure-atomic.
             self._adapter.reserve(span.start, span.end)
+            self._geometry_cache = committed_geometry
+            self._total_free = committed_total
             if committed_payloads is not None:
                 self._payload_segments = committed_payloads
             if committed_events is not None:
                 self._ordered_events = committed_events
-            return MutationResult(
-                changed,
-                sum(part.length for part in changed),
-                covered,
-            )
+            return MutationResult(changed, changed_length, covered)
 
     def first_fit(
         self,
@@ -532,7 +587,10 @@ class RangeSet:
             raise ValueError("payload predicate requires an explicit payload policy")
         with self._lock:
             if self._payload_segments is None:
-                for interval in self._geometry_intervals():
+                available = self._geometry_intervals()
+                first = bisect_right(available, not_before, key=lambda item: item.end)
+                for index in range(first, len(available)):
+                    interval = available[index]
                     start = max(not_before, interval.start)
                     end = start + length
                     if end <= interval.end and (not_after is None or end <= not_after):
@@ -612,6 +670,12 @@ class RangeSet:
 
     def overlaps(self, span: Span) -> tuple[IntervalResult, ...]:
         self._validate_domain(span)
+        if self._payload_segments is None:
+            with self._lock:
+                available = self._geometry_intervals()
+                first = bisect_right(available, span.start, key=lambda item: item.end)
+                last = bisect_left(available, span.end, key=lambda item: item.start)
+                return available[first:last]
         return tuple(
             interval
             for interval in self.intervals()
@@ -619,12 +683,12 @@ class RangeSet:
         )
 
     def snapshot(self) -> RangeSnapshot:
-        intervals = self.intervals()
-        return RangeSnapshot(
-            intervals,
-            sum(item.end - item.start for item in intervals),
-            self._domain,
-        )
+        with self._lock:
+            return RangeSnapshot(
+                self.intervals(),
+                self._total_free,
+                self._domain,
+            )
 
     def stats(self) -> AvailabilityStats:
         with self._lock:
@@ -633,13 +697,13 @@ class RangeSet:
                     "availability statistics require an explicit managed domain"
                 )
             intervals = self._geometry_intervals()
-            total_free = sum(item.end - item.start for item in intervals)
-            largest = max((item.end - item.start for item in intervals), default=0)
             return AvailabilityStats(
-                total_free=total_free,
-                total_occupied=self._domain.measure - total_free,
+                total_free=self._total_free,
+                total_occupied=self._domain.measure - self._total_free,
                 total_space=self._domain.measure,
                 free_chunks=len(intervals),
-                largest_chunk=largest,
+                largest_chunk=max(
+                    (item.end - item.start for item in intervals), default=0
+                ),
                 bounds=self._domain.bounds,
             )

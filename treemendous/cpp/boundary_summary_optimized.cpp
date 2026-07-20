@@ -1,6 +1,6 @@
-// Optimized Boundary-Based Summary Interval Manager
-// Combines std::map efficiency with comprehensive summary statistics
-// Provides O(log n) operations with O(1) cached summary queries
+// Experimental boundary-map manager with lazily cached summary statistics.
+// Cached summary reads are constant-time; dirty recomputation and some range
+// operations can inspect the complete interval map.
 
 #include <map>
 #include <vector>
