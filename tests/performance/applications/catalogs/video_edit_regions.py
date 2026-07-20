@@ -139,9 +139,7 @@ def run_benchmark(operations: int = 500, seed: int = 0) -> ApplicationSample:
         region_id = f"r{index}"
         start = index * 5
         track = f"v{index % 4}"
-        handle = catalog.add(
-            region_id, start, start + 30, track=track, effect="grade"
-        )
+        handle = catalog.add(region_id, start, start + 30, track=track, effect="grade")
         rows.append((region_id, track, "grade", start, start + 30))
         expected_records.append(
             (

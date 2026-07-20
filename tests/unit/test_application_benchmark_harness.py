@@ -73,9 +73,7 @@ def test_uuid_checksums_normalize_values_but_preserve_identity_relations() -> No
     first, second = uuid4(), uuid4()
     replacement_first, replacement_second = uuid4(), uuid4()
 
-    original_pattern = evidence_checksum(
-        [str(first), str(first), str(second)]
-    )
+    original_pattern = evidence_checksum([str(first), str(first), str(second)])
     matching_pattern = evidence_checksum(
         [str(replacement_first), str(replacement_first), str(replacement_second)]
     )
