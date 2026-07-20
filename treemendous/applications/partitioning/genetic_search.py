@@ -8,7 +8,11 @@ from dataclasses import dataclass
 from math import isfinite
 from typing import Any, cast
 
-from treemendous.applications._shared.claiming import ClaimUnavailableError
+from treemendous.applications._shared.claiming import (
+    ClaimInvariantError,
+    ClaimState,
+    ClaimUnavailableError,
+)
 from treemendous.applications._shared.clock import Clock
 from treemendous.applications.partitioning._runtime import (
     PartitionRuntime,
@@ -31,6 +35,31 @@ def _finite_float(value: object, name: str) -> float:
 
 def _count_ones(value: str) -> float:
     return value.count("1") * 1.0
+
+
+def _validated_population(population: object) -> tuple[str, ...]:
+    if isinstance(population, (str, bytes)) or not isinstance(population, Sequence):
+        raise TypeError("population must be a sequence of bit strings")
+    if len(population) < 2:
+        raise ValueError("population must contain at least two candidates")
+    width = len(population[0])
+    if width == 0 or any(
+        not isinstance(item, str)
+        or len(item) != width
+        or set(item) - {"0", "1"}
+        for item in population
+    ):
+        raise ValueError("population must contain equal-width nonempty bit strings")
+    return tuple(population)
+
+
+def _validated_rate(value: object) -> float:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise TypeError("mutation_rate must be numeric")
+    converted = _finite_float(value, "mutation_rate")
+    if not 0.0 <= converted <= 1.0:
+        raise ValueError("mutation_rate must be between zero and one")
+    return converted
 
 
 @dataclass(frozen=True)
@@ -73,29 +102,14 @@ class GeneticSearchEngine:
         mutation_rate: float = 0.05,
         clock: Clock | None = None,
     ) -> None:
-        if isinstance(population, (str, bytes)) or not isinstance(population, Sequence):
-            raise TypeError("population must be a sequence of bit strings")
-        if len(population) < 2:
-            raise ValueError("population must contain at least two candidates")
-        width = len(population[0])
-        if width == 0 or any(
-            not isinstance(item, str)
-            or len(item) != width
-            or set(item) - {"0", "1"}
-            for item in population
-        ):
-            raise ValueError("population must contain equal-width nonempty bit strings")
+        checked_population = _validated_population(population)
         if not callable(fitness):
             raise TypeError("fitness must be callable")
         positive(generations, "generations")
         if type(seed) is not int:
             raise TypeError("seed must be an integer")
-        if not isinstance(mutation_rate, (int, float)) or isinstance(mutation_rate, bool):
-            raise TypeError("mutation_rate must be numeric")
-        converted_rate = _finite_float(mutation_rate, "mutation_rate")
-        if not 0.0 <= converted_rate <= 1.0:
-            raise ValueError("mutation_rate must be between zero and one")
-        self._population = tuple(population)
+        converted_rate = _validated_rate(mutation_rate)
+        self._population = checked_population
         self._fitness = fitness
         self._generations = generations
         self._generation = 0
@@ -121,8 +135,12 @@ class GeneticSearchEngine:
         if self._generation >= self._generations:
             raise ClaimUnavailableError("all generations are complete")
         claim = self._runtime.claim(owner, 1)
-        prior_random_state = self._random.getstate()
-        try:
+
+        def prepare() -> tuple[
+            GeneticGeneration, tuple[str, ...], object, list[GeneticGeneration]
+        ]:
+            randomizer = random.Random()
+            randomizer.setstate(self._random.getstate())
             ranking = self._score(self._fitness, self._population)
             record = GeneticGeneration(self._generation, self._population, ranking)
             survivors = tuple(
@@ -130,23 +148,42 @@ class GeneticSearchEngine:
             )
             children: list[str] = []
             while len(children) < len(self._population):
-                left = survivors[self._random.randrange(len(survivors))]
-                right = survivors[self._random.randrange(len(survivors))]
-                point = self._random.randrange(1, len(left)) if len(left) > 1 else 1
+                left = survivors[randomizer.randrange(len(survivors))]
+                right = survivors[randomizer.randrange(len(survivors))]
+                point = randomizer.randrange(1, len(left)) if len(left) > 1 else 1
                 child = list(left[:point] + right[point:])
                 for index, bit in enumerate(child):
-                    if self._random.random() < self._mutation_rate:
+                    if randomizer.random() < self._mutation_rate:
                         child[index] = "1" if bit == "0" else "0"
                 children.append("".join(child))
-        except (Exception,):
-            self._random.setstate(prior_random_state)
-            self._runtime.abandon(claim)
-            raise
-        self._population = tuple(children)
-        self._history.append(record)
-        self._generation += 1
-        self._runtime.complete(claim, "generation", {"generation": record.number})
-        return record
+            return (
+                record,
+                tuple(children),
+                randomizer.getstate(),
+                [*self._history, record],
+            )
+
+        def commit(
+            value: tuple[
+                GeneticGeneration,
+                tuple[str, ...],
+                object,
+                list[GeneticGeneration],
+            ],
+        ) -> None:
+            self._population = value[1]
+            self._random.setstate(cast(tuple[Any, ...], value[2]))
+            self._history = value[3]
+            self._generation += 1
+
+        prepared = self._runtime.execute_claim(
+            claim,
+            kind="generation",
+            prepare=prepare,
+            commit=commit,
+            result=lambda value: {"generation": value[0].number},
+        )
+        return prepared[0]
 
     def run(self) -> tuple[GeneticGeneration, ...]:
         """Run all remaining generations."""
@@ -158,8 +195,7 @@ class GeneticSearchEngine:
         """Return the best candidate in the current population."""
         return self._score(self._fitness, self._population)[0]
 
-    def snapshot(self) -> GeneticCheckpoint:
-        """Capture complete deterministic local state."""
+    def _snapshot(self) -> GeneticCheckpoint:
         return GeneticCheckpoint(
             self._generation,
             self._generations,
@@ -169,6 +205,10 @@ class GeneticSearchEngine:
             self._random.getstate(),
             self._runtime.checkpoint(),
         )
+
+    def snapshot(self) -> GeneticCheckpoint:
+        """Capture complete deterministic local state."""
+        return self._runtime.observe(self._snapshot)
 
     checkpoint = snapshot
 
@@ -185,24 +225,77 @@ class GeneticSearchEngine:
             raise TypeError("checkpoint must be a GeneticCheckpoint")
         if not callable(fitness):
             raise TypeError("fitness must be callable")
-        if not 0 <= checkpoint.generation <= checkpoint.generations:
+        positive(checkpoint.generations, "checkpoint generations")
+        if type(checkpoint.generation) is not int or not (
+            0 <= checkpoint.generation <= checkpoint.generations
+        ):
             raise ValueError("checkpoint generation is inconsistent")
-        if len(checkpoint.history) != checkpoint.generation:
+        population = _validated_population(checkpoint.population)
+        mutation_rate = _validated_rate(checkpoint.mutation_rate)
+        if not isinstance(checkpoint.history, tuple) or (
+            len(checkpoint.history) != checkpoint.generation
+        ):
             raise ValueError("checkpoint history is inconsistent")
+        for number, record in enumerate(checkpoint.history):
+            if not isinstance(record, GeneticGeneration) or record.number != number:
+                raise ValueError("checkpoint history numbering is inconsistent")
+            historical_population = _validated_population(record.population)
+            if (
+                len(historical_population) != len(population)
+                or len(historical_population[0]) != len(population[0])
+                or record.ranking != cls._score(fitness, historical_population)
+            ):
+                raise ValueError("checkpoint history population is inconsistent")
+
+        randomizer = random.Random()
+        try:
+            randomizer.setstate(cast(tuple[Any, ...], checkpoint.random_state))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("checkpoint random state is invalid") from exc
+
+        runtime = PartitionRuntime.from_checkpoint(checkpoint.runtime, clock=clock)
+        runtime_claims = checkpoint.runtime.claims
+        if runtime_claims.domain.measure != checkpoint.generations:
+            raise ClaimInvariantError("runtime domain contradicts generation count")
+        completed = tuple(
+            claim
+            for claim in runtime_claims.claims
+            if claim.state is ClaimState.COMPLETED
+        )
+        if any(
+            claim.state in {ClaimState.ACTIVE, ClaimState.EXPIRED}
+            for claim in runtime_claims.claims
+        ):
+            raise ClaimInvariantError("checkpoint contains unfinished generation claims")
+        completed_by_generation: list[tuple[int, Any]] = []
+        for claim in completed:
+            result = dict(claim.result)
+            generation = result.get("generation")
+            if set(result) != {"generation"} or type(generation) is not int:
+                raise ClaimInvariantError(
+                    "runtime generation completion metadata is inconsistent"
+                )
+            completed_by_generation.append((generation, claim))
+        completed_by_generation.sort(key=lambda item: item[0])
+        if len(completed) != checkpoint.generation or tuple(
+            generation for generation, _ in completed_by_generation
+        ) != tuple(range(checkpoint.generation)):
+            raise ClaimInvariantError("runtime completion count contradicts generation")
+        if any(
+            claim.span.length != 1 or claim.span.start != generation
+            for generation, claim in completed_by_generation
+        ):
+            raise ClaimInvariantError("runtime generation claims are inconsistent")
+
         candidate = cls.__new__(cls)
-        candidate._population = checkpoint.population
+        candidate._population = population
         candidate._fitness = fitness
         candidate._generations = checkpoint.generations
         candidate._generation = checkpoint.generation
-        candidate._mutation_rate = checkpoint.mutation_rate
-        candidate._random = random.Random()
-        candidate._random.setstate(
-            cast(tuple[Any, ...], checkpoint.random_state)
-        )
+        candidate._mutation_rate = mutation_rate
+        candidate._random = randomizer
         candidate._history = list(checkpoint.history)
-        candidate._runtime = PartitionRuntime.from_checkpoint(
-            checkpoint.runtime, clock=clock
-        )
+        candidate._runtime = runtime
         return candidate
 
 

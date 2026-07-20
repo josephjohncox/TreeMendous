@@ -88,18 +88,29 @@ class IndexMergeEngine:
 
     def merge_claim(self, claim: WorkClaim) -> tuple[TermPostings, ...]:
         """Merge and validate all terms in one claimed band."""
-        staged: list[TermPostings] = []
-        for term in self._terms[claim.span.start : claim.span.end]:
-            streams = [segment[term] for segment in self._segments if term in segment]
-            merged = tuple(dict.fromkeys(heapq.merge(*streams)))
-            if any(left >= right for left, right in zip(merged, merged[1:])):
-                self._runtime.abandon(claim)
-                raise RuntimeError("merged posting list is not strictly ordered")
-            staged.append(TermPostings(term, merged))
-        for item in staged:
-            self._merged[item.term] = item.postings
-        self._runtime.complete(claim, "merged", {"terms": len(staged)})
-        return tuple(staged)
+        def prepare() -> tuple[tuple[TermPostings, ...], dict[str, tuple[int, ...]]]:
+            staged: list[TermPostings] = []
+            merged_state = self._merged.copy()
+            for term in self._terms[claim.span.start : claim.span.end]:
+                streams = [
+                    segment[term] for segment in self._segments if term in segment
+                ]
+                merged = tuple(dict.fromkeys(heapq.merge(*streams)))
+                if any(left >= right for left, right in zip(merged, merged[1:])):
+                    raise RuntimeError("merged posting list is not strictly ordered")
+                item = TermPostings(term, merged)
+                staged.append(item)
+                merged_state[item.term] = item.postings
+            return tuple(staged), merged_state
+
+        prepared = self._runtime.execute_claim(
+            claim,
+            kind="merged",
+            prepare=prepare,
+            commit=lambda value: setattr(self, "_merged", value[1]),
+            result=lambda value: {"terms": len(value[0])},
+        )
+        return prepared[0]
 
     def run(self, *, band_size: int = 64) -> tuple[TermPostings, ...]:
         """Merge every remaining term band in lexical order."""
@@ -112,16 +123,22 @@ class IndexMergeEngine:
             self.merge_claim(claim)
         return tuple(TermPostings(term, self._merged[term]) for term in sorted(self._merged))
 
-    def snapshot(self) -> IndexMergeSnapshot:
-        """Return immutable source-term and merged state."""
+    def _snapshot(self) -> IndexMergeSnapshot:
         return IndexMergeSnapshot(
             self._terms,
-            tuple(TermPostings(term, self._merged[term]) for term in sorted(self._merged)),
+            tuple(
+                TermPostings(term, self._merged[term])
+                for term in sorted(self._merged)
+            ),
         )
 
-    def checkpoint(self) -> tuple[IndexMergeSnapshot, object]:
-        """Capture merged postings and private runtime state."""
-        return self.snapshot(), self._runtime.checkpoint()
+    def snapshot(self) -> IndexMergeSnapshot:
+        """Return immutable source-term and merged state."""
+        return self._runtime.observe(self._snapshot)
+
+    def audit_snapshot(self) -> tuple[IndexMergeSnapshot, object]:
+        """Capture non-restorable application and runtime audit evidence."""
+        return self._runtime.audit_snapshot(self._snapshot)
 
 
 def create_index_merge(

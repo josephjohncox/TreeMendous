@@ -28,12 +28,12 @@ class RegexScanSnapshot:
 
 
 class RegexScanEngine:
-    """Scan claimed byte chunks while retaining cross-boundary matches.
+    """Scan claimed byte chunks with full-buffer regular-expression semantics.
 
-    A match is owned by the chunk containing its start offset. The explicit
-    halo must be large enough for the caller's pattern; Python regexes do not
-    expose a reliable maximum width for every construct. State is process-local
-    and distributed result stores must enforce claim fencing tokens.
+    A match is owned by the chunk containing its start offset. Evaluation uses
+    the original buffer so chunk edges never become artificial anchors or
+    lookaround boundaries. ``halo`` is retained as audit configuration. State
+    is process-local and distributed result stores must enforce claim fencing.
     """
 
     def __init__(
@@ -51,7 +51,7 @@ class RegexScanEngine:
             raise ValueError("pattern must be nonempty bytes")
         if type(halo) is not int or halo < 0:
             raise ValueError("halo must be a non-negative integer")
-        if type(flags) is not int:
+        if not isinstance(flags, int) or isinstance(flags, bool):
             raise TypeError("flags must be an integer")
         self._data = data
         try:
@@ -69,20 +69,28 @@ class RegexScanEngine:
         return self._runtime.claim(owner, length)
 
     def scan_claim(self, claim: WorkClaim) -> tuple[RegexMatch, ...]:
-        """Scan a core plus halos and merge only core-owned match starts."""
-        scan_start = max(0, claim.span.start - self._halo)
-        scan_end = min(len(self._data), claim.span.end + self._halo)
-        local = self._data[scan_start:scan_end]
-        found: list[RegexMatch] = []
-        for match in self._pattern.finditer(local):
-            start = scan_start + match.start()
-            end = scan_start + match.end()
-            if claim.span.start <= start < claim.span.end:
-                item = RegexMatch(start, end, match.group())
-                self._matches[(item.start, item.end, item.value)] = item
-                found.append(item)
-        self._runtime.complete(claim, "scanned", {"matches": len(found)})
-        return tuple(sorted(found))
+        """Scan with full-buffer context and merge only core-owned starts."""
+        def prepare() -> tuple[
+            tuple[RegexMatch, ...], dict[tuple[int, int, bytes], RegexMatch]
+        ]:
+            found: list[RegexMatch] = []
+            matches = self._matches.copy()
+            for match in self._pattern.finditer(self._data):
+                start = match.start()
+                if claim.span.start <= start < claim.span.end:
+                    item = RegexMatch(start, match.end(), match.group())
+                    matches[(item.start, item.end, item.value)] = item
+                    found.append(item)
+            return tuple(sorted(found)), matches
+
+        prepared = self._runtime.execute_claim(
+            claim,
+            kind="scanned",
+            prepare=prepare,
+            commit=lambda value: setattr(self, "_matches", value[1]),
+            result=lambda value: {"matches": len(value[0])},
+        )
+        return prepared[0]
 
     def run(self, *, chunk_size: int = 4096, owner: str = "local") -> tuple[RegexMatch, ...]:
         """Scan every byte chunk and return globally ordered unique matches."""
@@ -95,13 +103,16 @@ class RegexScanEngine:
             self.scan_claim(claim)
         return tuple(sorted(self._matches.values()))
 
-    def snapshot(self) -> RegexScanSnapshot:
-        """Return immutable deduplicated scan state."""
+    def _snapshot(self) -> RegexScanSnapshot:
         return RegexScanSnapshot(self._halo, tuple(sorted(self._matches.values())))
 
-    def checkpoint(self) -> tuple[RegexScanSnapshot, object]:
-        """Capture scan results with claim and event state."""
-        return self.snapshot(), self._runtime.checkpoint()
+    def snapshot(self) -> RegexScanSnapshot:
+        """Return immutable deduplicated scan state."""
+        return self._runtime.observe(self._snapshot)
+
+    def audit_snapshot(self) -> tuple[RegexScanSnapshot, object]:
+        """Capture non-restorable application and runtime audit evidence."""
+        return self._runtime.audit_snapshot(self._snapshot)
 
 
 def create_regex_scan(

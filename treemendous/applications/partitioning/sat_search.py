@@ -87,21 +87,33 @@ class SatSearchEngine:
 
     def evaluate_claim(self, claim: WorkClaim) -> tuple[SatisfyingAssignment, ...]:
         """Enumerate suffixes beneath every claimed prefix and evaluate CNF."""
-        suffix_bits = self._variables - self._prefix_bits
-        found: list[SatisfyingAssignment] = []
-        for prefix in range(claim.span.start, claim.span.end):
-            for suffix in range(1 << suffix_bits):
-                ordinal = prefix | (suffix << self._prefix_bits)
-                if self._satisfies(ordinal):
-                    values = tuple(
-                        bool(ordinal & (1 << variable))
-                        for variable in range(self._variables)
-                    )
-                    solution = SatisfyingAssignment(ordinal, values)
-                    self._solutions[ordinal] = solution
-                    found.append(solution)
-        self._runtime.complete(claim, "evaluated", {"solutions": len(found)})
-        return tuple(sorted(found))
+        def prepare() -> tuple[
+            tuple[SatisfyingAssignment, ...], dict[int, SatisfyingAssignment]
+        ]:
+            suffix_bits = self._variables - self._prefix_bits
+            found: list[SatisfyingAssignment] = []
+            solutions = self._solutions.copy()
+            for prefix in range(claim.span.start, claim.span.end):
+                for suffix in range(1 << suffix_bits):
+                    ordinal = prefix | (suffix << self._prefix_bits)
+                    if self._satisfies(ordinal):
+                        values = tuple(
+                            bool(ordinal & (1 << variable))
+                            for variable in range(self._variables)
+                        )
+                        solution = SatisfyingAssignment(ordinal, values)
+                        solutions[ordinal] = solution
+                        found.append(solution)
+            return tuple(sorted(found)), solutions
+
+        prepared = self._runtime.execute_claim(
+            claim,
+            kind="evaluated",
+            prepare=prepare,
+            commit=lambda value: setattr(self, "_solutions", value[1]),
+            result=lambda value: {"solutions": len(value[0])},
+        )
+        return prepared[0]
 
     def run(self, *, shard_size: int = 32) -> tuple[SatisfyingAssignment, ...]:
         """Evaluate all prefixes and return solutions in ordinal order."""
@@ -114,17 +126,20 @@ class SatSearchEngine:
             self.evaluate_claim(claim)
         return tuple(self._solutions[key] for key in sorted(self._solutions))
 
-    def snapshot(self) -> SatSearchSnapshot:
-        """Return immutable solver state."""
+    def _snapshot(self) -> SatSearchSnapshot:
         return SatSearchSnapshot(
             self._variables,
             self._prefix_bits,
             tuple(self._solutions[key] for key in sorted(self._solutions)),
         )
 
-    def checkpoint(self) -> tuple[SatSearchSnapshot, object]:
-        """Capture solver and private runtime state."""
-        return self.snapshot(), self._runtime.checkpoint()
+    def snapshot(self) -> SatSearchSnapshot:
+        """Return immutable solver state."""
+        return self._runtime.observe(self._snapshot)
+
+    def audit_snapshot(self) -> tuple[SatSearchSnapshot, object]:
+        """Capture non-restorable application and runtime audit evidence."""
+        return self._runtime.audit_snapshot(self._snapshot)
 
 
 def create_sat_search(

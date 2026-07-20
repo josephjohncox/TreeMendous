@@ -70,24 +70,64 @@ class GraphSearchEngine:
             return ()
         count = min(width, len(self._frontier))
         claim = self._runtime.claim(owner, count)
-        expanded: list[str] = []
-        for _ in range(claim.span.length):
-            if not self._frontier:
-                break
-            vertex = self._frontier.popleft()
-            if vertex in self._visited:
-                continue
-            self._visited.add(vertex)
-            self._order.append(vertex)
-            expanded.append(vertex)
-            distance = self._distances[vertex] + 1
-            for neighbor in self._graph[vertex]:
-                if neighbor not in self._visited and neighbor not in self._queued:
-                    self._queued.add(neighbor)
-                    self._distances[neighbor] = distance
-                    self._frontier.append(neighbor)
-        self._runtime.complete(claim, "expanded", {"vertices": len(expanded)})
-        return tuple(expanded)
+        def prepare() -> tuple[
+            tuple[str, ...],
+            deque[str],
+            set[str],
+            set[str],
+            dict[str, int],
+            list[str],
+        ]:
+            frontier = deque(self._frontier)
+            queued = self._queued.copy()
+            visited = self._visited.copy()
+            distances = self._distances.copy()
+            order = self._order.copy()
+            expanded: list[str] = []
+            for _ in range(claim.span.length):
+                if not frontier:
+                    break
+                vertex = frontier.popleft()
+                if vertex in visited:
+                    continue
+                visited.add(vertex)
+                order.append(vertex)
+                expanded.append(vertex)
+                distance = distances[vertex] + 1
+                for neighbor in self._graph[vertex]:
+                    if neighbor not in visited and neighbor not in queued:
+                        queued.add(neighbor)
+                        distances[neighbor] = distance
+                        frontier.append(neighbor)
+            return tuple(expanded), frontier, queued, visited, distances, order
+
+        def commit(
+            value: tuple[
+                tuple[str, ...],
+                deque[str],
+                set[str],
+                set[str],
+                dict[str, int],
+                list[str],
+            ],
+        ) -> None:
+            (
+                _,
+                self._frontier,
+                self._queued,
+                self._visited,
+                self._distances,
+                self._order,
+            ) = value
+
+        prepared = self._runtime.execute_claim(
+            claim,
+            kind="expanded",
+            prepare=prepare,
+            commit=commit,
+            result=lambda value: {"vertices": len(value[0])},
+        )
+        return prepared[0]
 
     def run(self, *, frontier_width: int = 32) -> GraphSearchSnapshot:
         """Run BFS to exhaustion."""
@@ -99,17 +139,20 @@ class GraphSearchEngine:
                 break
         return self.snapshot()
 
-    def snapshot(self) -> GraphSearchSnapshot:
-        """Return detached BFS state."""
+    def _snapshot(self) -> GraphSearchSnapshot:
         return GraphSearchSnapshot(
             tuple(self._order),
             tuple(sorted((key, self._distances[key]) for key in self._visited)),
             tuple(self._frontier),
         )
 
-    def checkpoint(self) -> tuple[GraphSearchSnapshot, object]:
-        """Capture BFS and private claim/event state."""
-        return self.snapshot(), self._runtime.checkpoint()
+    def snapshot(self) -> GraphSearchSnapshot:
+        """Return detached BFS state."""
+        return self._runtime.observe(self._snapshot)
+
+    def audit_snapshot(self) -> tuple[GraphSearchSnapshot, object]:
+        """Capture non-restorable application and runtime audit evidence."""
+        return self._runtime.audit_snapshot(self._snapshot)
 
 
 def create_graph_search(

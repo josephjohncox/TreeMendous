@@ -91,18 +91,29 @@ class DocumentSearchEngine:
 
     def search_claim(self, claim: WorkClaim) -> tuple[SearchHit, ...]:
         """Query one claimed band and merge its results idempotently."""
-        candidate_ids = set(self._postings.get(self._query[0], ()))
-        for token in self._query[1:]:
-            candidate_ids.intersection_update(self._postings.get(token, ()))
-        hits = tuple(
-            SearchHit(document_id, self._tokenized[document_id])
-            for document_id, _ in self._documents[claim.span.start : claim.span.end]
-            if document_id in candidate_ids
+        def prepare() -> tuple[tuple[SearchHit, ...], dict[int, SearchHit]]:
+            candidate_ids = set(self._postings.get(self._query[0], ()))
+            for token in self._query[1:]:
+                candidate_ids.intersection_update(self._postings.get(token, ()))
+            hits = tuple(
+                SearchHit(document_id, self._tokenized[document_id])
+                for document_id, _ in self._documents[
+                    claim.span.start : claim.span.end
+                ]
+                if document_id in candidate_ids
+            )
+            matches = self._matches.copy()
+            matches.update((hit.document_id, hit) for hit in hits)
+            return hits, matches
+
+        prepared = self._runtime.execute_claim(
+            claim,
+            kind="searched",
+            prepare=prepare,
+            commit=lambda value: setattr(self, "_matches", value[1]),
+            result=lambda value: {"matches": len(value[0])},
         )
-        for hit in hits:
-            self._matches[hit.document_id] = hit
-        self._runtime.complete(claim, "searched", {"matches": len(hits)})
-        return hits
+        return prepared[0]
 
     def run(self, *, shard_size: int = 64, owner: str = "local") -> tuple[SearchHit, ...]:
         """Execute all unclaimed bands and return merged ordered hits."""
@@ -115,8 +126,7 @@ class DocumentSearchEngine:
             self.search_claim(claim)
         return tuple(self._matches[key] for key in sorted(self._matches))
 
-    def snapshot(self) -> DocumentSearchSnapshot:
-        """Return detached query and result state."""
+    def _snapshot(self) -> DocumentSearchSnapshot:
         ledger = self._runtime.ledger.snapshot()
         claimed = len(self._documents) - ledger.diagnostics.available_work
         return DocumentSearchSnapshot(
@@ -125,9 +135,13 @@ class DocumentSearchEngine:
             claimed,
         )
 
-    def checkpoint(self) -> tuple[DocumentSearchSnapshot, object]:
-        """Capture application state plus private runtime checkpoint."""
-        return self.snapshot(), self._runtime.checkpoint()
+    def snapshot(self) -> DocumentSearchSnapshot:
+        """Return detached query and result state."""
+        return self._runtime.observe(self._snapshot)
+
+    def audit_snapshot(self) -> tuple[DocumentSearchSnapshot, object]:
+        """Capture non-restorable application and runtime audit evidence."""
+        return self._runtime.audit_snapshot(self._snapshot)
 
 
 def create_document_search(

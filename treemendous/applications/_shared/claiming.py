@@ -10,6 +10,8 @@ can still write.
 from __future__ import annotations
 
 import secrets
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from enum import Enum
 from threading import RLock
@@ -347,10 +349,10 @@ class ClaimLedger:
             raise ForeignClaimError("claim belongs to another owner")
         if current.state is ClaimState.EXPIRED:
             raise ExpiredClaimError("claim has expired")
-        if current != claim:
-            raise StaleClaimError("claim handle is an old revision")
         if current.state is not ClaimState.ACTIVE:
             raise TerminalClaimError(f"claim is already {current.state.value}")
+        if current != claim:
+            raise StaleClaimError("claim handle is an old revision")
         return current
 
     def _stage_lifecycle(
@@ -458,6 +460,21 @@ class ClaimLedger:
             self._next_claim_id += 1
             self._next_fencing_token += 1
             return claim
+
+    def validate_active(
+        self, claim: WorkClaim, *, owner: str | None = None
+    ) -> WorkClaim:
+        """Validate and return the current active handle without mutating state."""
+        with self._lock:
+            return self._active_handle(claim, owner)
+
+    @contextmanager
+    def active_transaction(
+        self, claim: WorkClaim, *, owner: str | None = None
+    ) -> Iterator[WorkClaim]:
+        """Hold the ledger fence after validating one active claim."""
+        with self._lock:
+            yield self._active_handle(claim, owner)
 
     def renew(
         self, claim: WorkClaim, *, ttl: int, owner: str | None = None

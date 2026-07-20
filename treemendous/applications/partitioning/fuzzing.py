@@ -88,24 +88,43 @@ class FuzzingEngine:
     ) -> tuple[Crash, ...]:
         """Run target calls, or abandon the whole band on worker failure."""
         if infrastructure_failure:
-            self._runtime.abandon(claim)
-            self._retries += 1
+            retries = self._retries + 1
+            self._runtime.abandon_claim(
+                claim, commit=lambda: setattr(self, "_retries", retries)
+            )
             return ()
-        found: list[Crash] = []
-        for ordinal in range(claim.span.start, claim.span.end):
-            data = self.input_for(ordinal)
-            try:
-                self._target(data)
-            except (Exception,) as exc:
-                signature = self._signature(exc)
-                crash = Crash(signature, ordinal, data, type(exc).__name__, str(exc))
-                prior = self._crashes.get(signature)
-                if prior is None or ordinal < prior.ordinal:
-                    self._crashes[signature] = crash
-                found.append(crash)
-            self._executed.add(ordinal)
-        self._runtime.complete(claim, "executed", {"crashes": len(found)})
-        return tuple(sorted(found))
+
+        def prepare() -> tuple[tuple[Crash, ...], set[int], dict[str, Crash]]:
+            found: list[Crash] = []
+            executed = self._executed.copy()
+            crashes = self._crashes.copy()
+            for ordinal in range(claim.span.start, claim.span.end):
+                data = self.input_for(ordinal)
+                try:
+                    self._target(data)
+                except (Exception,) as exc:
+                    signature = self._signature(exc)
+                    crash = Crash(
+                        signature, ordinal, data, type(exc).__name__, str(exc)
+                    )
+                    prior = crashes.get(signature)
+                    if prior is None or ordinal < prior.ordinal:
+                        crashes[signature] = crash
+                    found.append(crash)
+                executed.add(ordinal)
+            return tuple(sorted(found)), executed, crashes
+
+        def commit(value: tuple[tuple[Crash, ...], set[int], dict[str, Crash]]) -> None:
+            self._executed, self._crashes = value[1], value[2]
+
+        prepared = self._runtime.execute_claim(
+            claim,
+            kind="executed",
+            prepare=prepare,
+            commit=commit,
+            result=lambda value: {"crashes": len(value[0])},
+        )
+        return prepared[0]
 
     def run(
         self,
@@ -125,17 +144,20 @@ class FuzzingEngine:
             injected = False
         return tuple(sorted(self._crashes.values()))
 
-    def snapshot(self) -> FuzzingSnapshot:
-        """Return immutable execution, crash, and retry evidence."""
+    def _snapshot(self) -> FuzzingSnapshot:
         return FuzzingSnapshot(
             tuple(sorted(self._executed)),
             tuple(sorted(self._crashes.values())),
             self._retries,
         )
 
-    def checkpoint(self) -> tuple[FuzzingSnapshot, object]:
-        """Capture findings and process-local coordination state."""
-        return self.snapshot(), self._runtime.checkpoint()
+    def snapshot(self) -> FuzzingSnapshot:
+        """Return immutable execution, crash, and retry evidence."""
+        return self._runtime.observe(self._snapshot)
+
+    def audit_snapshot(self) -> tuple[FuzzingSnapshot, object]:
+        """Capture non-restorable application and runtime audit evidence."""
+        return self._runtime.audit_snapshot(self._snapshot)
 
 
 def _default_target(data: bytes) -> None:

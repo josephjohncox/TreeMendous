@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from ipaddress import AddressValueError, IPv6Address
 from posixpath import normpath
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
@@ -43,10 +44,17 @@ def normalize_url(url: str, *, base: str | None = None) -> str:
     if scheme not in {"http", "https"} or parsed.hostname is None:
         raise ValueError("URL must be absolute HTTP or HTTPS")
     host = parsed.hostname.lower()
+    if "%" in host:
+        raise ValueError("IPv6 zone identifiers are not supported")
     try:
         port = parsed.port
     except ValueError as exc:
         raise ValueError("URL port is invalid") from exc
+    if ":" in host:
+        try:
+            host = f"[{IPv6Address(host).compressed}]"
+        except AddressValueError as exc:
+            raise ValueError("URL IPv6 address is invalid") from exc
     default = (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
     netloc = host if port is None or default else f"{host}:{port}"
     if parsed.username is not None or parsed.password is not None:
@@ -97,26 +105,49 @@ class WebCrawlEngine:
         if not self._frontier or len(self._visited) >= self._max_pages:
             return None
         claim = self._runtime.claim(owner, 1)
-        url = self._frontier.popleft()
-        try:
-            page = self._fetcher(url)
-            if not isinstance(page, CrawlPage):
-                raise TypeError("fetcher must return CrawlPage")
-            if not isinstance(page.body, bytes):
-                raise TypeError("page body must be bytes")
-            links = tuple(sorted({normalize_url(link, base=url) for link in page.links}))
-        except (Exception,) as exc:
-            self._frontier.appendleft(url)
-            self._runtime.abandon(claim)
-            raise RuntimeError(f"fetch failed for {url}") from exc
-        self._visited.append(url)
-        self._pages[url] = page.body
-        for link in links:
-            if link not in self._known:
-                self._known.add(link)
-                self._frontier.append(link)
-        self._runtime.complete(claim, "fetched", {"links": len(links)})
-        return url
+
+        def prepare() -> tuple[
+            str, deque[str], set[str], list[str], dict[str, bytes], int
+        ]:
+            frontier = deque(self._frontier)
+            known = self._known.copy()
+            visited = self._visited.copy()
+            pages = self._pages.copy()
+            url = frontier.popleft()
+            try:
+                page = self._fetcher(url)
+                if not isinstance(page, CrawlPage):
+                    raise TypeError("fetcher must return CrawlPage")
+                if not isinstance(page.body, bytes):
+                    raise TypeError("page body must be bytes")
+                links = tuple(
+                    sorted({normalize_url(link, base=url) for link in page.links})
+                )
+            except (Exception,) as exc:
+                raise RuntimeError(f"fetch failed for {url}") from exc
+            visited.append(url)
+            pages[url] = page.body
+            for link in links:
+                if link not in known:
+                    known.add(link)
+                    frontier.append(link)
+            return url, frontier, known, visited, pages, len(links)
+
+        def commit(
+            value: tuple[
+                str, deque[str], set[str], list[str], dict[str, bytes], int
+            ],
+        ) -> None:
+            _, self._frontier, self._known, self._visited, self._pages, _ = value
+
+        prepared = self._runtime.execute_claim(
+            claim,
+            kind="fetched",
+            prepare=prepare,
+            commit=commit,
+            result=lambda value: {"links": value[5]},
+        )
+        return prepared[0]
 
     def run(self) -> CrawlSnapshot:
         """Crawl until the frontier or page budget is exhausted."""
@@ -127,17 +158,20 @@ class WebCrawlEngine:
                 break
         return self.snapshot()
 
-    def snapshot(self) -> CrawlSnapshot:
-        """Return detached crawl state."""
+    def _snapshot(self) -> CrawlSnapshot:
         return CrawlSnapshot(
             tuple(self._visited),
             tuple(self._frontier),
             tuple((url, self._pages[url]) for url in sorted(self._pages)),
         )
 
-    def checkpoint(self) -> tuple[CrawlSnapshot, object]:
-        """Capture crawl and private runtime state."""
-        return self.snapshot(), self._runtime.checkpoint()
+    def snapshot(self) -> CrawlSnapshot:
+        """Return detached crawl state."""
+        return self._runtime.observe(self._snapshot)
+
+    def audit_snapshot(self) -> tuple[CrawlSnapshot, object]:
+        """Capture non-restorable application and runtime audit evidence."""
+        return self._runtime.audit_snapshot(self._snapshot)
 
 
 def _fixture_fetcher(url: str) -> CrawlPage:

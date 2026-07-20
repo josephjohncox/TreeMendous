@@ -9,7 +9,7 @@ from treemendous.applications.partitioning.log_replay import (
 )
 
 
-def test_offset_replay_is_idempotent_and_checkpointed() -> None:
+def test_offset_replay_is_idempotent_and_audited() -> None:
     events = (
         ReplayEvent(4, "x", "increment", 2),
         ReplayEvent(1, "x", "set", 3),
@@ -22,7 +22,7 @@ def test_offset_replay_is_idempotent_and_checkpointed() -> None:
     expected = (("x", 5),)
     expected_offsets = (1, 4, 8, 9)
     assert observed == expected_state(raw) == expected
-    assert engine.checkpoint().applied_offsets == expected_offsets
+    assert engine.audit_snapshot().applied_offsets == expected_offsets
     assert engine.run() == observed
 
 

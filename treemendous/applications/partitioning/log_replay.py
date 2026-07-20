@@ -28,8 +28,8 @@ class ReplayEvent:
 
 
 @dataclass(frozen=True)
-class LogReplayCheckpoint:
-    """Immutable materialized state and applied offsets."""
+class LogReplayAuditSnapshot:
+    """Immutable, non-restorable materialized state and applied offsets."""
 
     state: tuple[tuple[str, ReplayValue], ...]
     applied_offsets: tuple[int, ...]
@@ -81,9 +81,9 @@ class LogReplayEngine:
         """Claim event positions in sorted offset order."""
         return self._runtime.claim(owner, length)
 
-    def _rebuild(self) -> None:
+    def _materialize(self, applied: set[int]) -> dict[str, ReplayValue]:
         state: dict[str, ReplayValue] = {}
-        for offset in sorted(self._applied):
+        for offset in sorted(applied):
             event = self._by_offset[offset]
             if event.operation == "delete":
                 state.pop(event.key, None)
@@ -98,24 +98,31 @@ class LogReplayEngine:
                 if not isinstance(event.value, int):
                     raise RuntimeError("validated increment event lost its value")
                 state[event.key] = current + event.value
-        self._state = state
+        return state
 
     def apply_claim(self, claim: WorkClaim) -> tuple[int, ...]:
         """Apply a band once and materialize state by ascending offset."""
-        offsets = tuple(
-            self._events[position].offset
-            for position in range(claim.span.start, claim.span.end)
+        def prepare() -> tuple[tuple[int, ...], set[int], dict[str, ReplayValue]]:
+            offsets = tuple(
+                self._events[position].offset
+                for position in range(claim.span.start, claim.span.end)
+            )
+            applied = self._applied | set(offsets)
+            return offsets, applied, self._materialize(applied)
+
+        def commit(
+            value: tuple[tuple[int, ...], set[int], dict[str, ReplayValue]],
+        ) -> None:
+            self._applied, self._state = value[1], value[2]
+
+        prepared = self._runtime.execute_claim(
+            claim,
+            kind="replayed",
+            prepare=prepare,
+            commit=commit,
+            result=lambda value: {"events": len(value[0])},
         )
-        self._applied.update(offsets)
-        try:
-            self._rebuild()
-        except (TypeError, ValueError):
-            self._applied.difference_update(offsets)
-            self._rebuild()
-            self._runtime.abandon(claim)
-            raise
-        self._runtime.complete(claim, "replayed", {"events": len(offsets)})
-        return offsets
+        return prepared[0]
 
     def run(self, *, window_size: int = 128) -> tuple[tuple[str, ReplayValue], ...]:
         """Replay all remaining offsets and return sorted materialized state."""
@@ -128,15 +135,18 @@ class LogReplayEngine:
             self.apply_claim(claim)
         return tuple(sorted(self._state.items()))
 
-    def snapshot(self) -> LogReplayCheckpoint:
-        """Capture materialized and idempotency state."""
-        return LogReplayCheckpoint(
+    def _snapshot(self) -> LogReplayAuditSnapshot:
+        return LogReplayAuditSnapshot(
             tuple(sorted(self._state.items())),
             tuple(sorted(self._applied)),
             self._runtime.checkpoint(),
         )
 
-    checkpoint = snapshot
+    def snapshot(self) -> LogReplayAuditSnapshot:
+        """Capture non-restorable materialized and idempotency evidence."""
+        return self._runtime.observe(self._snapshot)
+
+    audit_snapshot = snapshot
 
 
 def create_log_replay(

@@ -97,32 +97,43 @@ class MapReduceEngine:
 
     def execute_claim(self, claim: WorkClaim) -> tuple[tuple[str, Any], ...]:
         """Map every unit in a split band and commit only validated emissions."""
-        staged: dict[int, tuple[tuple[str, Any], ...]] = {}
-        try:
-            for split in self._splits[claim.span.start : claim.span.end]:
-                emissions: list[tuple[str, Any]] = []
-                for unit in split.units:
-                    for emission in self._mapper(unit):
-                        if not isinstance(emission, tuple) or len(emission) != 2:
-                            raise TypeError("mapper must emit key/value pairs")
-                        key, value = emission
-                        if not isinstance(key, str) or not key:
-                            raise ValueError("mapper keys must be nonempty strings")
-                        emissions.append((key, value))
-                staged[split.split_id] = tuple(emissions)
-        except (Exception,) as exc:
-            self._runtime.abandon(claim)
-            raise RuntimeError("mapper execution failed") from exc
-        self._mapped.update(staged)
-        self._runtime.complete(
-            claim,
-            "mapped",
-            {"emissions": sum(len(values) for values in staged.values())},
-        )
-        return tuple(value for key in sorted(staged) for value in staged[key])
+        def prepare() -> tuple[
+            tuple[tuple[str, Any], ...], dict[int, tuple[tuple[str, Any], ...]]
+        ]:
+            staged: dict[int, tuple[tuple[str, Any], ...]] = {}
+            try:
+                for split in self._splits[claim.span.start : claim.span.end]:
+                    emissions: list[tuple[str, Any]] = []
+                    for unit in split.units:
+                        for emission in self._mapper(unit):
+                            if not isinstance(emission, tuple) or len(emission) != 2:
+                                raise TypeError("mapper must emit key/value pairs")
+                            key, value = emission
+                            if not isinstance(key, str) or not key:
+                                raise ValueError(
+                                    "mapper keys must be nonempty strings"
+                                )
+                            emissions.append((key, value))
+                    staged[split.split_id] = tuple(emissions)
+            except (Exception,) as exc:
+                raise RuntimeError("mapper execution failed") from exc
+            mapped = self._mapped.copy()
+            mapped.update(staged)
+            output = tuple(
+                value for key in sorted(staged) for value in staged[key]
+            )
+            return output, mapped
 
-    def reduce(self) -> tuple[tuple[str, Any], ...]:
-        """Reduce by key in stable split and mapper-emission order."""
+        prepared = self._runtime.execute_claim(
+            claim,
+            kind="mapped",
+            prepare=prepare,
+            commit=lambda value: setattr(self, "_mapped", value[1]),
+            result=lambda value: {"emissions": len(value[0])},
+        )
+        return prepared[0]
+
+    def _reduce(self) -> tuple[tuple[str, Any], ...]:
         grouped: dict[str, list[Any]] = {}
         for split_id in sorted(self._mapped):
             for key, value in self._mapped[split_id]:
@@ -136,6 +147,10 @@ class MapReduceEngine:
             reduced.append((key, accumulator))
         return tuple(reduced)
 
+    def reduce(self) -> tuple[tuple[str, Any], ...]:
+        """Reduce by key in stable split and mapper-emission order."""
+        return self._runtime.observe(self._reduce)
+
     def run(self, *, shard_size: int = 8) -> tuple[tuple[str, Any], ...]:
         """Map all remaining splits and return deterministic reduction."""
         positive(shard_size, "shard_size")
@@ -147,13 +162,16 @@ class MapReduceEngine:
             self.execute_claim(claim)
         return self.reduce()
 
+    def _snapshot(self) -> MapReduceSnapshot:
+        return MapReduceSnapshot(self._mode, self._splits, self._reduce())
+
     def snapshot(self) -> MapReduceSnapshot:
         """Return immutable plan and current reduction."""
-        return MapReduceSnapshot(self._mode, self._splits, self.reduce())
+        return self._runtime.observe(self._snapshot)
 
-    def checkpoint(self) -> tuple[MapReduceSnapshot, object]:
-        """Capture map/reduce and private runtime state."""
-        return self.snapshot(), self._runtime.checkpoint()
+    def audit_snapshot(self) -> tuple[MapReduceSnapshot, object]:
+        """Capture non-restorable application and runtime audit evidence."""
+        return self._runtime.audit_snapshot(self._snapshot)
 
 
 def _word_mapper(unit: bytes) -> Iterable[tuple[str, int]]:

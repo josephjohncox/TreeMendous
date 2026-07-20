@@ -161,30 +161,40 @@ class BuildShardingEngine:
 
     def execute_claim(self, claim: WorkClaim) -> tuple[str, ...]:
         """Record a shard band only when all external dependencies are done."""
-        names = tuple(
-            name
-            for shard in self._shards[claim.span.start : claim.span.end]
-            for name in shard.tasks
+        def prepare() -> tuple[tuple[str, ...], set[str]]:
+            names = tuple(
+                name
+                for shard in self._shards[claim.span.start : claim.span.end]
+                for name in shard.tasks
+            )
+            local = set(names)
+            unavailable = sorted(
+                {
+                    dependency
+                    for name in names
+                    for dependency in self._tasks[name].dependencies
+                    if dependency not in self._completed and dependency not in local
+                }
+            )
+            if unavailable:
+                raise RuntimeError(
+                    f"shard dependencies are incomplete: {unavailable!r}"
+                )
+            completed = self._completed.copy()
+            for name in names:
+                if not set(self._tasks[name].dependencies) <= completed | local:
+                    raise RuntimeError("shard is not internally topological")
+                completed.add(name)
+            return names, completed
+
+        prepared = self._runtime.execute_claim(
+            claim,
+            kind="built",
+            prepare=prepare,
+            commit=lambda value: setattr(self, "_completed", value[1]),
+            result=lambda value: {"tasks": len(value[0])},
         )
-        local = set(names)
-        unavailable = sorted(
-            {
-                dependency
-                for name in names
-                for dependency in self._tasks[name].dependencies
-                if dependency not in self._completed and dependency not in local
-            }
-        )
-        if unavailable:
-            self._runtime.abandon(claim)
-            raise RuntimeError(f"shard dependencies are incomplete: {unavailable!r}")
-        for name in names:
-            if not set(self._tasks[name].dependencies) <= self._completed | local:
-                self._runtime.abandon(claim)
-                raise RuntimeError("shard is not internally topological")
-            self._completed.add(name)
-        self._runtime.complete(claim, "built", {"tasks": len(names)})
-        return names
+        return prepared[0]
 
     def run(self) -> tuple[str, ...]:
         """Execute all shards in dependency-safe order."""
@@ -196,17 +206,20 @@ class BuildShardingEngine:
             self.execute_claim(claim)
         return tuple(name for name in self._order if name in self._completed)
 
-    def snapshot(self) -> BuildShardingSnapshot:
-        """Return immutable plan and completion state."""
+    def _snapshot(self) -> BuildShardingSnapshot:
         return BuildShardingSnapshot(
             self._order,
             self._shards,
             tuple(name for name in self._order if name in self._completed),
         )
 
-    def checkpoint(self) -> tuple[BuildShardingSnapshot, object]:
-        """Capture plan, completion, and private runtime state."""
-        return self.snapshot(), self._runtime.checkpoint()
+    def snapshot(self) -> BuildShardingSnapshot:
+        """Return immutable plan and completion state."""
+        return self._runtime.observe(self._snapshot)
+
+    def audit_snapshot(self) -> tuple[BuildShardingSnapshot, object]:
+        """Capture non-restorable application and runtime audit evidence."""
+        return self._runtime.audit_snapshot(self._snapshot)
 
 
 def create_build_sharding(

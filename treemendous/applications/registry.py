@@ -186,14 +186,14 @@ _SCENARIO_ROWS = (
         "Distributed genetic search",
         "distributed_partition",
         "partition",
-        "workers claim population and candidate-ID bands with cancellation",
+        "the in-process engine claims and commits one serial generation at a time",
     ),
     (
         "distributed-graph-search",
         "Distributed graph frontier search",
         "distributed_partition",
         "partition",
-        "workers claim vertex-ID frontier bands for parallel expansion",
+        "the in-process engine accounts for bounded deterministic frontier expansions",
     ),
     (
         "distributed-sat-search",
@@ -242,7 +242,7 @@ _SCENARIO_ROWS = (
         "Distributed web crawl",
         "distributed_partition",
         "partition",
-        "crawlers claim normalized URL-ID ranges",
+        "the in-process engine accounts for one normalized-URL fetch at a time",
     ),
     (
         "distributed-index-merge",

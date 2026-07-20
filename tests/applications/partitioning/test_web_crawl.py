@@ -30,6 +30,16 @@ def test_normalized_frontier_uses_injected_fetcher_without_network() -> None:
     assert snapshot.frontier == empty
 
 
+def test_ipv6_url_normalization_preserves_bracketed_authorities() -> None:
+    assert normalize_url("HTTP://[0:0:0:0:0:0:0:1]:80/") == "http://[::1]/"
+    assert normalize_url("https://[2001:db8::1]:8443/a") == (
+        "https://[2001:db8::1]:8443/a"
+    )
+    assert normalize_url("https://127.0.0.1:443/") == "https://127.0.0.1/"
+    with pytest.raises(ValueError, match="zone"):
+        normalize_url("http://[fe80::1%25eth0]/")
+
+
 def test_fetch_failure_preserves_frontier_for_retry() -> None:
     engine = WebCrawlEngine(
         ("https://example.test",), _failed_fetch, max_pages=1

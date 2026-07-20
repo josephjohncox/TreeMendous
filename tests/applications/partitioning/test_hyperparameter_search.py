@@ -36,6 +36,26 @@ def test_cartesian_ids_and_objective_ranking_are_deterministic() -> None:
     assert tuple(item.trial_id for item in ranking) == expected_ranking
 
 
+def test_nested_parameter_values_are_detached_from_callers_and_objectives() -> None:
+    value = [1]
+
+    def mutating_objective(parameters: Mapping[str, Any]) -> float:
+        parameters["x"].append(2)
+        return 1.0
+
+    engine = HyperparameterSearchEngine({"x": (value,)}, mutating_objective)
+    value[0] = 9
+    first = engine.parameters_for(0)
+    assert first == (("x", [1]),)
+    first[0][1].append(3)
+    assert engine.parameters_for(0) == (("x", [1]),)
+
+    ranking = engine.run()
+    assert ranking[0].parameters == (("x", [1]),)
+    ranking[0].parameters[0][1].append(4)
+    assert engine.snapshot().ranking[0].parameters == (("x", [1]),)
+
+
 def test_hyperparameter_search_rejects_empty_axes_and_nonfinite_scores() -> None:
     with pytest.raises(ValueError, match="empty"):
         HyperparameterSearchEngine({"x": ()}, _zero)
