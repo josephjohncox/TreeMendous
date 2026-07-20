@@ -158,8 +158,10 @@ shared range operations work across five application families, 50 concrete
 scenarios, all explicit payload policies, and every stable backend. It does not
 establish:
 
-- correctness for continuous, multidimensional, cyclic, or partially ordered
-  domains without an explicit integer encoding;
+- generic interval-multimap semantics that preserve every overlapping record or
+  duplicate identity; `RangeSet` canonicalizes geometry and folds payloads;
+- correctness for continuous, multidimensional, cyclic, unbounded, or partially
+  ordered domains without an explicit finite integer encoding;
 - thread/process safety beyond the documented in-process `RangeSet` lock;
 - persistence, crash recovery, distributed consensus, or exactly-once work;
 - application-specific optimality, fairness policy, regex semantics, genetic
