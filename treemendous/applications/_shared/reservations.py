@@ -703,10 +703,22 @@ class ReservationLedger:
         )
 
         records: dict[str, Reservation] = {}
+        request_identities: set[tuple[str, str]] = set()
+        owner_sequences: dict[str, list[int]] = {}
         for reservation in checkpoint.reservations:
             if reservation.reservation_id in records:
                 raise ValueError("checkpoint contains duplicate reservation IDs")
-            _owner_sequence(reservation.reservation_id, reservation.owner)
+            if reservation.request_id is not None:
+                identity = (reservation.owner, reservation.request_id)
+                if identity in request_identities:
+                    raise ValueError(
+                        "checkpoint contains a duplicate owner/request identity"
+                    )
+                request_identities.add(identity)
+            sequence = _owner_sequence(
+                reservation.reservation_id, reservation.owner
+            )
+            owner_sequences.setdefault(reservation.owner, []).append(sequence)
             normalized = ledger._requirements(
                 {
                     item.resource: item.capacity
@@ -735,12 +747,22 @@ class ReservationLedger:
             if sequence <= 0:
                 raise ValueError("next sequence must be positive")
             next_by_owner[owner] = sequence
-        for reservation in records.values():
-            sequence = _owner_sequence(
-                reservation.reservation_id, reservation.owner
-            )
-            if next_by_owner.get(reservation.owner, 1) <= sequence:
+        for owner in sorted(next_by_owner.keys() - owner_sequences.keys()):
+            raise ValueError(f"checkpoint contains an orphan counter for {owner!r}")
+        for owner, sequences in owner_sequences.items():
+            next_sequence = next_by_owner.get(owner)
+            if next_sequence is None:
+                raise ValueError(f"checkpoint omits the owner counter for {owner!r}")
+            if next_sequence <= max(sequences):
                 raise ValueError("checkpoint owner counter would reuse an identity")
+            if (
+                len(sequences) != next_sequence - 1
+                or sorted(sequences) != list(range(1, next_sequence))
+            ):
+                raise ValueError(
+                    "checkpoint owner sequences are not contiguous through "
+                    "the exact next counter"
+                )
 
         idempotency: dict[
             tuple[str, str], tuple[_RequestFingerprint, str]
@@ -759,11 +781,18 @@ class ReservationLedger:
             ledger._validate_fingerprint(entry.fingerprint, referenced)
             idempotency[key] = (entry.fingerprint, entry.reservation_id)
         for reservation in records.values():
-            if reservation.request_id is not None and (
-                reservation.owner,
-                reservation.request_id,
-            ) not in idempotency:
+            if reservation.request_id is None:
+                continue
+            identity = (reservation.owner, reservation.request_id)
+            mapped = idempotency.get(identity)
+            if mapped is None:
                 raise ValueError("checkpoint omits a reservation idempotency identity")
+            fingerprint, reservation_id = mapped
+            if reservation_id != reservation.reservation_id:
+                raise ValueError(
+                    "checkpoint idempotency identity references a different reservation"
+                )
+            ledger._validate_fingerprint(fingerprint, reservation)
 
         ledger._reservations = records
         ledger._next_by_owner = next_by_owner
@@ -787,9 +816,12 @@ class ReservationLedger:
         with self._lock:
             errors: list[str] = []
             staged: dict[str, Reservation] = {}
-            for reservation in sorted(
+            owner_sequences: dict[str, list[int]] = {}
+            request_identities: set[tuple[str, str]] = set()
+            ordered_reservations = sorted(
                 self._reservations.values(), key=lambda item: item.reservation_id
-            ):
+            )
+            for reservation in ordered_reservations:
                 if reservation.active:
                     conflicts = self._find_conflicts(
                         reservation.requirements,
@@ -810,9 +842,34 @@ class ReservationLedger:
                     errors.append(
                         f"invalid identity {reservation.reservation_id!r}"
                     )
-                    continue
-                if self._next_by_owner.get(reservation.owner, 1) <= sequence:
-                    errors.append(f"stale owner counter for {reservation.owner!r}")
+                else:
+                    owner_sequences.setdefault(reservation.owner, []).append(sequence)
+                if reservation.request_id is not None:
+                    identity = (reservation.owner, reservation.request_id)
+                    if identity in request_identities:
+                        errors.append(
+                            f"duplicate owner/request identity {identity!r}"
+                        )
+                    else:
+                        request_identities.add(identity)
+
+            for owner in sorted(self._next_by_owner.keys() - owner_sequences.keys()):
+                errors.append(f"orphan owner counter for {owner!r}")
+            for owner, sequences in sorted(owner_sequences.items()):
+                next_sequence = self._next_by_owner.get(owner)
+                if next_sequence is None:
+                    errors.append(f"missing owner counter for {owner!r}")
+                elif next_sequence <= max(sequences):
+                    errors.append(f"stale owner counter for {owner!r}")
+                elif (
+                    len(sequences) != next_sequence - 1
+                    or sorted(sequences) != list(range(1, next_sequence))
+                ):
+                    errors.append(
+                        f"non-contiguous owner sequences or non-exact counter "
+                        f"for {owner!r}"
+                    )
+
             for (owner, request_id), (_, reservation_id) in sorted(
                 self._idempotency.items()
             ):
@@ -826,6 +883,32 @@ class ReservationLedger:
                 ):
                     errors.append(
                         f"idempotency key {(owner, request_id)!r} is inconsistent"
+                    )
+
+            for reservation in ordered_reservations:
+                if reservation.request_id is None:
+                    continue
+                identity = (reservation.owner, reservation.request_id)
+                mapped = self._idempotency.get(identity)
+                if mapped is None:
+                    errors.append(
+                        f"reservation {reservation.reservation_id!r} has no "
+                        "idempotency identity"
+                    )
+                    continue
+                fingerprint, reservation_id = mapped
+                if reservation_id != reservation.reservation_id:
+                    errors.append(
+                        f"reservation {reservation.reservation_id!r} has an "
+                        "inconsistent idempotency identity"
+                    )
+                    continue
+                try:
+                    self._validate_fingerprint(fingerprint, reservation)
+                except (TypeError, ValueError):
+                    errors.append(
+                        f"reservation {reservation.reservation_id!r} has an "
+                        "inconsistent idempotency fingerprint"
                     )
             return tuple(errors)
 

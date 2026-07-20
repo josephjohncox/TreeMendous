@@ -265,6 +265,114 @@ def test_restore_rejects_invalid_checkpoint_without_changing_live_state() -> Non
         ReservationLedger.from_checkpoint(object())  # type: ignore[arg-type]
 
 
+def test_checkpoint_rejects_duplicate_owner_request_identity() -> None:
+    ledger = ReservationLedger({"lane": CapacityVector(units=1)})
+    demand = {"lane": CapacityVector(units=1)}
+    ledger.reserve_exact("owner", 0, 1, demand, request_id="first")
+    ledger.reserve_exact("owner", 1, 2, demand, request_id="second")
+    checkpoint = ledger.checkpoint()
+    duplicate = replace(
+        checkpoint.reservations[1],
+        request_id=checkpoint.reservations[0].request_id,
+    )
+    invalid = replace(
+        checkpoint,
+        reservations=(checkpoint.reservations[0], duplicate),
+        idempotency=(checkpoint.idempotency[0],),
+    )
+
+    with pytest.raises(ValueError, match="duplicate owner/request identity"):
+        ReservationLedger.from_checkpoint(invalid)
+
+
+def test_checkpoint_rejects_missing_retained_reservation_history() -> None:
+    ledger = ReservationLedger({"lane": CapacityVector(units=1)})
+    demand = {"lane": CapacityVector(units=1)}
+    for start in range(3):
+        reservation = ledger.reserve_exact("owner", start, start + 1, demand)
+        ledger.cancel("owner", reservation.id)
+    checkpoint = ledger.checkpoint()
+    invalid = replace(
+        checkpoint,
+        reservations=(checkpoint.reservations[0], checkpoint.reservations[2]),
+    )
+
+    with pytest.raises(ValueError, match="contiguous.*exact next counter"):
+        ReservationLedger.from_checkpoint(invalid)
+
+
+def test_checkpoint_rejects_non_exact_and_orphan_owner_counters() -> None:
+    ledger = ReservationLedger({"lane": CapacityVector(units=1)})
+    ledger.reserve_exact("owner", 0, 1, {"lane": CapacityVector(units=1)})
+    checkpoint = ledger.checkpoint()
+    non_exact = replace(checkpoint, next_sequences=(("owner", 10),))
+    orphan = replace(
+        checkpoint,
+        next_sequences=checkpoint.next_sequences + (("other", 1),),
+    )
+
+    with pytest.raises(ValueError, match="exact next counter"):
+        ReservationLedger.from_checkpoint(non_exact)
+    with pytest.raises(ValueError, match="orphan counter"):
+        ReservationLedger.from_checkpoint(orphan)
+
+
+def test_diagnostics_reports_duplicate_request_identity() -> None:
+    ledger = ReservationLedger({"lane": CapacityVector(units=1)})
+    demand = {"lane": CapacityVector(units=1)}
+    first = ledger.reserve_exact("owner", 0, 1, demand, request_id="first")
+    second = ledger.reserve_exact("owner", 1, 2, demand, request_id="second")
+    ledger._reservations[second.id] = replace(second, request_id="first")
+
+    errors = ledger.diagnostics()
+    assert "duplicate owner/request identity ('owner', 'first')" in errors
+    assert (
+        f"reservation {second.id!r} has an inconsistent idempotency identity"
+        in errors
+    )
+    assert ledger.get(first.id).request_id == "first"
+
+
+def test_diagnostics_reports_sequence_and_counter_corruption() -> None:
+    ledger = ReservationLedger({"lane": CapacityVector(units=1)})
+    demand = {"lane": CapacityVector(units=1)}
+    for start in range(3):
+        reservation = ledger.reserve_exact("owner", start, start + 1, demand)
+        ledger.cancel("owner", reservation.id)
+    del ledger._reservations["owner:2"]
+    ledger._next_by_owner["owner"] = 8
+    ledger._next_by_owner["orphan"] = 1
+
+    errors = ledger.diagnostics()
+    assert "orphan owner counter for 'orphan'" in errors
+    assert (
+        "non-contiguous owner sequences or non-exact counter for 'owner'" in errors
+    )
+
+
+def test_diagnostics_reports_inconsistent_idempotency_fingerprint() -> None:
+    ledger = ReservationLedger({"lane": CapacityVector(units=1)})
+    reservation = ledger.reserve_exact(
+        "owner",
+        0,
+        1,
+        {"lane": CapacityVector(units=1)},
+        request_id="request",
+    )
+    entry = ledger.checkpoint().idempotency[0]
+    invalid_fingerprint = replace(entry.fingerprint, start=1)
+    ledger._idempotency[(entry.owner, entry.request_id)] = (
+        invalid_fingerprint,
+        reservation.id,
+    )
+
+    expected_errors = (
+        f"reservation {reservation.id!r} has an inconsistent "
+        "idempotency fingerprint",
+    )
+    assert ledger.diagnostics() == expected_errors
+
+
 def test_concurrent_earliest_reservations_are_serialized() -> None:
     ledger = ReservationLedger({"runner": CapacityVector(units=1)})
     demand = {"runner": CapacityVector(units=1)}
