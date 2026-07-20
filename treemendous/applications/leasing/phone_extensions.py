@@ -66,8 +66,7 @@ class PhoneExtensionPool:
             validate_coordinate(number, "emergency number")
             excluded.append(Span(number, number + 1))
         excluded.extend(
-            inclusive_span(start, end, "service range")
-            for start, end in service_ranges
+            inclusive_span(start, end, "service range") for start, end in service_ranges
         )
         self._group = PoolGroup(
             {self.plan_id: spans_without(domain, excluded)},

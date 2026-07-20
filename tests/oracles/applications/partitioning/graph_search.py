@@ -3,7 +3,9 @@
 from collections.abc import Mapping, Sequence
 
 
-def expected_bfs(graph: Mapping[str, Sequence[str]], start: str) -> tuple[tuple[str, ...], tuple[tuple[str, int], ...]]:
+def expected_bfs(
+    graph: Mapping[str, Sequence[str]], start: str
+) -> tuple[tuple[str, ...], tuple[tuple[str, int], ...]]:
     queue = [start]
     distance = {start: 0}
     order: list[str] = []

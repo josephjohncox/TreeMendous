@@ -97,6 +97,7 @@ class MapReduceEngine:
 
     def execute_claim(self, claim: WorkClaim) -> tuple[tuple[str, Any], ...]:
         """Map every unit in a split band and commit only validated emissions."""
+
         def prepare() -> tuple[
             tuple[tuple[str, Any], ...], dict[int, tuple[tuple[str, Any], ...]]
         ]:
@@ -110,18 +111,14 @@ class MapReduceEngine:
                                 raise TypeError("mapper must emit key/value pairs")
                             key, value = emission
                             if not isinstance(key, str) or not key:
-                                raise ValueError(
-                                    "mapper keys must be nonempty strings"
-                                )
+                                raise ValueError("mapper keys must be nonempty strings")
                             emissions.append((key, value))
                     staged[split.split_id] = tuple(emissions)
             except (Exception,) as exc:
                 raise RuntimeError("mapper execution failed") from exc
             mapped = self._mapped.copy()
             mapped.update(staged)
-            output = tuple(
-                value for key in sorted(staged) for value in staged[key]
-            )
+            output = tuple(value for key in sorted(staged) for value in staged[key])
             return output, mapped
 
         prepared = self._runtime.execute_claim(

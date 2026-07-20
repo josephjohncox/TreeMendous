@@ -2,7 +2,9 @@
 
 
 def expected_pair(
-    devices: tuple[tuple[str, frozenset[str], tuple[tuple[str, frozenset[str]], ...]], ...],
+    devices: tuple[
+        tuple[str, frozenset[str], tuple[tuple[str, frozenset[str]], ...]], ...
+    ],
     compatibility: str,
 ) -> tuple[str, str] | None:
     pairs = [

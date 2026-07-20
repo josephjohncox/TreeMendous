@@ -32,7 +32,9 @@ class NaiveExtensionOracle:
     def advance(self, delta: int) -> tuple[int, ...]:
         self.now += delta
         expired = tuple(
-            token for token, (_, deadline) in self.active.items() if deadline <= self.now
+            token
+            for token, (_, deadline) in self.active.items()
+            if deadline <= self.now
         )
         for token in expired:
             values, _ = self.active.pop(token)

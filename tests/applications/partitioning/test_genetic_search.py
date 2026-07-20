@@ -57,9 +57,7 @@ def test_restore_rejects_contradictory_application_and_runtime_progress() -> Non
     population = ("00", "11")
     engine = GeneticSearchEngine(population, _fitness, generations=2)
     checkpoint = engine.checkpoint()
-    record = GeneticGeneration(
-        0, population, expected_ranking(population, _fitness)
-    )
+    record = GeneticGeneration(0, population, expected_ranking(population, _fitness))
     mixed = replace(checkpoint, generation=1, history=(record,))
 
     with pytest.raises(ClaimInvariantError, match="completion count"):

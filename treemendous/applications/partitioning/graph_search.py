@@ -43,13 +43,18 @@ class GraphSearchEngine:
         normalized: dict[str, tuple[str, ...]] = {}
         for vertex, neighbors in graph.items():
             nonempty(vertex, "vertex")
-            if isinstance(neighbors, (str, bytes)) or not isinstance(neighbors, Sequence):
+            if isinstance(neighbors, (str, bytes)) or not isinstance(
+                neighbors, Sequence
+            ):
                 raise TypeError("neighbors must be a sequence of vertex names")
             checked: list[str] = []
             for neighbor in neighbors:
                 checked.append(nonempty(neighbor, "neighbor"))
             normalized[vertex] = tuple(sorted(set(checked)))
-        missing = sorted({item for values in normalized.values() for item in values} - set(normalized))
+        missing = sorted(
+            {item for values in normalized.values() for item in values}
+            - set(normalized)
+        )
         if missing:
             raise ValueError(f"graph references missing vertices: {missing!r}")
         nonempty(start, "start")
@@ -70,6 +75,7 @@ class GraphSearchEngine:
             return ()
         count = min(width, len(self._frontier))
         claim = self._runtime.claim(owner, count)
+
         def prepare() -> tuple[
             tuple[str, ...],
             deque[str],
@@ -162,5 +168,7 @@ def create_graph_search(
     clock: Clock | None = None,
 ) -> GraphSearchEngine:
     """Create a deterministic BFS job."""
-    selected = {"a": ("b", "c"), "b": ("d",), "c": (), "d": ()} if graph is None else graph
+    selected = (
+        {"a": ("b", "c"), "b": ("d",), "c": (), "d": ()} if graph is None else graph
+    )
     return GraphSearchEngine(selected, start, clock=clock)

@@ -5,7 +5,9 @@ from treemendous.applications.partitioning.document_search import DocumentSearch
 
 
 def main() -> None:
-    engine = DocumentSearchEngine({2: "range tree", 1: "range", 3: "tree"}, "range tree")
+    engine = DocumentSearchEngine(
+        {2: "range tree", 1: "range", 3: "tree"}, "range tree"
+    )
     hits = engine.run(shard_size=1)
     if tuple(hit.document_id for hit in hits) != (2,):
         raise RuntimeError("unexpected document search result")

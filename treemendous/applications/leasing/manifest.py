@@ -24,18 +24,10 @@ EVIDENCE = MappingProxyType(
             "numeric_ip_pools", "numeric_ip_address_pools"
         ),
         "database-id-pools": _evidence("database_ids", "database_id_pools"),
-        "software-license-seats": _evidence(
-            "software_seats", "software_license_seats"
-        ),
-        "warehouse-bin-ranges": _evidence(
-            "warehouse_bins", "warehouse_bin_ranges"
-        ),
-        "game-world-region-ids": _evidence(
-            "game_regions", "game_world_region_ids"
-        ),
+        "software-license-seats": _evidence("software_seats", "software_license_seats"),
+        "warehouse-bin-ranges": _evidence("warehouse_bins", "warehouse_bin_ranges"),
+        "game-world-region-ids": _evidence("game_regions", "game_world_region_ids"),
         "vlan-tag-pools": _evidence("vlan_tags", "vlan_tag_pools"),
-        "phone-extension-pools": _evidence(
-            "phone_extensions", "phone_extension_pools"
-        ),
+        "phone-extension-pools": _evidence("phone_extensions", "phone_extension_pools"),
     }
 )

@@ -124,7 +124,10 @@ class MaintenanceScheduler:
                     raise ValueError(f"dependency is cancelled: {dependency!r}")
                 dependency_bookings.append(booking)
             ready = max(
-                (earliest_start, *(item.reservation.end for item in dependency_bookings))
+                (
+                    earliest_start,
+                    *(item.reservation.end for item in dependency_bookings),
+                )
             )
             policy = self._services[service]
             selected: int | None = None
@@ -195,8 +198,5 @@ def create_maintenance_scheduler(
 ) -> MaintenanceScheduler:
     """Construct a maintenance scheduler."""
     return MaintenanceScheduler(
-        services
-        or (
-            MaintenanceService("api", (Span(0, 100),)),
-        )
+        services or (MaintenanceService("api", (Span(0, 100),)),)
     )

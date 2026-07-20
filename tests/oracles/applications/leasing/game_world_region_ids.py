@@ -12,7 +12,9 @@ class NaiveRegionOracle:
         self.now = 0
         self.next_token = 1
 
-    def acquire(self, shard: str, owner: str, count: int, ttl: int) -> tuple[int, set[int]]:
+    def acquire(
+        self, shard: str, owner: str, count: int, ttl: int
+    ) -> tuple[int, set[int]]:
         values = next(
             (
                 set(range(start, start + count))
@@ -39,7 +41,9 @@ class NaiveRegionOracle:
     def advance(self, delta: int) -> tuple[int, ...]:
         self.now += delta
         expired = tuple(
-            token for token, (_, _, _, deadline) in self.active.items() if deadline <= self.now
+            token
+            for token, (_, _, _, deadline) in self.active.items()
+            if deadline <= self.now
         )
         for token in expired:
             shard, _, values, _ = self.active.pop(token)

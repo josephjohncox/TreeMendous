@@ -44,9 +44,7 @@ class LogReplayEngine:
     transactionally persist offsets, values, and fencing tokens.
     """
 
-    def __init__(
-        self, events: object, *, clock: Clock | None = None
-    ) -> None:
+    def __init__(self, events: object, *, clock: Clock | None = None) -> None:
         if isinstance(events, (str, bytes)) or not isinstance(events, Sequence):
             raise TypeError("events must be a sequence")
         if not events:
@@ -102,6 +100,7 @@ class LogReplayEngine:
 
     def apply_claim(self, claim: WorkClaim) -> tuple[int, ...]:
         """Apply a band once and materialize state by ascending offset."""
+
         def prepare() -> tuple[tuple[int, ...], set[int], dict[str, ReplayValue]]:
             offsets = tuple(
                 self._events[position].offset

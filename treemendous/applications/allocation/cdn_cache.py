@@ -175,9 +175,7 @@ class CDNByteRangeCache:
         validate_coordinate(checkpoint.evictions, "evictions")
         if checkpoint.evictions < 0:
             raise ValueError("evictions must be nonnegative")
-        records = {
-            record.handle: record for record in checkpoint.allocator.records
-        }
+        records = {record.handle: record for record in checkpoint.allocator.records}
         staged: dict[int, CachedSegment] = {}
         for segment in checkpoint.segments:
             if (

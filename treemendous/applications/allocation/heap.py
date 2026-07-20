@@ -93,7 +93,9 @@ class HeapAllocator:
         validate_length(size)
         selected_alignment = self._default_alignment if alignment is None else alignment
         self._validate_alignment(selected_alignment)
-        selected_policy = self._policy if policy is None else self._coerce_policy(policy)
+        selected_policy = (
+            self._policy if policy is None else self._coerce_policy(policy)
+        )
         prefix = self._header_size + self._redzone_size
         suffix = self._redzone_size
         total = prefix + size + suffix
@@ -154,7 +156,9 @@ class HeapAllocator:
             state = self._allocator.snapshot()
             return HeapSnapshot(
                 capacity=state.domain.measure,
-                blocks=tuple(sorted(self._blocks.values(), key=lambda item: item.payload)),
+                blocks=tuple(
+                    sorted(self._blocks.values(), key=lambda item: item.payload)
+                ),
                 free_ranges=state.free_ranges,
                 diagnostics=state.diagnostics,
             )
@@ -174,7 +178,10 @@ class HeapAllocator:
         staged: dict[int, HeapBlock] = {}
         allocator_handles = {record.handle for record in checkpoint.allocator.records}
         for block in checkpoint.blocks:
-            if not isinstance(block, HeapBlock) or block.raw_handle not in allocator_handles:
+            if (
+                not isinstance(block, HeapBlock)
+                or block.raw_handle not in allocator_handles
+            ):
                 raise ValueError("checkpoint block metadata does not match allocator")
             raw = block.raw_handle.span
             expected_start = raw.start + block.header_size + block.redzone_size

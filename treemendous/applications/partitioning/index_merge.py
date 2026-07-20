@@ -88,6 +88,7 @@ class IndexMergeEngine:
 
     def merge_claim(self, claim: WorkClaim) -> tuple[TermPostings, ...]:
         """Merge and validate all terms in one claimed band."""
+
         def prepare() -> tuple[tuple[TermPostings, ...], dict[str, tuple[int, ...]]]:
             staged: list[TermPostings] = []
             merged_state = self._merged.copy()
@@ -121,14 +122,15 @@ class IndexMergeEngine:
             except ClaimUnavailableError:
                 break
             self.merge_claim(claim)
-        return tuple(TermPostings(term, self._merged[term]) for term in sorted(self._merged))
+        return tuple(
+            TermPostings(term, self._merged[term]) for term in sorted(self._merged)
+        )
 
     def _snapshot(self) -> IndexMergeSnapshot:
         return IndexMergeSnapshot(
             self._terms,
             tuple(
-                TermPostings(term, self._merged[term])
-                for term in sorted(self._merged)
+                TermPostings(term, self._merged[term]) for term in sorted(self._merged)
             ),
         )
 

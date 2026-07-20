@@ -78,11 +78,7 @@ class BuildShardingEngine:
             by_name[task.name] = task
             checked_tasks.append(task)
         missing = sorted(
-            {
-                dependency
-                for task in checked_tasks
-                for dependency in task.dependencies
-            }
+            {dependency for task in checked_tasks for dependency in task.dependencies}
             - set(by_name)
         )
         if missing:
@@ -161,6 +157,7 @@ class BuildShardingEngine:
 
     def execute_claim(self, claim: WorkClaim) -> tuple[str, ...]:
         """Record a shard band only when all external dependencies are done."""
+
         def prepare() -> tuple[tuple[str, ...], set[str]]:
             names = tuple(
                 name

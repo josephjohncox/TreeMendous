@@ -39,15 +39,18 @@ def test_bin_zone_size_hazard_and_expiry_match_naive_model() -> None:
     assert set(range(lease.resource.start, lease.resource.end)) == expected
     assert lease.size_class == "large"
     assert lease.hazard == "flammable"
-    assert engine.acquire(
-        "north",
-        "putaway",
-        ttl=2,
-        count=2,
-        size_class="large",
-        hazard="flammable",
-        request_id="job-1",
-    ) == lease
+    assert (
+        engine.acquire(
+            "north",
+            "putaway",
+            ttl=2,
+            count=2,
+            size_class="large",
+            hazard="flammable",
+            request_id="job-1",
+        )
+        == lease
+    )
     with pytest.raises(BinCompatibilityError):
         engine.acquire("north", "bad", ttl=1, size_class="oversize")
     with pytest.raises(BinRequestConflictError):

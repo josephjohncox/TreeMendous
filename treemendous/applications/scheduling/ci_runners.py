@@ -73,8 +73,5 @@ def create_ci_runner_scheduler(
 ) -> CIRunnerScheduler:
     """Construct a CI scheduler."""
     return CIRunnerScheduler(
-        runners
-        or (
-            Runner("runner-a", frozenset({"linux", "x86"}), concurrency=2),
-        )
+        runners or (Runner("runner-a", frozenset({"linux", "x86"}), concurrency=2),)
     )

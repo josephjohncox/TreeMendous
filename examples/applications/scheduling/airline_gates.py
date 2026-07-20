@@ -8,8 +8,13 @@ from treemendous.applications.scheduling.airline_gates import (
 def main() -> None:
     scheduler = create_airline_gate_scheduler()
     placement = scheduler.assign(
-        "TM123", 10, 15, aircraft_type="A320", turnaround_before=1,
-        turnaround_after=2, request_id="arrival",
+        "TM123",
+        10,
+        15,
+        aircraft_type="A320",
+        turnaround_before=1,
+        turnaround_after=2,
+        request_id="arrival",
     )
     print(placement.resource, placement.reservation.occupied_span)
 

@@ -5,7 +5,9 @@ from treemendous.applications.partitioning.index_merge import IndexMergeEngine
 
 
 def main() -> None:
-    merged = IndexMergeEngine(({"a": (1, 3)}, {"a": (2, 3), "b": (4,)})).run(band_size=1)
+    merged = IndexMergeEngine(({"a": (1, 3)}, {"a": (2, 3), "b": (4,)})).run(
+        band_size=1
+    )
     observed = tuple((item.term, item.postings) for item in merged)
     if observed != (("a", (1, 2, 3)), ("b", (4,))):
         raise RuntimeError("unexpected index merge")

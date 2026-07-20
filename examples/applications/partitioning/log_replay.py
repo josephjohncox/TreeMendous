@@ -8,7 +8,10 @@ from treemendous.applications.partitioning.log_replay import (
 
 
 def main() -> None:
-    events = (ReplayEvent(2, "count", "increment", 2), ReplayEvent(0, "count", "set", 1))
+    events = (
+        ReplayEvent(2, "count", "increment", 2),
+        ReplayEvent(0, "count", "set", 1),
+    )
     state = LogReplayEngine(events).run(window_size=1)
     if state != (("count", 3),):
         raise RuntimeError("unexpected replay state")

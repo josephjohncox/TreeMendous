@@ -61,15 +61,15 @@ Package: `treemendous.applications.partitioning`. Registered engines: 12.
 | --- | --- | --- |
 | [Distributed document search](scenarios/partitioning/document_search.md) | workers claim document-ID bands and return abandoned bands for retry | [example](../examples/applications/partitioning/document_search.py) |
 | [Distributed regular-expression scan](scenarios/partitioning/regex_scan.md) | workers claim byte-offset chunks while overlap checks model boundary halos | [example](../examples/applications/partitioning/regex_scan.py) |
-| [Distributed genetic search](scenarios/partitioning/genetic_search.md) | workers claim population and candidate-ID bands with cancellation | [example](../examples/applications/partitioning/genetic_search.py) |
-| [Distributed graph frontier search](scenarios/partitioning/graph_search.md) | workers claim vertex-ID frontier bands for parallel expansion | [example](../examples/applications/partitioning/graph_search.py) |
+| [Distributed genetic search](scenarios/partitioning/genetic_search.md) | the in-process engine claims and commits one serial generation at a time | [example](../examples/applications/partitioning/genetic_search.py) |
+| [Distributed graph frontier search](scenarios/partitioning/graph_search.md) | the in-process engine accounts for bounded deterministic frontier expansions | [example](../examples/applications/partitioning/graph_search.py) |
 | [Distributed SAT search](scenarios/partitioning/sat_search.md) | workers claim ordinal ranges of assignment prefixes | [example](../examples/applications/partitioning/sat_search.py) |
 | [Distributed fuzzing](scenarios/partitioning/fuzzing.md) | workers claim generated-input ordinal ranges and retry failed workers | [example](../examples/applications/partitioning/fuzzing.py) |
 | [Distributed hyperparameter search](scenarios/partitioning/hyperparameter_search.md) | workers claim deterministic trial-ID ranges | [example](../examples/applications/partitioning/hyperparameter_search.py) |
 | [Distributed log replay](scenarios/partitioning/log_replay.md) | consumers claim log-offset windows and return interrupted windows | [example](../examples/applications/partitioning/log_replay.py) |
 | [Distributed build and test sharding](scenarios/partitioning/build_sharding.md) | runners claim ordered source-file or test-ID ranges | [example](../examples/applications/partitioning/build_sharding.py) |
 | [Map-reduce input splitting](scenarios/partitioning/map_reduce.md) | workers claim byte and record ranges from partitioned inputs | [example](../examples/applications/partitioning/map_reduce.py) |
-| [Distributed web crawl](scenarios/partitioning/web_crawl.md) | crawlers claim normalized URL-ID ranges | [example](../examples/applications/partitioning/web_crawl.py) |
+| [Distributed web crawl](scenarios/partitioning/web_crawl.md) | the in-process engine accounts for one normalized-URL fetch at a time | [example](../examples/applications/partitioning/web_crawl.py) |
 | [Distributed search-index merge](scenarios/partitioning/index_merge.md) | workers claim term-ID and posting-list bands during index merges | [example](../examples/applications/partitioning/index_merge.py) |
 
 ## Scheduling and reservation

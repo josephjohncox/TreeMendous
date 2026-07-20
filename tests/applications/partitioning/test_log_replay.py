@@ -27,7 +27,9 @@ def test_offset_replay_is_idempotent_and_audited() -> None:
 
 
 def test_log_replay_rolls_back_invalid_increment() -> None:
-    engine = LogReplayEngine((ReplayEvent(0, "x", "set", "text"), ReplayEvent(1, "x", "increment", 1)))
+    engine = LogReplayEngine(
+        (ReplayEvent(0, "x", "set", "text"), ReplayEvent(1, "x", "increment", 1))
+    )
     with pytest.raises(ValueError, match="string"):
         engine.run(window_size=2)
     empty: tuple[tuple[str, int | str], ...] = ()

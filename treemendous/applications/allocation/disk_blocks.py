@@ -30,7 +30,9 @@ class FileExtent:
 
     @property
     def byte_range(self) -> Span:
-        return Span(self.handle.start * self.block_size, self.handle.end * self.block_size)
+        return Span(
+            self.handle.start * self.block_size, self.handle.end * self.block_size
+        )
 
 
 @dataclass(frozen=True)
@@ -118,7 +120,11 @@ class DiskBlockAllocator:
         with self._lock:
             return tuple(
                 sorted(
-                    (item for item in self._extents.values() if item.file_id == file_id),
+                    (
+                        item
+                        for item in self._extents.values()
+                        if item.file_id == file_id
+                    ),
                     key=lambda item: item.blocks,
                 )
             )

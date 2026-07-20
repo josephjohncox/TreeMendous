@@ -60,7 +60,9 @@ class FleetChargingScheduler:
     tariffs, taper curves, battery degradation, and grid-wide optimization.
     """
 
-    def __init__(self, chargers: tuple[Charger, ...], *, max_session_slots: int) -> None:
+    def __init__(
+        self, chargers: tuple[Charger, ...], *, max_session_slots: int
+    ) -> None:
         if not chargers:
             raise ValueError("at least one charger is required")
         integer(max_session_slots, "max_session_slots", minimum=1)
@@ -111,7 +113,9 @@ class FleetChargingScheduler:
                 if connector in charger.connectors
             )
             for charger in compatible:
-                duration = (energy + charger.power_per_slot - 1) // charger.power_per_slot
+                duration = (
+                    energy + charger.power_per_slot - 1
+                ) // charger.power_per_slot
                 if duration > self._max_session_slots or duration > dwell.length:
                     continue
                 for start in range(dwell.start, dwell.end - duration + 1):

@@ -13,7 +13,9 @@ class NaivePortOracle:
         self.now = 0
         self.next_token = 1
 
-    def acquire(self, protocol: str, count: int, ttl: int) -> tuple[int, tuple[int, ...]]:
+    def acquire(
+        self, protocol: str, count: int, ttl: int
+    ) -> tuple[int, tuple[int, ...]]:
         for start in sorted(self.free[protocol]):
             block = tuple(range(start, start + count))
             if all(port in self.free[protocol] for port in block):
@@ -27,7 +29,9 @@ class NaivePortOracle:
     def advance(self, delta: int) -> tuple[int, ...]:
         self.now += delta
         expired = tuple(
-            token for token, (_, _, deadline) in self.active.items() if deadline <= self.now
+            token
+            for token, (_, _, deadline) in self.active.items()
+            if deadline <= self.now
         )
         for token in expired:
             protocol, block, _ = self.active.pop(token)

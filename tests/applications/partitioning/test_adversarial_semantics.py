@@ -77,7 +77,9 @@ def _map_reduce(effects: list[str]) -> MapReduceEngine:
         effects.append("mapper")
         return (("key", 1),)
 
-    return MapReduceEngine(b"unit", mapper, lambda left, right: left + right, split_size=1)
+    return MapReduceEngine(
+        b"unit", mapper, lambda left, right: left + right, split_size=1
+    )
 
 
 def _regex(_: list[str]) -> RegexScanEngine:
@@ -160,7 +162,9 @@ def test_failed_runtime_event_append_cannot_commit_application_state(
     assert runtime.claims.claims[0].state is ClaimState.ACTIVE
 
 
-def test_concurrent_duplicate_execution_runs_callback_once_and_snapshot_is_consistent() -> None:
+def test_concurrent_duplicate_execution_runs_callback_once_and_snapshot_is_consistent() -> (
+    None
+):
     entered = ThreadEvent()
     release = ThreadEvent()
     callback_calls: list[str] = []

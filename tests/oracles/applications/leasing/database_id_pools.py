@@ -15,7 +15,9 @@ class NaiveDatabaseIdOracle:
         self.reusable: set[int] = set()
         self.committed: set[int] = set()
 
-    def acquire(self, count: int, ttl: int, *, reusable: bool = False) -> tuple[int, set[int]]:
+    def acquire(
+        self, count: int, ttl: int, *, reusable: bool = False
+    ) -> tuple[int, set[int]]:
         if reusable:
             ordered = sorted(self.reusable)
             values = next(
@@ -46,7 +48,9 @@ class NaiveDatabaseIdOracle:
     def advance(self, delta: int) -> tuple[int, ...]:
         self.now += delta
         expired = tuple(
-            token for token, (_, deadline) in self.active.items() if deadline <= self.now
+            token
+            for token, (_, deadline) in self.active.items()
+            if deadline <= self.now
         )
         for token in expired:
             values, _ = self.active.pop(token)

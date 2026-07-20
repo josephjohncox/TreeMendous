@@ -87,6 +87,7 @@ class HyperparameterSearchEngine:
 
     def evaluate_claim(self, claim: WorkClaim) -> tuple[TrialResult, ...]:
         """Evaluate and record all trial IDs in one claimed band."""
+
         def prepare() -> tuple[tuple[TrialResult, ...], dict[int, TrialResult]]:
             evaluated: list[TrialResult] = []
             results = self._results.copy()
@@ -96,9 +97,7 @@ class HyperparameterSearchEngine:
                     raw_score = self._objective(deepcopy(dict(parameters)))
                     score = float(raw_score)
                 except (Exception,) as exc:
-                    raise ValueError(
-                        "objective must return a finite number"
-                    ) from exc
+                    raise ValueError("objective must return a finite number") from exc
                 if not isfinite(score):
                     raise ValueError("objective must return a finite number")
                 trial = TrialResult(trial_id, parameters, score)

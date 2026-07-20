@@ -11,17 +11,27 @@ def test_cluster_capacity_labels_placement_and_failure_atomicity() -> None:
     scheduler = ClusterScheduler(
         (
             ClusterNode("a", CapacityVector(cpu=4, memory=8), frozenset({"linux"})),
-            ClusterNode("b", CapacityVector(cpu=4, memory=8), frozenset({"linux", "gpu"})),
+            ClusterNode(
+                "b", CapacityVector(cpu=4, memory=8), frozenset({"linux", "gpu"})
+            ),
         )
     )
     demand = CapacityVector(cpu=3, memory=4)
     first = scheduler.schedule(
-        "one", 2, demand, required_labels=frozenset({"gpu"}), latest_end=4,
+        "one",
+        2,
+        demand,
+        required_labels=frozenset({"gpu"}),
+        latest_end=4,
         request_id="r1",
     )
     assert first.resource == "b"
     replay = scheduler.schedule(
-        "one", 2, demand, required_labels=frozenset({"gpu"}), latest_end=4,
+        "one",
+        2,
+        demand,
+        required_labels=frozenset({"gpu"}),
+        latest_end=4,
         request_id="r1",
     )
     assert replay is first

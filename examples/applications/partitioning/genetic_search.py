@@ -9,7 +9,9 @@ def fitness(value: str) -> float:
 
 
 def main() -> None:
-    engine = GeneticSearchEngine(("000", "001", "110", "111"), fitness, generations=3, seed=5)
+    engine = GeneticSearchEngine(
+        ("000", "001", "110", "111"), fitness, generations=3, seed=5
+    )
     history = engine.run()
     if len(history) != 3:
         raise RuntimeError("unexpected genetic history")

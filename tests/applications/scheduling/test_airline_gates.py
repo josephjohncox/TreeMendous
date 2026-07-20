@@ -12,7 +12,11 @@ from treemendous.applications.scheduling.airline_gates import (
 def test_gate_aircraft_compatibility_and_turnaround_buffers() -> None:
     scheduler = AirlineGateScheduler((Gate("g1", frozenset({"A320"})),))
     first = scheduler.assign(
-        "f1", 10, 20, aircraft_type="A320", turnaround_before=2,
+        "f1",
+        10,
+        20,
+        aircraft_type="A320",
+        turnaround_before=2,
         turnaround_after=2,
     )
     with pytest.raises(SchedulingUnavailableError):

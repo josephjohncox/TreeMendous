@@ -134,9 +134,7 @@ class WebCrawlEngine:
             return url, frontier, known, visited, pages, len(links)
 
         def commit(
-            value: tuple[
-                str, deque[str], set[str], list[str], dict[str, bytes], int
-            ],
+            value: tuple[str, deque[str], set[str], list[str], dict[str, bytes], int],
         ) -> None:
             _, self._frontier, self._known, self._visited, self._pages, _ = value
 

@@ -91,15 +91,14 @@ class DocumentSearchEngine:
 
     def search_claim(self, claim: WorkClaim) -> tuple[SearchHit, ...]:
         """Query one claimed band and merge its results idempotently."""
+
         def prepare() -> tuple[tuple[SearchHit, ...], dict[int, SearchHit]]:
             candidate_ids = set(self._postings.get(self._query[0], ()))
             for token in self._query[1:]:
                 candidate_ids.intersection_update(self._postings.get(token, ()))
             hits = tuple(
                 SearchHit(document_id, self._tokenized[document_id])
-                for document_id, _ in self._documents[
-                    claim.span.start : claim.span.end
-                ]
+                for document_id, _ in self._documents[claim.span.start : claim.span.end]
                 if document_id in candidate_ids
             )
             matches = self._matches.copy()
@@ -115,7 +114,9 @@ class DocumentSearchEngine:
         )
         return prepared[0]
 
-    def run(self, *, shard_size: int = 64, owner: str = "local") -> tuple[SearchHit, ...]:
+    def run(
+        self, *, shard_size: int = 64, owner: str = "local"
+    ) -> tuple[SearchHit, ...]:
         """Execute all unclaimed bands and return merged ordered hits."""
         positive(shard_size, "shard_size")
         while True:
@@ -151,5 +152,7 @@ def create_document_search(
     clock: Clock | None = None,
 ) -> DocumentSearchEngine:
     """Create a reusable document-search job."""
-    selected = {0: "range search", 1: "other document"} if documents is None else documents
+    selected = (
+        {0: "range search", 1: "other document"} if documents is None else documents
+    )
     return DocumentSearchEngine(selected, query, clock=clock)

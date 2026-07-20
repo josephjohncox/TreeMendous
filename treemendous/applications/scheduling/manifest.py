@@ -11,8 +11,7 @@ def _evidence(module: str, factory: str, scenario_id: str) -> dict[str, str]:
         "example": f"examples/applications/scheduling/{module}.py",
         "oracle": f"tests/oracles/applications/scheduling/{module}.py",
         "benchmark": (
-            "tests/performance/applications/scheduling/"
-            f"test_{module}_smoke.py"
+            f"tests/performance/applications/scheduling/test_{module}_smoke.py"
         ),
         "docs": f"docs/scenarios/scheduling/{scenario_id}.md",
     }

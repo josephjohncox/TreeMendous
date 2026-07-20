@@ -15,7 +15,9 @@ class NaiveSeatOracle:
 
     def checkout(self, owner: str, count: int, ttl: int) -> tuple[int, set[int]]:
         owned = sum(
-            len(seats) for active_owner, seats, _ in self.active.values() if active_owner == owner
+            len(seats)
+            for active_owner, seats, _ in self.active.values()
+            if active_owner == owner
         )
         if owned + count > self.entitlements.get(owner, 0):
             raise PermissionError("not entitled")
@@ -31,7 +33,9 @@ class NaiveSeatOracle:
     def advance(self, delta: int) -> tuple[int, ...]:
         self.now += delta
         expired = tuple(
-            token for token, (_, _, deadline) in self.active.items() if deadline <= self.now
+            token
+            for token, (_, _, deadline) in self.active.items()
+            if deadline <= self.now
         )
         for token in expired:
             _, seats, _ = self.active.pop(token)

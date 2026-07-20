@@ -130,7 +130,9 @@ class MultipartUploadTracker:
     def snapshot(self) -> MultipartSnapshot:
         """Return completed parts, missing bytes, prefix completion, and counters."""
         with self._lock:
-            completed = tuple(self._completed[index] for index in sorted(self._completed))
+            completed = tuple(
+                self._completed[index] for index in sorted(self._completed)
+            )
             missing = self._allocator.snapshot().free_ranges
             cursor = 0
             for part in completed:

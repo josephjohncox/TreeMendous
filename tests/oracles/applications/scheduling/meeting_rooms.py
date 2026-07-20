@@ -11,6 +11,10 @@ def expected_room(
     features: frozenset[str],
 ) -> str | None:
     return min(
-        (name for name, seats, available in rooms if attendees <= seats and features <= available),
+        (
+            name
+            for name, seats, available in rooms
+            if attendees <= seats and features <= available
+        ),
         default=None,
     )

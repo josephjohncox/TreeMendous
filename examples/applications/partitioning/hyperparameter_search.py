@@ -14,7 +14,9 @@ def objective(parameters: Mapping[str, Any]) -> float:
 
 
 def main() -> None:
-    engine = HyperparameterSearchEngine({"rate": (0.1, 0.2), "depth": (2, 4)}, objective)
+    engine = HyperparameterSearchEngine(
+        {"rate": (0.1, 0.2), "depth": (2, 4)}, objective
+    )
     best = engine.run(shard_size=2)[0]
     if best.trial_id != 2:
         raise RuntimeError("unexpected hyperparameter rank")

@@ -203,10 +203,7 @@ class VirtualAddressSpace:
                 or mapping.address % self._page_size
                 or mapping.requested_length <= 0
                 or mapping.mapped_length
-                != (
-                    (mapping.requested_length + self._page_size - 1)
-                    // self._page_size
-                )
+                != ((mapping.requested_length + self._page_size - 1) // self._page_size)
                 * self._page_size
                 or mapping.mapped_length % self._page_size
                 or mapping.guard_pages < 0

@@ -242,8 +242,7 @@ print(json.dumps({
     assert completed.stdout.strip() == "allocated [9, 11)"
 
     application_example = (
-        readme.parent
-        / "examples/applications/partitioning/document_search.py"
+        readme.parent / "examples/applications/partitioning/document_search.py"
     )
     completed = subprocess.run(
         [str(python), str(application_example)],

@@ -10,7 +10,12 @@ def main() -> None:
     reservation = scheduler.reserve(
         "transmitter", 8, 4, 100, 110, guard_channels=1, request_id="burst-1"
     )
-    print(reservation.channel_start, reservation.channel_end, reservation.start, reservation.end)
+    print(
+        reservation.channel_start,
+        reservation.channel_end,
+        reservation.start,
+        reservation.end,
+    )
 
 
 if __name__ == "__main__":

@@ -9,7 +9,9 @@ def main() -> None:
         "https://example.test/": CrawlPage(b"root", ("/a", "/a#duplicate")),
         "https://example.test/a": CrawlPage(b"a", ()),
     }
-    snapshot = WebCrawlEngine(("https://example.test",), pages.__getitem__, max_pages=3).run()
+    snapshot = WebCrawlEngine(
+        ("https://example.test",), pages.__getitem__, max_pages=3
+    ).run()
     if snapshot.visited != ("https://example.test/", "https://example.test/a"):
         raise RuntimeError("unexpected crawl order")
     print("web-crawl: visited 2 normalized URLs offline")

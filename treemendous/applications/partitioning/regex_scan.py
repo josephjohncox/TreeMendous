@@ -70,6 +70,7 @@ class RegexScanEngine:
 
     def scan_claim(self, claim: WorkClaim) -> tuple[RegexMatch, ...]:
         """Scan with full-buffer context and merge only core-owned starts."""
+
         def prepare() -> tuple[
             tuple[RegexMatch, ...], dict[tuple[int, int, bytes], RegexMatch]
         ]:
@@ -92,7 +93,9 @@ class RegexScanEngine:
         )
         return prepared[0]
 
-    def run(self, *, chunk_size: int = 4096, owner: str = "local") -> tuple[RegexMatch, ...]:
+    def run(
+        self, *, chunk_size: int = 4096, owner: str = "local"
+    ) -> tuple[RegexMatch, ...]:
         """Scan every byte chunk and return globally ordered unique matches."""
         positive(chunk_size, "chunk_size")
         while True:

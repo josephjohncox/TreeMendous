@@ -177,10 +177,14 @@ class DatabasePageAllocator:
         handles = {record.handle for record in checkpoint.allocator.records}
         staged: dict[int, PageExtent] = {}
         for extent in checkpoint.extents:
-            expected_reused = any(
-                span.start < extent.handle.end and extent.handle.start < span.end
-                for span in history
-            ) if isinstance(extent, PageExtent) else False
+            expected_reused = (
+                any(
+                    span.start < extent.handle.end and extent.handle.start < span.end
+                    for span in history
+                )
+                if isinstance(extent, PageExtent)
+                else False
+            )
             if (
                 not isinstance(extent, PageExtent)
                 or extent.handle not in handles

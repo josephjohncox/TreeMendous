@@ -9,7 +9,9 @@ from treemendous.applications.partitioning.regex_scan import RegexScanEngine
 def test_halos_find_boundary_matches_once() -> None:
     data = b"xxABCDyyABCDz"
     engine = RegexScanEngine(data, b"ABCD", halo=4)
-    observed = tuple((item.start, item.end, item.value) for item in engine.run(chunk_size=3))
+    observed = tuple(
+        (item.start, item.end, item.value) for item in engine.run(chunk_size=3)
+    )
     assert observed == expected_matches(data, b"ABCD")
     assert len(observed) == 2
 

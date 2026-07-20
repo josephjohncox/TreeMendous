@@ -124,9 +124,7 @@ class RadioSpectrumScheduler:
                     return self._records[prior[1]].reservation
             overlaps = self._index.overlaps(guarded)
             if overlaps:
-                identifiers = tuple(
-                    sorted(str(entry.data) for entry in overlaps)
-                )
+                identifiers = tuple(sorted(str(entry.data) for entry in overlaps))
                 raise SpectrumConflictError(SpectrumConflict(guarded, identifiers))
             sequence = self._next_by_owner.get(owner, 1)
             reservation_id = f"{owner}:{sequence}"
@@ -191,12 +189,8 @@ class RadioSpectrumScheduler:
             if record.handle is None:
                 raise RuntimeError("active spectrum record has no geometry handle")
             self._index.remove(record.handle)
-            cancelled = replace(
-                record.reservation, status=SpectrumStatus.CANCELLED
-            )
-            self._records[reservation_id] = _SpectrumRecord(
-                cancelled, None, record.box
-            )
+            cancelled = replace(record.reservation, status=SpectrumStatus.CANCELLED)
+            self._records[reservation_id] = _SpectrumRecord(cancelled, None, record.box)
             return cancelled
 
     def snapshot(self) -> SpectrumSnapshot:

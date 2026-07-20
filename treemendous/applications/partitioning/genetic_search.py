@@ -44,9 +44,7 @@ def _validated_population(population: object) -> tuple[str, ...]:
         raise ValueError("population must contain at least two candidates")
     width = len(population[0])
     if width == 0 or any(
-        not isinstance(item, str)
-        or len(item) != width
-        or set(item) - {"0", "1"}
+        not isinstance(item, str) or len(item) != width or set(item) - {"0", "1"}
         for item in population
     ):
         raise ValueError("population must contain equal-width nonempty bit strings")
@@ -119,7 +117,9 @@ class GeneticSearchEngine:
         self._runtime = PartitionRuntime(generations, clock=clock)
 
     @staticmethod
-    def _score(fitness: Fitness, population: tuple[str, ...]) -> tuple[tuple[float, str], ...]:
+    def _score(
+        fitness: Fitness, population: tuple[str, ...]
+    ) -> tuple[tuple[float, str], ...]:
         scored: list[tuple[float, str]] = []
         for candidate in population:
             try:
@@ -143,9 +143,7 @@ class GeneticSearchEngine:
             randomizer.setstate(self._random.getstate())
             ranking = self._score(self._fitness, self._population)
             record = GeneticGeneration(self._generation, self._population, ranking)
-            survivors = tuple(
-                item[1] for item in ranking[: max(2, len(ranking) // 2)]
-            )
+            survivors = tuple(item[1] for item in ranking[: max(2, len(ranking) // 2)])
             children: list[str] = []
             while len(children) < len(self._population):
                 left = survivors[randomizer.randrange(len(survivors))]
@@ -266,7 +264,9 @@ class GeneticSearchEngine:
             claim.state in {ClaimState.ACTIVE, ClaimState.EXPIRED}
             for claim in runtime_claims.claims
         ):
-            raise ClaimInvariantError("checkpoint contains unfinished generation claims")
+            raise ClaimInvariantError(
+                "checkpoint contains unfinished generation claims"
+            )
         completed_by_generation: list[tuple[int, Any]] = []
         for claim in completed:
             result = dict(claim.result)

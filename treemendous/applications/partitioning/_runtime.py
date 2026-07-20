@@ -47,7 +47,9 @@ class PartitionRuntime:
         self._lock = RLock()
         self._executing_claim_ids: set[int] = set()
 
-    def claim(self, owner: str, length: int, *, request_id: str | None = None) -> WorkClaim:
+    def claim(
+        self, owner: str, length: int, *, request_id: str | None = None
+    ) -> WorkClaim:
         """Claim the next ordinal band, capped at its earliest free interval."""
         validate_length(length)
         with self._lock:
@@ -214,11 +216,16 @@ class PartitionRuntime:
             if claim is None:
                 raise ClaimInvariantError("runtime event has no terminal claim")
             payload = dict(event.payload)
-            if payload.get("start") != claim.span.start or payload.get("end") != claim.span.end:
+            if (
+                payload.get("start") != claim.span.start
+                or payload.get("end") != claim.span.end
+            ):
                 raise ClaimInvariantError("runtime event span contradicts its claim")
             if claim.state is ClaimState.ABANDONED:
                 if event.kind != "abandoned" or "fencing_token" in payload:
-                    raise ClaimInvariantError("runtime abandonment event is inconsistent")
+                    raise ClaimInvariantError(
+                        "runtime abandonment event is inconsistent"
+                    )
             elif payload.get("fencing_token") != claim.fencing_token:
                 raise ClaimInvariantError("runtime completion token is inconsistent")
 

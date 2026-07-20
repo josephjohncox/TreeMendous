@@ -87,6 +87,7 @@ class SatSearchEngine:
 
     def evaluate_claim(self, claim: WorkClaim) -> tuple[SatisfyingAssignment, ...]:
         """Enumerate suffixes beneath every claimed prefix and evaluate CNF."""
+
         def prepare() -> tuple[
             tuple[SatisfyingAssignment, ...], dict[int, SatisfyingAssignment]
         ]:
@@ -150,6 +151,4 @@ def create_sat_search(
     clock: Clock | None = None,
 ) -> SatSearchEngine:
     """Create an exact partitioned CNF search job."""
-    return SatSearchEngine(
-        variables, clauses, prefix_bits=prefix_bits, clock=clock
-    )
+    return SatSearchEngine(variables, clauses, prefix_bits=prefix_bits, clock=clock)
