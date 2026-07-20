@@ -68,9 +68,24 @@ class ReplaySummary:
 
 
 @dataclass(frozen=True)
-class _ObservedMutation:
+class _CapturedMutation:
+    changed: tuple[tuple[int, int], ...]
     changed_length: int
-    touched_intervals: int
+    fully_covered: bool
+
+    @property
+    def touched_intervals(self) -> int:
+        return len(self.changed)
+
+
+@dataclass(frozen=True)
+class _CapturedOutcome:
+    mutation: _CapturedMutation | None = None
+    result: tuple[int, int] | None = None
+    overlaps: tuple[tuple[int, int], ...] | None = None
+    snapshot: tuple[int, tuple[tuple[int, int], ...]] | None = None
+    stats: tuple[int | None, ...] | None = None
+    error_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -150,6 +165,12 @@ def _jain_fairness(success: dict[str, list[int]]) -> float | None:
     return (sum(rates) ** 2 / denominator) if denominator else 1.0
 
 
+def _interval_geometry(item: Any) -> tuple[int, int]:
+    if isinstance(item, tuple):
+        return item
+    return item.start, item.end
+
+
 def _normalized_state(target: RangeLike | RangeOracle) -> tuple[tuple[int, int], ...]:
     if isinstance(target, RangeOracle):
         return target.intervals
@@ -201,6 +222,35 @@ def _stats_observation(
     )
 
 
+def _freeze_mutation(raw: Any) -> _CapturedMutation | None:
+    """Detach exact primitive mutation evidence at the operation boundary."""
+    if raw is None:
+        return None
+    return _CapturedMutation(
+        tuple(_interval_geometry(item) for item in raw.changed),
+        raw.changed_length,
+        raw.fully_covered,
+    )
+
+
+def _append_mutation_observation(
+    queries: list[tuple[str, int | str | None, int | str | None]],
+    kind: str,
+    mutation: _CapturedMutation | None,
+) -> None:
+    if mutation is None:
+        queries.append((f"{kind}:mutation", None, None))
+        return
+    evidence = (mutation.changed, mutation.changed_length)
+    queries.append(
+        (
+            f"{kind}:mutation",
+            1 if mutation.fully_covered else 0,
+            _checksum(evidence),
+        )
+    )
+
+
 def _execute_trace(
     target: RangeLike | RangeOracle,
     operations: tuple[Operation, ...],
@@ -234,12 +284,12 @@ def _execute_trace(
             elif operation.kind == "overlaps":
                 assert operation.start is not None and operation.end is not None
                 if isinstance(target, RangeOracle):
-                    query_hit = target.overlaps(operation.start, operation.end)
+                    raw_matches = target.overlaps(operation.start, operation.end)
                 else:
-                    query_hit = bool(
-                        target.overlaps(Span(operation.start, operation.end))
-                    )
-                queries.append(("overlaps", int(query_hit), None))
+                    raw_matches = target.overlaps(Span(operation.start, operation.end))
+                matches = tuple(_interval_geometry(item) for item in raw_matches)
+                query_hit = bool(matches)
+                queries.append(("overlaps", len(matches), _checksum(matches)))
             elif operation.kind == "snapshot":
                 total, state_checksum = _snapshot_observation(target)
                 queries.append(("snapshot", total, state_checksum))
@@ -269,7 +319,8 @@ def _execute_trace(
                     # Atomic allocation returns its allocated range rather than
                     # MutationResult. Its geometric change is exactly that one
                     # contiguous result.
-                    mutation = _ObservedMutation(operation.length, 1)
+                    assert result is not None
+                    mutation = _CapturedMutation((result,), operation.length, True)
                 queries.append(
                     (operation.kind, None, None)
                     if result is None
@@ -281,7 +332,7 @@ def _execute_trace(
                     attempts, wins = scheduling.setdefault(operation.job_class, [0, 0])
                     scheduling[operation.job_class] = [
                         attempts + 1,
-                        wins + int(result is not None),
+                        wins + (1 if result is not None else 0),
                     ]
             elif operation.kind == "cancel":
                 assert operation.job_id is not None
@@ -305,15 +356,14 @@ def _execute_trace(
                 raise AssertionError(
                     f"{operation.kind} did not raise {operation.expected_error}"
                 )
-            changed_length = 0 if mutation is None else mutation.changed_length
+            frozen_mutation = _freeze_mutation(mutation)
+            if operation.kind in {"add", "discard", "allocate", "cancel"}:
+                _append_mutation_observation(queries, operation.kind, frozen_mutation)
+            changed_length = (
+                0 if frozen_mutation is None else frozen_mutation.changed_length
+            )
             touched = (
-                0
-                if mutation is None
-                else (
-                    mutation.touched_intervals
-                    if hasattr(mutation, "touched_intervals")
-                    else len(mutation.changed)
-                )
+                0 if frozen_mutation is None else frozen_mutation.touched_intervals
             )
             touched_length += changed_length
             touched_intervals += touched
@@ -399,6 +449,218 @@ def _replay_public_operations(
                 )
 
 
+def _capture_public_operations(
+    target: RangeLike, operations: tuple[Operation, ...]
+) -> tuple[
+    tuple[_CapturedOutcome, ...],
+    dict[str, list[int]],
+    int,
+]:
+    """Time only public calls, then freeze each result before the next call."""
+    allocations: dict[int, tuple[int, int]] = {}
+    outcomes: list[_CapturedOutcome] = []
+    latencies: dict[str, list[int]] = {}
+    execution_ns = 0
+    for operation in operations:
+        method: Any = None
+        method_args: tuple[Any, ...] = ()
+        method_kwargs: dict[str, Any] = {}
+
+        # Prepare arguments, resolve methods, and update harness bookkeeping
+        # outside the public-call timing boundary. Validation failures during
+        # argument construction are still part of the observable trace, but
+        # they do not fabricate a public-call latency when no call occurred.
+        try:
+            if operation.kind in {"add", "discard", "overlaps"}:
+                assert operation.start is not None and operation.end is not None
+                method = getattr(target, operation.kind)
+                method_args = (Span(operation.start, operation.end),)
+            elif operation.kind in {"snapshot", "stats"}:
+                method = getattr(target, operation.kind)
+            elif operation.kind in {"first_fit", "allocate"}:
+                assert operation.length is not None and operation.not_before is not None
+                method = getattr(target, operation.kind)
+                method_args = (operation.length,)
+                method_kwargs = {
+                    "not_before": operation.not_before,
+                    "not_after": operation.not_after,
+                }
+            elif operation.kind == "cancel":
+                assert operation.job_id is not None
+                allocated = allocations.pop(operation.job_id, None)
+                if allocated is not None:
+                    method = target.add
+                    method_args = (Span(*allocated),)
+            else:
+                raise ValueError(f"unknown operation kind: {operation.kind}")
+        except (ValueError, TypeError, OverflowError) as exc:
+            error_type = type(exc).__name__
+            if operation.expected_error != error_type:
+                raise
+            outcomes.append(_CapturedOutcome(error_type=error_type))
+            continue
+
+        raw_value: Any = None
+        if method is not None:
+            started = time.perf_counter_ns()
+            try:
+                raw_value = method(*method_args, **method_kwargs)
+            except (ValueError, TypeError, OverflowError) as exc:
+                elapsed = time.perf_counter_ns() - started
+                execution_ns += elapsed
+                latencies.setdefault(operation.kind, []).append(elapsed)
+                error_type = type(exc).__name__
+                if operation.expected_error != error_type:
+                    raise
+                outcomes.append(_CapturedOutcome(error_type=error_type))
+                continue
+            elapsed = time.perf_counter_ns() - started
+            execution_ns += elapsed
+            latencies.setdefault(operation.kind, []).append(elapsed)
+
+        if operation.expected_error is not None:
+            raise AssertionError(
+                f"{operation.kind} did not raise {operation.expected_error}"
+            )
+
+        raw_mutation = (
+            raw_value if operation.kind in {"add", "discard", "cancel"} else None
+        )
+        raw_result = raw_value if operation.kind in {"first_fit", "allocate"} else None
+        raw_overlaps = raw_value if operation.kind == "overlaps" else None
+        raw_snapshot = raw_value if operation.kind == "snapshot" else None
+        raw_stats = raw_value if operation.kind == "stats" else None
+
+        # Everything below is outside both aggregate and operation call timing.
+        result = _result_geometry(raw_result)
+        mutation = _freeze_mutation(raw_mutation)
+        if operation.kind == "allocate" and result is not None:
+            assert operation.length is not None
+            mutation = _CapturedMutation((result,), operation.length, True)
+            if operation.job_id is not None:
+                allocations[operation.job_id] = result
+        matches = (
+            None
+            if raw_overlaps is None
+            else tuple(_interval_geometry(item) for item in raw_overlaps)
+        )
+        snapshot = None
+        if raw_snapshot is not None:
+            snapshot_state = tuple(
+                (item.start, item.end) for item in raw_snapshot.intervals
+            )
+            snapshot = (raw_snapshot.total_free, snapshot_state)
+        stats = None
+        if raw_stats is not None:
+            stats = (
+                raw_stats.total_free,
+                raw_stats.total_occupied,
+                raw_stats.total_space,
+                raw_stats.free_chunks,
+                raw_stats.largest_chunk,
+                *raw_stats.bounds,
+            )
+        outcomes.append(
+            _CapturedOutcome(
+                mutation=mutation,
+                result=result,
+                overlaps=matches,
+                snapshot=snapshot,
+                stats=stats,
+            )
+        )
+    return tuple(outcomes), latencies, execution_ns
+
+
+def _result_geometry(raw: Any) -> tuple[int, int] | None:
+    if raw is None:
+        return None
+    if hasattr(raw, "start"):
+        return raw.start, raw.end
+    return raw
+
+
+def _summarize_captured_trace(
+    target: RangeLike,
+    operations: tuple[Operation, ...],
+    outcomes: tuple[_CapturedOutcome, ...],
+) -> ReplaySummary:
+    """Normalize and checksum timed-instance evidence outside execution timing."""
+    successes = no_ops = errors = touched_intervals = touched_length = 0
+    queries: list[tuple[str, int | str | None, int | str | None]] = []
+    scheduling: dict[str, list[int]] = {}
+
+    for operation, outcome in zip(operations, outcomes, strict=True):
+        if outcome.error_type is not None:
+            errors += 1
+            if operation.kind in {"first_fit", "allocate"}:
+                queries.append((operation.kind, "error", outcome.error_type))
+            continue
+
+        result = _result_geometry(outcome.result)
+        query_hit = False
+        if operation.kind == "overlaps":
+            matches = outcome.overlaps
+            assert matches is not None
+            query_hit = bool(matches)
+            queries.append(("overlaps", len(matches), _checksum(matches)))
+        elif operation.kind == "snapshot":
+            snapshot = outcome.snapshot
+            assert snapshot is not None
+            total, state = snapshot
+            queries.append(("snapshot", total, _checksum(state)))
+        elif operation.kind == "stats":
+            signature = outcome.stats
+            assert signature is not None
+            queries.append(("stats", _checksum(signature), signature[3]))
+        elif operation.kind in {"first_fit", "allocate"}:
+            queries.append(
+                (operation.kind, None, None)
+                if result is None
+                else (operation.kind, result[0], result[1])
+            )
+            if operation.job_class is not None:
+                attempts, wins = scheduling.setdefault(operation.job_class, [0, 0])
+                scheduling[operation.job_class] = [
+                    attempts + 1,
+                    wins + (1 if result is not None else 0),
+                ]
+
+        mutation = outcome.mutation
+        if operation.kind in {"add", "discard", "allocate", "cancel"}:
+            _append_mutation_observation(queries, operation.kind, mutation)
+        changed_length = 0 if mutation is None else mutation.changed_length
+        touched = 0 if mutation is None else mutation.touched_intervals
+        touched_length += changed_length
+        touched_intervals += touched
+        if changed_length > 0 or result is not None or query_hit:
+            successes += 1
+        else:
+            no_ops += 1
+
+    state = _normalized_state(target)
+    query_results = tuple(queries)
+    schedule_tuple = tuple(
+        (name, values[0], values[1]) for name, values in sorted(scheduling.items())
+    )
+    return ReplaySummary(
+        requested_operations=len(operations),
+        successful_operations=successes,
+        no_op_operations=no_ops,
+        error_operations=errors,
+        actual_interval_count=len(state),
+        total_available=_total(target),
+        touched_intervals=touched_intervals,
+        touched_length=touched_length,
+        normalized_state=state,
+        query_results=query_results,
+        state_checksum=_checksum(state),
+        query_checksum=_checksum(query_results),
+        scheduling_success=schedule_tuple,
+        scheduling_fairness=_jain_fairness(scheduling),
+    )
+
+
 def oracle_summary(workload: BenchmarkWorkload) -> tuple[int, ReplaySummary]:
     """Replay setup and timed traces in the independent model."""
     oracle = RangeOracle(
@@ -423,15 +685,14 @@ def validate_target(
 ) -> tuple[ReplaySummary, dict[str, list[int]]]:
     """Apply both phases and reject a target that differs from the oracle."""
     initial_count, expected = oracle_summary(workload)
-    _execute_trace(target, workload.setup, record_latencies=False)
+    _replay_public_operations(target, workload.setup)
     observed_initial = len(target.intervals())
     if observed_initial != initial_count:
         raise AssertionError(
             f"{name} setup interval count {observed_initial} != oracle {initial_count}"
         )
-    observed, latencies = _execute_trace(
-        target, workload.operations, record_latencies=True
-    )
+    outcomes, latencies, _ = _capture_public_operations(target, workload.operations)
+    observed = _summarize_captured_trace(target, workload.operations, outcomes)
     if observed != expected:
         raise AssertionError(
             f"{name} benchmark validation failed\n"
@@ -441,18 +702,23 @@ def validate_target(
 
 
 def run_validated_sample(backend_id: str, workload: BenchmarkWorkload) -> Sample:
-    """Time a public replay and validate an equivalent independent replay."""
+    """Time public calls and validate outcomes from that exact instance."""
     validation_started = time.perf_counter_ns()
     initial_count, expected = oracle_summary(workload)
     validation_target = _new_backend(backend_id, workload)
-    _execute_trace(validation_target, workload.setup, record_latencies=False)
+    _replay_public_operations(validation_target, workload.setup)
     observed_initial = len(validation_target.intervals())
     if observed_initial != initial_count:
         raise AssertionError(
             f"{backend_id} setup interval count {observed_initial} != oracle {initial_count}"
         )
-    observed, latencies = _execute_trace(
-        validation_target, workload.operations, record_latencies=True
+    validation_outcomes, latencies, _ = _capture_public_operations(
+        validation_target, workload.operations
+    )
+    observed = _summarize_captured_trace(
+        validation_target,
+        workload.operations,
+        validation_outcomes,
     )
     if observed != expected:
         raise AssertionError(
@@ -472,16 +738,29 @@ def run_validated_sample(backend_id: str, workload: BenchmarkWorkload) -> Sample
             f"!= oracle {initial_count}"
         )
 
-    execution_started = time.perf_counter_ns()
-    _replay_public_operations(target, workload.operations)
-    execution_ns = time.perf_counter_ns() - execution_started
+    timed_outcomes, _, execution_ns = _capture_public_operations(
+        target, workload.operations
+    )
+
+    timed_validation_started = time.perf_counter_ns()
+    timed_observed = _summarize_captured_trace(
+        target,
+        workload.operations,
+        timed_outcomes,
+    )
+    if timed_observed != expected:
+        raise AssertionError(
+            f"{backend_id} timed-instance validation failed\n"
+            f"expected={expected!r}\nobserved={timed_observed!r}"
+        )
+    validation_ns += time.perf_counter_ns() - timed_validation_started
     return Sample(
         backend_id,
         setup_ns,
         execution_ns,
         validation_ns,
         tuple((kind, tuple(values)) for kind, values in sorted(latencies.items())),
-        observed,
+        timed_observed,
     )
 
 
@@ -654,14 +933,15 @@ def benchmark_backends(
             "implementation_order": "deterministically randomized per sample round",
             "confidence": "95% run-level percentile bootstrap interval for the median",
             "execution_timing": (
-                "only the declared public operation trace; accounting, snapshots, "
-                "normalization, JSON checksums, and divergence rejection run in a "
-                "separate equivalent validation replay"
+                "sum of declared public-call durations on the attested timed "
+                "instance; result freezing, accounting, normalization, checksums, "
+                "and divergence rejection are excluded"
             ),
             "validation_overhead": "reported separately and excluded from execution",
             "operation_latency": (
-                "collected during the validation replay; confidence intervals use "
-                "per-run medians and invocation distributions are descriptive only"
+                "public-call duration only, collected during the validation replay; "
+                "confidence intervals use per-run medians and invocation "
+                "distributions are descriptive only"
             ),
         },
         "environment": environment_metadata(),

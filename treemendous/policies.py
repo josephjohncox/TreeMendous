@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from copy import copy
+from copy import copy, deepcopy
 from dataclasses import dataclass
 from typing import Any, Generic, Protocol, TypeVar
 
@@ -20,6 +20,7 @@ def _require_subspan(source: Span, target: Span) -> None:
 class PayloadPolicy(Protocol[D]):
     """Policy governing payload combination and subspan restriction."""
 
+    def clone(self, data: D) -> D: ...
     def can_merge(self, left: D, right: D) -> bool: ...
     def combine(self, left: D, right: D) -> D: ...
     def restrict(self, data: D, source: Span, target: Span) -> D: ...
@@ -30,6 +31,11 @@ class UniformPayloadPolicy(Generic[D]):
     """Uniform labels merge only when equal; splits copy the label."""
 
     copy_on_split: bool = False
+    clone_fn: Callable[[D], D] = deepcopy
+
+    def clone(self, data: D) -> D:
+        """Return application-owned data detached for RangeSet storage/readout."""
+        return self.clone_fn(data)
 
     def can_merge(self, left: D, right: D) -> bool:
         return left == right
@@ -55,6 +61,11 @@ class JoinPayloadPolicy(Generic[D]):
     join: Callable[[D, D], D]
     bottom: D
     restrict_fn: Callable[[D, Span, Span], D] | None = None
+    clone_fn: Callable[[D], D] = deepcopy
+
+    def clone(self, data: D) -> D:
+        """Return application-owned data detached for RangeSet storage/readout."""
+        return self.clone_fn(data)
 
     def can_merge(self, left: D, right: D) -> bool:
         return left == right
@@ -82,6 +93,11 @@ class OrderedPayloadPolicy(Generic[D]):
     identity: D
     restrict_fn: Callable[[D, Span, Span], D] | None = None
     event_key_fn: Callable[[D], Any] | None = None
+    clone_fn: Callable[[D], D] = deepcopy
+
+    def clone(self, data: D) -> D:
+        """Return application-owned data detached for RangeSet storage/readout."""
+        return self.clone_fn(data)
 
     def event_key(self, data: D) -> Any:
         if self.event_key_fn is not None:
