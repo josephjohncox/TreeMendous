@@ -18,4 +18,4 @@ labels. It is an in-memory feasibility component rather than a warehouse
 management system: process loss discards state and no distributed fencing or
 durable transaction is implied.
 
-Run `python examples/one_dimensional/applications/scheduling/warehouse_docks.py`.
+Run `python examples/applications/scheduling/warehouse_docks.py`.

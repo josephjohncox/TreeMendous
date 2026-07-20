@@ -20,4 +20,4 @@ time are caller-normalized units. The search is deliberately bounded and makes
 no NP-hard scheduling optimality claim. State and atomicity are local to one
 Python process, not distributed across driver processes or machines.
 
-Run `python examples/one_dimensional/applications/scheduling/gpu_streams.py`.
+Run `python examples/applications/scheduling/gpu_streams.py`.

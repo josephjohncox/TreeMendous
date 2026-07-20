@@ -8,10 +8,7 @@ from types import MappingProxyType
 def _evidence(module: str, factory: str, scenario_id: str) -> dict[str, str]:
     return {
         "engine": f"treemendous.applications.scheduling.{module}:{factory}",
-        "example": (
-            "examples/one_dimensional/applications/scheduling/"
-            f"{module}.py"
-        ),
+        "example": f"examples/applications/scheduling/{module}.py",
         "oracle": f"tests/oracles/applications/scheduling/{module}.py",
         "benchmark": (
             "tests/performance/applications/scheduling/"

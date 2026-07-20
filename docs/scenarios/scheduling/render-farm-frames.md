@@ -19,4 +19,4 @@ optimal chunk size, or provide exactly-once rendering. A production controller
 must durably record work results and reconcile worker leases. The deterministic
 policy provides reproducibility rather than optimal makespan.
 
-Run `python examples/one_dimensional/applications/scheduling/render_farm.py`.
+Run `python examples/applications/scheduling/render_farm.py`.

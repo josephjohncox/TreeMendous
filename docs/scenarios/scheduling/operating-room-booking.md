@@ -19,4 +19,4 @@ suite. Those constraints must be resolved before calling the engine or encoded
 by a surrounding policy layer. Atomicity and locking cover one Python process;
 there is no durable database transaction or distributed lock.
 
-Run `python examples/one_dimensional/applications/scheduling/operating_rooms.py`.
+Run `python examples/applications/scheduling/operating_rooms.py`.

@@ -18,4 +18,4 @@ vehicle-to-grid flows, degradation, and route optimization. It is not an energy
 management system or distributed charger protocol. Locking and atomicity cover
 one process; persistence and charger fencing belong to a control plane.
 
-Run `python examples/one_dimensional/applications/scheduling/fleet_charging.py`.
+Run `python examples/applications/scheduling/fleet_charging.py`.

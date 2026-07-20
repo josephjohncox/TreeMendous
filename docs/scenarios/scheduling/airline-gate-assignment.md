@@ -19,4 +19,4 @@ preferences, or solve the NP-hard global assignment problem. It provides local,
 reproducible feasibility only. State has thread-safe in-process atomicity but no
 cross-process transaction, durable log, or distributed lease.
 
-Run `python examples/one_dimensional/applications/scheduling/airline_gates.py`.
+Run `python examples/applications/scheduling/airline_gates.py`.

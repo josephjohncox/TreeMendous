@@ -20,4 +20,4 @@ guard policy, not a physical interference prediction. `BoxIndex` is an O(n)
 experimental in-memory index, and neither it nor this scheduler provides durable
 or distributed spectrum coordination.
 
-Run `python examples/one_dimensional/applications/scheduling/radio_spectrum.py`.
+Run `python examples/applications/scheduling/radio_spectrum.py`.

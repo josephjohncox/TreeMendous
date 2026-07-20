@@ -19,4 +19,4 @@ are literal strings rather than an expression language. Deadlines bound the
 local deterministic scan. Durability, worker health, and distributed fencing
 belong in a surrounding control plane.
 
-Run `python examples/one_dimensional/applications/scheduling/ci_runners.py`.
+Run `python examples/applications/scheduling/ci_runners.py`.

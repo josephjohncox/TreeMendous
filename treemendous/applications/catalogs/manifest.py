@@ -14,7 +14,7 @@ def _evidence(module: str, factory: str, scenario_id: str) -> Mapping[str, str]:
             "example": f"examples/applications/catalogs/{artifact_name}.py",
             "oracle": f"tests/oracles/applications/catalogs/{artifact_name}.py",
             "benchmark": f"tests/performance/applications/catalogs/{artifact_name}.py",
-            "docs": f"docs/scenarios/{scenario_id}.md",
+            "docs": f"docs/scenarios/catalogs/{scenario_id}.md",
         }
     )
 

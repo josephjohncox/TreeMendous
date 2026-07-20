@@ -6,4 +6,4 @@ Use `claim()` plus `search_claim()` when driving workers explicitly, or `run(sha
 
 The implementation is thread-safe only at the private claim kernel boundary. The index and result merge are process-local memory. A real distributed service must store the input/index durably, transmit claims, and accept results only when the claim fencing token is current. Its result store must also make retry commits idempotent. The bundled engine deliberately makes none of those durability, consensus, worker-liveness, or network claims.
 
-See `examples/one_dimensional/applications/partitioning/document_search.py`; the correctness smoke compares actual indexed execution with an independent exhaustive document oracle.
+See `examples/applications/partitioning/document_search.py`; the correctness smoke compares actual indexed execution with an independent exhaustive document oracle.

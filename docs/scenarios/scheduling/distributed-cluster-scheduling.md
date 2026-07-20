@@ -22,5 +22,5 @@ heartbeats, durable queue, preemption, gang scheduling, autoscaling, or recovery
 from process loss. Persist snapshots externally only as observations; the engine
 does not make them durable transactions.
 
-Run `python examples/one_dimensional/applications/scheduling/cluster.py` for a
+Run `python examples/applications/scheduling/cluster.py` for a
 deterministic placement.

@@ -18,4 +18,4 @@ strings and calibration windows are trusted caller data. It offers thread-safe
 in-memory atomicity only, with no durable audit trail, distributed coordination,
 or recovery after process failure.
 
-Run `python examples/one_dimensional/applications/scheduling/lab_instruments.py`.
+Run `python examples/applications/scheduling/lab_instruments.py`.

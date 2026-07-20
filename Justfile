@@ -110,8 +110,22 @@ validate: test check
     @echo "Tree-Mendous validation complete"
 
 run-examples: install-dev
-    uv run python examples/basic_rangeset.py
-    uv run python examples/multidimensional/core/linear_box_index.py
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="$PWD"
+    examples=(
+        examples/basic_rangeset.py
+        examples/multidimensional/core/linear_box_index.py
+    )
+    while IFS= read -r example; do
+        examples+=("$example")
+    done < <(
+        find examples/applications -type f -name '*.py' -print | LC_ALL=C sort
+    )
+    for example in "${examples[@]}"; do
+        echo "==> $example"
+        (cd /tmp && uv run --project "$root" python "$root/$example")
+    done
 
 version:
     @python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])"

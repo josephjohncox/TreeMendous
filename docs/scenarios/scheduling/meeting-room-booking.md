@@ -19,4 +19,4 @@ with an authoritative timezone library before booking. The engine is a
 single-process reservation component with no database durability or distributed
 locking.
 
-Run `python examples/one_dimensional/applications/scheduling/meeting_rooms.py`.
+Run `python examples/applications/scheduling/meeting_rooms.py`.

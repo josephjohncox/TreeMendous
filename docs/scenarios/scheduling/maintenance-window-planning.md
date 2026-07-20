@@ -20,4 +20,4 @@ trusted integer inputs. The state machine provides only one-process locking and
 failure atomicity; durable orchestration, approvals, fencing, and rollback of
 external maintenance actions are outside its boundary.
 
-Run `python examples/one_dimensional/applications/scheduling/maintenance.py`.
+Run `python examples/applications/scheduling/maintenance.py`.

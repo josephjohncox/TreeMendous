@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import MappingProxyType
 
 _PREFIX = "treemendous.applications.partitioning"
-_EXAMPLE = "examples/one_dimensional/applications/partitioning"
+_EXAMPLE = "examples/applications/partitioning"
 _ORACLE = "tests/oracles/applications/partitioning"
 _BENCHMARK = "tests/performance/applications/partitioning"
 _DOCS = "docs/scenarios/partitioning"
