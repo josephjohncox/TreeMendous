@@ -62,6 +62,12 @@ benchmark-smoke output="build/benchmarks/smoke.json": build-cpp
 benchmark-standard output="build/benchmarks/standard.json": build-cpp
     uv run python -m tests.performance.benchmark_suite --profile standard --require-all-stable --output "{{output}}"
 
+benchmark-applications-smoke output="build/benchmarks/applications-smoke.json": install-dev
+    uv run python -m tests.performance.application_benchmark_suite --profile smoke --output "{{output}}"
+
+benchmark-applications-standard output="build/benchmarks/applications-standard.json": install-dev
+    uv run python -m tests.performance.application_benchmark_suite --profile standard --output "{{output}}"
+
 benchmark-large output="build/benchmarks/large.json": build-cpp
     uv run python -m tests.performance.benchmark_suite --profile large --require-all-stable --output "{{output}}"
 
@@ -77,7 +83,7 @@ test-metal: install-dev
 test-metal-quick: install-dev
     uv run python tests/performance/metal_benchmark.py --operations 100 --intervals 16
 
-benchmark: benchmark-standard
+benchmark: benchmark-standard benchmark-applications-standard
 
 benchmark-gpu-large: install-dev
     uv run python tests/performance/gpu_benchmark.py --intervals 10000 --operations 5000
