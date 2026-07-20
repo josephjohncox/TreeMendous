@@ -2,7 +2,6 @@
 
 import pytest
 
-from tests.oracles.applications.partitioning.fuzzing import generated, signature
 from treemendous.applications.partitioning.fuzzing import FuzzingEngine
 
 
@@ -13,9 +12,9 @@ def test_inputs_crashes_dedup_and_abandoned_retry_are_deterministic() -> None:
 
     engine = FuzzingEngine(target, cases=20, seed=4, max_input_size=8)
     crashes = engine.run(shard_size=5, fail_first_claim=True)
-    assert engine.input_for(7) == generated(4, 7, 8)
+    assert engine.input_for(7) == b"i\xb1Tu"
     assert len({item.signature for item in crashes}) == len(crashes) == 1
-    assert crashes[0].signature == signature(ValueError("multiple-of-three"))
+    assert crashes[0].signature == "8ca31d8500c2906afe90"
     assert engine.snapshot().retries == 1
     assert engine.snapshot().executed_ordinals == tuple(range(20))
 

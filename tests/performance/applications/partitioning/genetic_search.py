@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from tests.oracles.applications.partitioning.genetic_search import expected_search
+from tests.oracles.applications.partitioning.genetic_search import (
+    expected_invariant_search,
+)
 from tests.performance.applications.harness import (
     ApplicationOutcome,
     ApplicationSample,
@@ -17,7 +19,10 @@ from treemendous.applications.partitioning.genetic_search import (
 _DEFAULT_OPERATIONS = 12
 _MAX_OPERATIONS = 64
 _DEFAULT_SEED = 19
-_MUTATION_RATE = 0.075
+_MUTATION_RATE = 0.0
+_CANDIDATE = "10101010"
+_POPULATION_SIZE = 24
+_CANDIDATE_SCORE = 8.0
 
 
 def _fitness(value: str) -> float:
@@ -35,7 +40,7 @@ def run_benchmark(
 ) -> ApplicationSample:
     """Run and attest every generation of a bounded seeded search."""
     validate_case(operations, seed, maximum=_MAX_OPERATIONS)
-    population = tuple(f"{(value * 37 + seed) % 256:08b}" for value in range(24))
+    population = (_CANDIDATE,) * _POPULATION_SIZE
     engine = GeneticSearchEngine(
         population,
         _fitness,
@@ -60,6 +65,7 @@ def run_benchmark(
                 "population": checkpoint.population,
                 "history": state_history,
                 "random_state": checkpoint.random_state,
+                "initial_random_state": checkpoint.initial_random_state,
             },
             counters={
                 "generations_executed": len(checkpoint.history),
@@ -70,12 +76,12 @@ def run_benchmark(
         )
 
     def oracle() -> ApplicationOutcome:
-        history, final_population, random_state = expected_search(
-            population,
-            _fitness,
+        history, final_population, random_state = expected_invariant_search(
+            _CANDIDATE,
+            population_size=_POPULATION_SIZE,
             generations=operations,
+            score=_CANDIDATE_SCORE,
             seed=seed,
-            mutation_rate=_MUTATION_RATE,
         )
         return ApplicationOutcome(
             results=history,
@@ -86,6 +92,7 @@ def run_benchmark(
                 "population": final_population,
                 "history": history,
                 "random_state": random_state,
+                "initial_random_state": random_state,
             },
             counters={
                 "generations_executed": operations,

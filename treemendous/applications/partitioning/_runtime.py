@@ -205,29 +205,63 @@ class PartitionRuntime:
         }
         if len(work_events) != len(terminal):
             raise ClaimInvariantError("runtime events do not match terminal claims")
-        for event in work_events:
+
+        event_claim_ids: list[int] = []
+        for expected_sequence, event in enumerate(work_events, start=1):
+            if event.sequence != expected_sequence:
+                raise ClaimInvariantError(
+                    "runtime event transition IDs must be ordered and unique"
+                )
             if not event.stream.startswith("work:"):
                 raise ClaimInvariantError("runtime event stream is invalid")
             try:
                 claim_id = int(event.stream.removeprefix("work:"))
             except ValueError as exc:
                 raise ClaimInvariantError("runtime event claim ID is invalid") from exc
+            if claim_id in event_claim_ids:
+                raise ClaimInvariantError(
+                    "runtime events must match terminal claims exactly once"
+                )
+            if event.version != 1:
+                raise ClaimInvariantError(
+                    "runtime event transition IDs must be ordered and unique"
+                )
+            event_claim_ids.append(claim_id)
             claim = terminal.get(claim_id)
             if claim is None:
                 raise ClaimInvariantError("runtime event has no terminal claim")
             payload = dict(event.payload)
-            if (
+            expected_fields = {"start", "end"}
+            if claim.state is ClaimState.COMPLETED:
+                expected_fields.add("fencing_token")
+            if set(payload) != expected_fields or (
                 payload.get("start") != claim.span.start
                 or payload.get("end") != claim.span.end
             ):
                 raise ClaimInvariantError("runtime event span contradicts its claim")
             if claim.state is ClaimState.ABANDONED:
-                if event.kind != "abandoned" or "fencing_token" in payload:
+                if event.kind != "abandoned":
                     raise ClaimInvariantError(
                         "runtime abandonment event is inconsistent"
                     )
             elif payload.get("fencing_token") != claim.fencing_token:
                 raise ClaimInvariantError("runtime completion token is inconsistent")
+            if event.idempotency_key != event.kind:
+                raise ClaimInvariantError("runtime event transition ID is invalid")
+
+        if set(event_claim_ids) != set(terminal):
+            raise ClaimInvariantError(
+                "runtime events must match terminal claims exactly once"
+            )
+        terminal_transition_ids = tuple(
+            dict(event.payload).get("claim_id")
+            for event in checkpoint.claims.events.events
+            if event.kind in {ClaimState.COMPLETED.value, ClaimState.ABANDONED.value}
+        )
+        if tuple(event_claim_ids) != terminal_transition_ids:
+            raise ClaimInvariantError(
+                "runtime event transitions contradict terminal claim order"
+            )
 
     @classmethod
     def from_checkpoint(

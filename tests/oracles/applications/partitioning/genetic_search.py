@@ -1,4 +1,4 @@
-"""Independent seeded simulator for genetic-search benchmark evidence."""
+"""Structurally independent evidence for genetic-search scenarios."""
 
 from __future__ import annotations
 
@@ -21,31 +21,19 @@ def expected_ranking(
     )
 
 
-def expected_search(
-    population: Sequence[str],
-    fitness: Fitness,
+def expected_invariant_search(
+    candidate: str,
     *,
+    population_size: int,
     generations: int,
+    score: float,
     seed: int,
-    mutation_rate: float,
 ) -> tuple[tuple[GenerationSpec, ...], tuple[str, ...], object]:
-    """Simulate selection, crossover, mutation, and final PRNG state."""
-    current = tuple(population)
-    randomizer = random.Random(seed)
-    history: list[GenerationSpec] = []
-    for generation in range(generations):
-        ranking = expected_ranking(current, fitness)
-        history.append((generation, current, ranking))
-        survivors = tuple(item[1] for item in ranking[: max(2, len(ranking) // 2)])
-        children: list[str] = []
-        while len(children) < len(current):
-            left = survivors[randomizer.randrange(len(survivors))]
-            right = survivors[randomizer.randrange(len(survivors))]
-            point = randomizer.randrange(1, len(left)) if len(left) > 1 else 1
-            child = list(left[:point] + right[point:])
-            for index, bit in enumerate(child):
-                if randomizer.random() < mutation_rate:
-                    child[index] = "1" if bit == "0" else "0"
-            children.append("".join(child))
-        current = tuple(children)
-    return tuple(history), current, randomizer.getstate()
+    """Derive a zero-mutation invariant workload without simulating evolution."""
+    population = (candidate,) * population_size
+    ranking = ((score, candidate),) * population_size
+    history = tuple(
+        (generation, population, ranking) for generation in range(generations)
+    )
+    initial_random_state = random.Random(seed).getstate()
+    return history, population, initial_random_state

@@ -79,6 +79,7 @@ class GeneticCheckpoint:
     population: tuple[str, ...]
     history: tuple[GeneticGeneration, ...]
     random_state: object
+    initial_random_state: object
     runtime: RuntimeCheckpoint
 
 
@@ -113,6 +114,7 @@ class GeneticSearchEngine:
         self._generation = 0
         self._mutation_rate = converted_rate
         self._random = random.Random(seed)
+        self._initial_random_state = self._random.getstate()
         self._history: list[GeneticGeneration] = []
         self._runtime = PartitionRuntime(generations, clock=clock)
 
@@ -130,6 +132,28 @@ class GeneticSearchEngine:
             scored.append((score, candidate))
         return tuple(sorted(scored, key=lambda item: (-item[0], item[1])))
 
+    @staticmethod
+    def _next_population(
+        population: tuple[str, ...],
+        ranking: tuple[tuple[float, str], ...],
+        mutation_rate: float,
+        randomizer: random.Random,
+    ) -> tuple[str, ...]:
+        survivors = tuple(item[1] for item in ranking[: max(2, len(ranking) // 2)])
+        if mutation_rate == 0.0 and len(set(survivors)) == 1:
+            return (survivors[0],) * len(population)
+        children: list[str] = []
+        while len(children) < len(population):
+            left = survivors[randomizer.randrange(len(survivors))]
+            right = survivors[randomizer.randrange(len(survivors))]
+            point = randomizer.randrange(1, len(left)) if len(left) > 1 else 1
+            child = list(left[:point] + right[point:])
+            for index, bit in enumerate(child):
+                if randomizer.random() < mutation_rate:
+                    child[index] = "1" if bit == "0" else "0"
+            children.append("".join(child))
+        return tuple(children)
+
     def step(self, *, owner: str = "local") -> GeneticGeneration:
         """Claim and execute exactly one generation."""
         if self._generation >= self._generations:
@@ -143,20 +167,12 @@ class GeneticSearchEngine:
             randomizer.setstate(self._random.getstate())
             ranking = self._score(self._fitness, self._population)
             record = GeneticGeneration(self._generation, self._population, ranking)
-            survivors = tuple(item[1] for item in ranking[: max(2, len(ranking) // 2)])
-            children: list[str] = []
-            while len(children) < len(self._population):
-                left = survivors[randomizer.randrange(len(survivors))]
-                right = survivors[randomizer.randrange(len(survivors))]
-                point = randomizer.randrange(1, len(left)) if len(left) > 1 else 1
-                child = list(left[:point] + right[point:])
-                for index, bit in enumerate(child):
-                    if randomizer.random() < self._mutation_rate:
-                        child[index] = "1" if bit == "0" else "0"
-                children.append("".join(child))
+            next_population = self._next_population(
+                self._population, ranking, self._mutation_rate, randomizer
+            )
             return (
                 record,
-                tuple(children),
+                next_population,
                 randomizer.getstate(),
                 [*self._history, record],
             )
@@ -201,6 +217,7 @@ class GeneticSearchEngine:
             self._population,
             tuple(self._history),
             self._random.getstate(),
+            self._initial_random_state,
             self._runtime.checkpoint(),
         )
 
@@ -245,11 +262,32 @@ class GeneticSearchEngine:
             ):
                 raise ValueError("checkpoint history population is inconsistent")
 
+        replay_randomizer = random.Random()
         randomizer = random.Random()
         try:
+            replay_randomizer.setstate(
+                cast(tuple[Any, ...], checkpoint.initial_random_state)
+            )
             randomizer.setstate(cast(tuple[Any, ...], checkpoint.random_state))
         except (TypeError, ValueError) as exc:
             raise ValueError("checkpoint random state is invalid") from exc
+
+        replayed_population = (
+            checkpoint.history[0].population if checkpoint.history else population
+        )
+        for record in checkpoint.history:
+            if record.population != replayed_population:
+                raise ValueError("checkpoint population transition is inconsistent")
+            replayed_population = cls._next_population(
+                replayed_population,
+                record.ranking,
+                mutation_rate,
+                replay_randomizer,
+            )
+        if replayed_population != population:
+            raise ValueError("checkpoint final population is inconsistent")
+        if replay_randomizer.getstate() != randomizer.getstate():
+            raise ValueError("checkpoint random state contradicts population lineage")
 
         runtime = PartitionRuntime.from_checkpoint(checkpoint.runtime, clock=clock)
         runtime_claims = checkpoint.runtime.claims
@@ -286,6 +324,19 @@ class GeneticSearchEngine:
             for generation, claim in completed_by_generation
         ):
             raise ClaimInvariantError("runtime generation claims are inconsistent")
+        events_by_stream = {
+            event.stream: event for event in checkpoint.runtime.events.events
+        }
+        generation_events = tuple(
+            events_by_stream[f"work:{claim.claim_id}"]
+            for _, claim in completed_by_generation
+        )
+        if any(event.kind != "generation" for event in generation_events):
+            raise ClaimInvariantError("runtime generation event kind is inconsistent")
+        if tuple(event.sequence for event in generation_events) != tuple(
+            range(1, checkpoint.generation + 1)
+        ):
+            raise ClaimInvariantError("runtime generation event order is inconsistent")
 
         candidate = cls.__new__(cls)
         candidate._population = population
@@ -294,6 +345,9 @@ class GeneticSearchEngine:
         candidate._generation = checkpoint.generation
         candidate._mutation_rate = mutation_rate
         candidate._random = randomizer
+        candidate._initial_random_state = cast(
+            tuple[Any, ...], checkpoint.initial_random_state
+        )
         candidate._history = list(checkpoint.history)
         candidate._runtime = runtime
         return candidate

@@ -12,6 +12,8 @@ from treemendous.applications._shared.clock import Clock
 from treemendous.applications.partitioning._runtime import PartitionRuntime, positive
 
 FuzzTarget = Callable[[bytes], object]
+FuzzInputProvider = Callable[[int], bytes]
+CrashSignatureProvider = Callable[[Exception], str]
 
 
 @dataclass(frozen=True, order=True)
@@ -49,10 +51,16 @@ class FuzzingEngine:
         cases: int,
         seed: int = 0,
         max_input_size: int = 32,
+        input_provider: FuzzInputProvider | None = None,
+        signature_provider: CrashSignatureProvider | None = None,
         clock: Clock | None = None,
     ) -> None:
         if not callable(target):
             raise TypeError("target must be callable")
+        if input_provider is not None and not callable(input_provider):
+            raise TypeError("input_provider must be callable")
+        if signature_provider is not None and not callable(signature_provider):
+            raise TypeError("signature_provider must be callable")
         positive(cases, "cases")
         positive(max_input_size, "max_input_size")
         if type(seed) is not int:
@@ -61,6 +69,8 @@ class FuzzingEngine:
         self._cases = cases
         self._seed = seed
         self._max_input_size = max_input_size
+        self._input_provider = input_provider
+        self._signature_provider = signature_provider
         self._executed: set[int] = set()
         self._crashes: dict[str, Crash] = {}
         self._retries = 0
@@ -70,6 +80,11 @@ class FuzzingEngine:
         """Map an ordinal to bytes independently of worker or claim order."""
         if type(ordinal) is not int or not 0 <= ordinal < self._cases:
             raise ValueError("ordinal is outside the fuzzing domain")
+        if self._input_provider is not None:
+            generated = self._input_provider(ordinal)
+            if not isinstance(generated, bytes):
+                raise TypeError("input_provider must return bytes")
+            return generated
         randomizer = random.Random((self._seed << 32) ^ ordinal)
         length = randomizer.randrange(self._max_input_size + 1)
         return bytes(randomizer.randrange(256) for _ in range(length))
@@ -102,8 +117,18 @@ class FuzzingEngine:
                 data = self.input_for(ordinal)
                 try:
                     self._target(data)
-                except (Exception,) as exc:
-                    signature = self._signature(exc)
+                except BaseException as exc:
+                    if not isinstance(exc, Exception):
+                        raise
+                    signature = (
+                        self._signature(exc)
+                        if self._signature_provider is None
+                        else self._signature_provider(exc)
+                    )
+                    if not isinstance(signature, str) or not signature:
+                        raise ValueError(
+                            "signature_provider must return a nonempty string"
+                        )
                     crash = Crash(
                         signature, ordinal, data, type(exc).__name__, str(exc)
                     )

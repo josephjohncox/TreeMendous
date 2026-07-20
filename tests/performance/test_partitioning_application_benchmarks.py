@@ -65,6 +65,28 @@ def test_partitioning_run_benchmark_rejects_unbounded_work(name: str) -> None:
         module.run_benchmark(operations=10_000, seed=101)
 
 
+def test_fuzzing_detects_injected_input_vector_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fixed expected crashes reject a corrupted injected input stream."""
+    module = _module("fuzzing")
+    monkeypatch.setattr(module, "benchmark_input", lambda _ordinal: b"ok")
+
+    with pytest.raises(AssertionError, match="evidence differs"):
+        module.run_benchmark(operations=8, seed=7)
+
+
+def test_genetic_search_detects_invariant_score_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Invariant expected history rejects a corrupted independent score."""
+    module = _module("genetic_search")
+    monkeypatch.setattr(module, "_CANDIDATE_SCORE", -1.0)
+
+    with pytest.raises(AssertionError, match="evidence differs"):
+        module.run_benchmark(operations=8, seed=7)
+
+
 def test_document_search_detects_result_sequence_mismatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

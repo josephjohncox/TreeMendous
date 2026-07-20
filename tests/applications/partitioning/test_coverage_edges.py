@@ -20,7 +20,6 @@ from treemendous.applications.partitioning._runtime import (
     RuntimeCheckpoint,
 )
 from treemendous.applications.partitioning.genetic_search import (
-    GeneticGeneration,
     GeneticSearchEngine,
     create_genetic_search,
 )
@@ -232,8 +231,8 @@ def test_url_normalization_and_crawler_validate_adversarial_inputs() -> None:
         lambda: WebCrawlEngine((), fetcher, max_pages=1),
         lambda: WebCrawlEngine(
             ("https://example.test",),
-            None,
-            max_pages=1,  # type: ignore[arg-type]
+            None,  # type: ignore[arg-type]
+            max_pages=1,
         ),
         lambda: WebCrawlEngine(("https://example.test",), fetcher, max_pages=0),
     )
@@ -289,8 +288,8 @@ def test_hyperparameter_validators_and_minimization_paths() -> None:
             maximize=1,  # type: ignore[arg-type]
         ),
         lambda: HyperparameterSearchEngine(
-            {1: (1,)},
-            _constant_objective,  # type: ignore[dict-item]
+            {1: (1,)},  # type: ignore[dict-item]
+            _constant_objective,
         ),
         lambda: HyperparameterSearchEngine({"": (1,)}, _constant_objective),
         lambda: HyperparameterSearchEngine({"x": "one"}, _constant_objective),
@@ -346,8 +345,8 @@ def test_genetic_validators_callback_failures_and_terminal_step() -> None:
         lambda: GeneticSearchEngine(("0", "x"), _score_ones, generations=1),
         lambda: GeneticSearchEngine(
             ("0", "1"),
-            None,
-            generations=1,  # type: ignore[arg-type]
+            None,  # type: ignore[arg-type]
+            generations=1,
         ),
         lambda: GeneticSearchEngine(("0", "1"), _score_ones, generations=0),
         lambda: GeneticSearchEngine(("0", "1"), _score_ones, generations=1, seed=True),
@@ -418,6 +417,11 @@ def test_genetic_restore_rejects_application_checkpoint_corruption() -> None:
             "population",
         ),
         (replace(checkpoint, random_state=object()), ValueError, "random state"),
+        (
+            replace(checkpoint, initial_random_state=object()),
+            ValueError,
+            "random state",
+        ),
         (replace(checkpoint, generations=3), ClaimInvariantError, "domain"),
     )
     for corrupted, error, message in corruptions:
@@ -435,6 +439,7 @@ def test_genetic_restore_rejects_application_checkpoint_corruption() -> None:
 def test_genetic_restore_rejects_unfinished_and_malformed_runtime_claims() -> None:
     clock = LogicalClock()
     base_engine = GeneticSearchEngine(("00", "11"), _score_ones, generations=2)
+    base_engine.step()
     base_checkpoint = base_engine.checkpoint()
 
     active_runtime = PartitionRuntime(2, clock=clock)
@@ -445,14 +450,11 @@ def test_genetic_restore_rejects_unfinished_and_malformed_runtime_claims() -> No
             unfinished, fitness=_score_ones, clock=clock
         )
 
-    history = (GeneticGeneration(0, ("00", "11"), ((2.0, "11"), (0.0, "00"))),)
     metadata_runtime = PartitionRuntime(2, clock=clock)
     claim = metadata_runtime.claim("worker", 1)
     metadata_runtime.complete(claim, "generation", {"other": 0})
     malformed_metadata = replace(
         base_checkpoint,
-        generation=1,
-        history=history,
         runtime=metadata_runtime.checkpoint(),
     )
     with pytest.raises(ClaimInvariantError, match="metadata"):
@@ -465,8 +467,6 @@ def test_genetic_restore_rejects_unfinished_and_malformed_runtime_claims() -> No
     wide_runtime.complete(wide_claim, "generation", {"generation": 0})
     malformed_span = replace(
         base_checkpoint,
-        generation=1,
-        history=history,
         runtime=wide_runtime.checkpoint(),
     )
     with pytest.raises(ClaimInvariantError, match="claims"):
@@ -562,15 +562,15 @@ def test_map_reduce_validators_emissions_and_default_factory() -> None:
         lambda: MapReduceEngine(b"", _pair_mapper, _sum, split_size=1),
         lambda: MapReduceEngine(
             b"x",
-            None,
+            None,  # type: ignore[arg-type]
             _sum,
-            split_size=1,  # type: ignore[arg-type]
+            split_size=1,
         ),
         lambda: MapReduceEngine(
             b"x",
             _pair_mapper,
-            None,
-            split_size=1,  # type: ignore[arg-type]
+            None,  # type: ignore[arg-type]
+            split_size=1,
         ),
         lambda: MapReduceEngine(b"x", _pair_mapper, _sum, split_size=0),
         lambda: MapReduceEngine(b"x", _pair_mapper, _sum, split_size=1, mode="bad"),

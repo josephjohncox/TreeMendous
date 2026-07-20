@@ -12,13 +12,18 @@ from typing import Any
 import pytest
 
 from treemendous.applications._shared.claiming import (
+    ClaimInvariantError,
     ClaimState,
     ForeignClaimError,
     StaleClaimError,
     TerminalClaimError,
 )
+from treemendous.applications._shared.clock import LogicalClock
 from treemendous.applications._shared.events import EventLog
-from treemendous.applications.partitioning._runtime import RuntimeCheckpoint
+from treemendous.applications.partitioning._runtime import (
+    PartitionRuntime,
+    RuntimeCheckpoint,
+)
 from treemendous.applications.partitioning.build_sharding import (
     BuildShardingEngine,
     BuildTask,
@@ -139,6 +144,66 @@ def test_explicit_executors_reject_invalid_claims_before_effects(
     assert tuple(effects) == effects_after_completion
 
 
+def _completed_runtime_checkpoint() -> RuntimeCheckpoint:
+    runtime = PartitionRuntime(2)
+    first = runtime.claim("worker", 1)
+    second = runtime.claim("worker", 1)
+    runtime.complete(first, "first")
+    runtime.complete(second, "second")
+    return runtime.checkpoint()
+
+
+def test_runtime_restore_rejects_duplicate_and_missing_claim_lineage() -> None:
+    checkpoint = _completed_runtime_checkpoint()
+    first_event, second_event = checkpoint.events.events
+    forged_event = replace(
+        second_event,
+        stream=first_event.stream,
+        version=2,
+    )
+    forged_requests = tuple(
+        replace(request, stream=first_event.stream, expected_version=1)
+        if request.event_sequence == second_event.sequence
+        else request
+        for request in checkpoint.events.requests
+    )
+    forged = replace(
+        checkpoint,
+        events=replace(
+            checkpoint.events,
+            events=(first_event, forged_event),
+            requests=forged_requests,
+        ),
+    )
+
+    with pytest.raises(ClaimInvariantError, match="exactly once"):
+        PartitionRuntime.from_checkpoint(forged, clock=LogicalClock())
+
+
+def test_runtime_restore_rejects_reordered_terminal_transition_ids() -> None:
+    checkpoint = _completed_runtime_checkpoint()
+    first_event, second_event = checkpoint.events.events
+    forged_events = (
+        replace(second_event, sequence=1),
+        replace(first_event, sequence=2),
+    )
+    forged_requests = tuple(
+        replace(request, event_sequence=3 - request.event_sequence)
+        for request in checkpoint.events.requests
+    )
+    forged = replace(
+        checkpoint,
+        events=replace(
+            checkpoint.events,
+            events=forged_events,
+            requests=forged_requests,
+        ),
+    )
+
+    with pytest.raises(ClaimInvariantError, match="terminal claim order"):
+        PartitionRuntime.from_checkpoint(forged, clock=LogicalClock())
+
+
 def test_failed_runtime_event_append_cannot_commit_application_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -157,8 +222,9 @@ def test_failed_runtime_event_append_cannot_commit_application_state(
 
     application, runtime = engine.audit_snapshot()
     assert isinstance(runtime, RuntimeCheckpoint)
-    assert application.hits == ()
-    assert runtime.events.events == ()
+    empty: tuple[object, ...] = ()
+    assert application.hits == empty
+    assert runtime.events.events == empty
     assert runtime.claims.claims[0].state is ClaimState.ACTIVE
 
 
@@ -211,7 +277,8 @@ def test_concurrent_duplicate_execution_runs_callback_once_and_snapshot_is_consi
     application, runtime = audits[0]
     assert isinstance(runtime, RuntimeCheckpoint)
     assert callback_calls == ["mapper"]
-    assert application.results == (("key", 1),)
+    expected_results = (("key", 1),)
+    assert application.results == expected_results
     assert len(runtime.events.events) == 1
     assert runtime.claims.claims[0].state is ClaimState.COMPLETED
     assert sum(isinstance(item, TerminalClaimError) for item in outcomes) == 1
@@ -236,7 +303,9 @@ def test_reentrant_execution_is_fenced_before_a_second_callback() -> None:
         b"unit", mapper, lambda left, right: left + right, split_size=1
     )
     claim = engine.claim("worker", 1)
-    assert engine.execute_claim(claim) == (("key", 1),)
+    result = engine.execute_claim(claim)
+    expected_result = (("key", 1),)
+    assert result == expected_result
     assert callback_calls == 1
     assert len(rejected) == 1
     assert isinstance(rejected[0], StaleClaimError)
@@ -260,4 +329,5 @@ def test_regex_chunks_preserve_full_buffer_context(
         for match in re.finditer(pattern, data, flags)
     )
     observed = RegexScanEngine(data, pattern, halo=0, flags=flags).run(chunk_size=2)
-    assert tuple((item.start, item.end, item.value) for item in observed) == expected
+    observed_values = tuple((item.start, item.end, item.value) for item in observed)
+    assert observed_values == expected

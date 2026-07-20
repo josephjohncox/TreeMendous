@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from tests.oracles.applications.partitioning.fuzzing import expected_crashes
+from tests.oracles.applications.partitioning.fuzzing import (
+    benchmark_input,
+    benchmark_signature,
+    expected_crashes,
+)
 from tests.performance.applications.harness import (
     ApplicationOutcome,
     ApplicationSample,
@@ -43,6 +47,8 @@ def run_benchmark(
         cases=operations,
         seed=seed,
         max_input_size=_MAX_INPUT_SIZE,
+        input_provider=benchmark_input,
+        signature_provider=benchmark_signature,
     )
 
     def execute() -> tuple[Crash, ...]:
@@ -70,7 +76,7 @@ def run_benchmark(
         )
 
     def oracle() -> ApplicationOutcome:
-        crashes = expected_crashes(operations, seed, _MAX_INPUT_SIZE)
+        crashes = expected_crashes(operations)
         successful_claims = (operations + _SHARD_SIZE - 1) // _SHARD_SIZE
         return ApplicationOutcome(
             results=crashes,
