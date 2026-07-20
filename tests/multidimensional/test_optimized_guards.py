@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from treemendous.multidimensional import BoundedBoxIndex, Box, BoxIndex2D
+from treemendous.multidimensional.algorithms import grid as grid_module
 
 
 def _bounded(
@@ -92,7 +93,9 @@ def test_huge_cell_ranges_are_counted_without_combinatorial_allocation() -> None
     assert len(index) == 0
 
 
-def test_memory_limit_rejects_before_enumeration_or_mutation() -> None:
+def test_memory_limit_rejects_before_enumeration_or_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     index = _bounded(
         max_cells_per_entry=16,
         max_cells_per_query=16,
@@ -107,6 +110,11 @@ def test_memory_limit_rejects_before_enumeration_or_mutation() -> None:
     assert index.diagnostics().max_estimated_bytes == 2_000
 
     handle = index.insert(Box((0, 0), (2, 2)), "safe")
+
+    def fail_set() -> set[object]:
+        raise AssertionError("candidate set allocated before memory preflight")
+
+    monkeypatch.setattr(grid_module, "set", fail_set, raising=False)
     with pytest.raises(ValueError, match="max_estimated_bytes"):
         index.overlaps(Box((0, 0), (8, 8)))
     assert index.get(handle).data == "safe"

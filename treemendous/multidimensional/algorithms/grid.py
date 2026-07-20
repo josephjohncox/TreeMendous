@@ -264,8 +264,9 @@ class SparseGridStrategy:
         entries: Mapping[BoxHandle, BoxEntry],
     ) -> tuple[BoxHandle, ...]:
         del entries
+        cells = self._query_cells(state, query)
         candidates: set[BoxHandle] = set()
-        for cell in self._query_cells(state, query):
+        for cell in cells:
             candidates.update(state.postings.get(cell, ()))
         return tuple(sorted(candidates, key=lambda handle: handle.sequence))
 
