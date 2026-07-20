@@ -6,13 +6,52 @@ import pytest
 
 from treemendous.backends.adapters import BackendAdapter
 from treemendous.basic.boundary import IntervalManager
-from treemendous.domain import ManagedDomainRequiredError, Span
+from treemendous.domain import IntervalResult, ManagedDomainRequiredError, Span
 from treemendous.policies import OrderedPayloadPolicy, UniformPayloadPolicy
 from treemendous.rangeset import RangeSet
 
 
 def _ranges(**options: Any) -> RangeSet:
     return RangeSet(BackendAdapter(IntervalManager()), **options)
+
+
+class _CountingIntervalManager:
+    def __init__(self) -> None:
+        self._implementation = IntervalManager()
+        self.interval_reads = 0
+
+    def release_interval(self, start: int, end: int) -> None:
+        self._implementation.release_interval(start, end)
+
+    def reserve_interval(self, start: int, end: int) -> None:
+        self._implementation.reserve_interval(start, end)
+
+    def get_intervals(self) -> list[IntervalResult]:
+        self.interval_reads += 1
+        return self._implementation.get_intervals()
+
+
+def test_mutations_and_queries_do_not_reenumerate_unchanged_backend_state() -> None:
+    implementation = _CountingIntervalManager()
+    ranges = RangeSet(
+        BackendAdapter(implementation),
+        domain=(0, 128),
+        initially_available=False,
+    )
+    initial_reads = implementation.interval_reads
+    spans = tuple(Span(i * 2, i * 2 + 1) for i in range(64))
+
+    for span in spans:
+        ranges.add(span)
+    for span in spans:
+        ranges.discard(span, require_covered=True)
+        ranges.add(span)
+    assert ranges.first_fit(1, not_before=0) is not None
+    assert ranges.overlaps(Span(0, 3))
+    assert ranges.snapshot().total_free == 64
+    assert ranges.stats().total_free == 64
+
+    assert implementation.interval_reads == initial_reads
 
 
 def test_payload_operations_require_an_explicit_policy() -> None:
