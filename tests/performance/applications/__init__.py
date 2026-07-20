@@ -1,1 +1,1 @@
-"""Actual-work application performance smokes."""
+"""Correctness-checked application performance smokes."""
