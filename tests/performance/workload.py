@@ -255,14 +255,10 @@ def lease_pool_workload(
         ):
             operations.append(Operation("snapshot"))
             continue
-        if request_id == operation_count - 2 or (
-            request_id and request_id % 503 == 0
-        ):
+        if request_id == operation_count - 2 or (request_id and request_id % 503 == 0):
             operations.append(Operation("stats"))
             continue
-        if request_id == operation_count - 3 or (
-            request_id and request_id % 211 == 0
-        ):
+        if request_id == operation_count - 3 or (request_id and request_id % 211 == 0):
             shard = rng.randrange(shards)
             base = shard * stride
             start = base + rng.randrange(slots_per_shard)
