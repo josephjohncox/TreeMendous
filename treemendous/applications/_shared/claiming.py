@@ -274,9 +274,7 @@ class ClaimLedger:
         return observed
 
     @staticmethod
-    def _append_event(
-        event_log: EventLog, claim: WorkClaim, occurred_at: int
-    ) -> None:
+    def _append_event(event_log: EventLog, claim: WorkClaim, occurred_at: int) -> None:
         stream = f"claim:{claim.claim_id}"
         event_log.append(
             stream,
@@ -607,9 +605,7 @@ class ClaimLedger:
                 violations.append("claim is outside the managed domain")
             if self._next_claim_id != max(self._claims, default=0) + 1:
                 violations.append("next_claim_id is inconsistent with issued IDs")
-            fencing_tokens = [
-                claim.fencing_token for claim in self._claims.values()
-            ]
+            fencing_tokens = [claim.fencing_token for claim in self._claims.values()]
             if len(fencing_tokens) != len(set(fencing_tokens)):
                 violations.append("claims reuse a fencing token")
             max_token = max(fencing_tokens, default=0)
@@ -805,7 +801,10 @@ class ClaimLedger:
                         )
                     prior_expiry = previous_payload["expires_at"]
                     if event.kind == ClaimState.ACTIVE.value:
-                        if payload["fencing_token"] == previous_payload["fencing_token"]:
+                        if (
+                            payload["fencing_token"]
+                            == previous_payload["fencing_token"]
+                        ):
                             raise ClaimInvariantError(
                                 "claim renewal must issue a fencing token"
                             )
@@ -873,9 +872,9 @@ class ClaimLedger:
             first_payload = event_payloads[stream_events[0].sequence]
             final_event = stream_events[-1]
             final_payload = event_payloads[final_event.sequence]
-            expected_result = dict(
-                freeze_metadata({"result": dict(claim.result)})
-            )["result"]
+            expected_result = dict(freeze_metadata({"result": dict(claim.result)}))[
+                "result"
+            ]
             if (
                 final_event.kind != claim.state.value
                 or final_payload["revision"] != claim.revision
@@ -893,9 +892,7 @@ class ClaimLedger:
             if claim.request_id is not None:
                 request = requests[claim.request_id]
                 expected_initial_expiry = (
-                    None
-                    if request.ttl is None
-                    else claim.acquired_at + request.ttl
+                    None if request.ttl is None else claim.acquired_at + request.ttl
                 )
                 if first_payload["expires_at"] != expected_initial_expiry:
                     raise ClaimInvariantError(
@@ -924,9 +921,7 @@ class ClaimLedger:
                     "terminal event has an inconsistent fencing token"
                 )
         if checkpoint.next_claim_id != next_claim_id:
-            raise ClaimInvariantError(
-                "next_claim_id would reuse or skip claim IDs"
-            )
+            raise ClaimInvariantError("next_claim_id would reuse or skip claim IDs")
         if checkpoint.next_fencing_token != next_fencing_token:
             raise ClaimInvariantError(
                 "next_fencing_token would reuse or skip fencing tokens"

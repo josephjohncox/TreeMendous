@@ -78,14 +78,18 @@ class CapacityVector(Mapping[str, int]):
     def add(self, other: CapacityVector) -> CapacityVector:
         """Add vectors after enforcing identical dimensions."""
         self._require_same_dimensions(other)
-        return CapacityVector((name, value + other[name]) for name, value in self._items)
+        return CapacityVector(
+            (name, value + other[name]) for name, value in self._items
+        )
 
     def subtract(self, other: CapacityVector) -> CapacityVector:
         """Subtract ``other``, rejecting a result with a negative component."""
         self._require_same_dimensions(other)
         if not self.fits(other):
             raise ValueError("capacity subtraction would produce a negative value")
-        return CapacityVector((name, value - other[name]) for name, value in self._items)
+        return CapacityVector(
+            (name, value - other[name]) for name, value in self._items
+        )
 
     def fits(self, required: CapacityVector) -> bool:
         """Return whether this vector can satisfy ``required`` in every dimension."""

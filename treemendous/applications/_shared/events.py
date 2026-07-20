@@ -75,8 +75,10 @@ def _freeze_value(value: Any) -> Any:
         (_FrozenBoolean, _FrozenFloat, _FrozenMapping, _FrozenSequence),
     ):
         return value
-    if value is None or isinstance(value, (int, str, bytes)) and not isinstance(
-        value, bool
+    if (
+        value is None
+        or isinstance(value, (int, str, bytes))
+        and not isinstance(value, bool)
     ):
         return value
     if isinstance(value, bool):

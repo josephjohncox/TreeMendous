@@ -162,9 +162,7 @@ class RangeLockTable(Generic[LockOwnerT]):
         except KeyError:
             raise KeyError(handle) from None
 
-    def _require_owner(
-        self, handle: LockHandle[LockOwnerT], owner: LockOwnerT
-    ) -> None:
+    def _require_owner(self, handle: LockHandle[LockOwnerT], owner: LockOwnerT) -> None:
         self._validate_owner(owner)
         if handle.owner != owner:
             raise PermissionError("lock belongs to another owner")

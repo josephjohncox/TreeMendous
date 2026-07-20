@@ -17,9 +17,7 @@ from treemendous.applications._shared.reservations import (
 
 
 def test_exact_reservations_use_half_open_cumulative_capacity() -> None:
-    ledger = ReservationLedger(
-        {"node": CapacityVector(cpu=2, memory=8)}
-    )
+    ledger = ReservationLedger({"node": CapacityVector(cpu=2, memory=8)})
     one = {"node": CapacityVector(cpu=1, memory=4)}
 
     first = ledger.reserve_exact("alpha", 10, 20, one)
@@ -50,9 +48,7 @@ def test_capacity_dimensions_are_checked_per_named_resource() -> None:
     )
 
     with pytest.raises(ValueError, match="same dimension"):
-        ledger.reserve_exact(
-            "owner", 0, 1, {"gpu": CapacityVector(slots=1)}
-        )
+        ledger.reserve_exact("owner", 0, 1, {"gpu": CapacityVector(slots=1)})
     with pytest.raises(ValueError, match="exceeds total"):
         ledger.reserve_exact(
             "owner",
@@ -61,9 +57,7 @@ def test_capacity_dimensions_are_checked_per_named_resource() -> None:
             {"network": CapacityVector(bandwidth=11)},
         )
     with pytest.raises(KeyError, match="unknown"):
-        ledger.reserve_exact(
-            "owner", 0, 1, {"missing": CapacityVector(units=1)}
-        )
+        ledger.reserve_exact("owner", 0, 1, {"missing": CapacityVector(units=1)})
     assert not ledger.reservations()
 
 
@@ -116,22 +110,14 @@ def test_owner_scoped_idempotency_preserves_identity_and_rejects_reuse() -> None
     ledger = ReservationLedger({"room": CapacityVector(units=1)})
     demand = {"room": CapacityVector(units=1)}
 
-    original = ledger.reserve_exact(
-        "alice", 1, 3, demand, request_id="request-1"
-    )
-    replay = ledger.reserve_exact(
-        "alice", 1, 3, demand, request_id="request-1"
-    )
+    original = ledger.reserve_exact("alice", 1, 3, demand, request_id="request-1")
+    replay = ledger.reserve_exact("alice", 1, 3, demand, request_id="request-1")
     assert replay is original
 
     with pytest.raises(ValueError, match="idempotency"):
-        ledger.reserve_exact(
-            "alice", 3, 5, demand, request_id="request-1"
-        )
+        ledger.reserve_exact("alice", 3, 5, demand, request_id="request-1")
 
-    other_owner = ledger.reserve_exact(
-        "bob", 3, 5, demand, request_id="request-1"
-    )
+    other_owner = ledger.reserve_exact("bob", 3, 5, demand, request_id="request-1")
     assert original.id == "alice:1"
     assert other_owner.id == "bob:1"
 
@@ -139,10 +125,7 @@ def test_owner_scoped_idempotency_preserves_identity_and_rejects_reuse() -> None
     assert cancelled.status is ReservationStatus.CANCELLED
     assert ledger.cancel("alice", original.id) is cancelled
     assert (
-        ledger.reserve_exact(
-            "alice", 1, 3, demand, request_id="request-1"
-        )
-        is cancelled
+        ledger.reserve_exact("alice", 1, 3, demand, request_id="request-1") is cancelled
     )
     ledger.reserve_exact("carol", 1, 3, demand)
 
@@ -159,9 +142,7 @@ def test_multi_resource_failure_is_atomic_before_exposure() -> None:
             "projector": CapacityVector(units=1),
         }
     )
-    ledger.reserve_exact(
-        "existing", 0, 10, {"room": CapacityVector(units=1)}
-    )
+    ledger.reserve_exact("existing", 0, 10, {"room": CapacityVector(units=1)})
     before = ledger.snapshot()
 
     with pytest.raises(ReservationConflictError):
@@ -216,9 +197,7 @@ def test_conflict_query_and_snapshot_are_deterministic_and_non_mutating() -> Non
 def test_checkpoint_restore_preserves_counters_cancellation_and_idempotency() -> None:
     ledger = ReservationLedger({"lane": CapacityVector(units=1)})
     demand = {"lane": CapacityVector(units=1)}
-    cancelled = ledger.reserve_exact(
-        "owner", -5, -1, demand, request_id="old"
-    )
+    cancelled = ledger.reserve_exact("owner", -5, -1, demand, request_id="old")
     ledger.cancel("owner", cancelled.id)
     active = ledger.reserve_earliest(
         "owner",
@@ -251,9 +230,7 @@ def test_checkpoint_restore_preserves_counters_cancellation_and_idempotency() ->
 
 def test_restore_rejects_invalid_checkpoint_without_changing_live_state() -> None:
     ledger = ReservationLedger({"lane": CapacityVector(units=1)})
-    ledger.reserve_exact(
-        "owner", 0, 1, {"lane": CapacityVector(units=1)}
-    )
+    ledger.reserve_exact("owner", 0, 1, {"lane": CapacityVector(units=1)})
     before = ledger.checkpoint()
     invalid = replace(before, next_sequences=(("owner", 1),))
 
@@ -327,8 +304,7 @@ def test_diagnostics_reports_duplicate_request_identity() -> None:
     errors = ledger.diagnostics()
     assert "duplicate owner/request identity ('owner', 'first')" in errors
     assert (
-        f"reservation {second.id!r} has an inconsistent idempotency identity"
-        in errors
+        f"reservation {second.id!r} has an inconsistent idempotency identity" in errors
     )
     assert ledger.get(first.id).request_id == "first"
 
@@ -345,9 +321,7 @@ def test_diagnostics_reports_sequence_and_counter_corruption() -> None:
 
     errors = ledger.diagnostics()
     assert "orphan owner counter for 'orphan'" in errors
-    assert (
-        "non-contiguous owner sequences or non-exact counter for 'owner'" in errors
-    )
+    assert "non-contiguous owner sequences or non-exact counter for 'owner'" in errors
 
 
 def test_diagnostics_reports_inconsistent_idempotency_fingerprint() -> None:
@@ -367,8 +341,7 @@ def test_diagnostics_reports_inconsistent_idempotency_fingerprint() -> None:
     )
 
     expected_errors = (
-        f"reservation {reservation.id!r} has an inconsistent "
-        "idempotency fingerprint",
+        f"reservation {reservation.id!r} has an inconsistent idempotency fingerprint",
     )
     assert ledger.diagnostics() == expected_errors
 

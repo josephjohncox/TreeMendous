@@ -54,9 +54,7 @@ def test_capacity_arithmetic_and_fits_are_componentwise() -> None:
     assert available.fits(used)
     assert used.fits_within(available)
     assert available.subtract(used) == CapacityVector(cpu=5, memory=22)
-    assert used.add(CapacityVector(cpu=2, memory=6)) == CapacityVector(
-        cpu=5, memory=16
-    )
+    assert used.add(CapacityVector(cpu=2, memory=6)) == CapacityVector(cpu=5, memory=16)
     assert available - used == CapacityVector(cpu=5, memory=22)
     assert used + used == CapacityVector(cpu=6, memory=20)
 

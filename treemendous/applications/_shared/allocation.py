@@ -177,12 +177,16 @@ class ContiguousAllocator:
         *,
         reserved: Iterable[Span | tuple[int, int]] = (),
     ) -> None:
-        self._domain = domain if isinstance(domain, ManagedDomain) else ManagedDomain(domain)
+        self._domain = (
+            domain if isinstance(domain, ManagedDomain) else ManagedDomain(domain)
+        )
         staged_free = _new_range_set(self._domain)
         reserved_ranges = _normalize_spans(_coerce_span(item) for item in reserved)
         for span in reserved_ranges:
             if not self._domain.contains(span):
-                raise ValueError("reserved range must be contained in the managed domain")
+                raise ValueError(
+                    "reserved range must be contained in the managed domain"
+                )
             staged_free.discard(span, require_covered=True)
 
         self._lock = RLock()
@@ -375,9 +379,7 @@ class ContiguousAllocator:
                 domain=self._domain,
                 free_ranges=self._free_spans(),
                 reserved_ranges=self._reserved,
-                records=tuple(
-                    self._records[key] for key in sorted(self._records)
-                ),
+                records=tuple(self._records[key] for key in sorted(self._records)),
                 idempotency=tuple(
                     (owner, key, allocation_id)
                     for (owner, key), allocation_id in self._idempotency.items()
@@ -542,7 +544,10 @@ class ContiguousAllocator:
             if record.policy is None:
                 if record.exact_start != handle.start:
                     raise ValueError("checkpoint exact reservation metadata is invalid")
-            elif not isinstance(record.policy, FitPolicy) or record.exact_start is not None:
+            elif (
+                not isinstance(record.policy, FitPolicy)
+                or record.exact_start is not None
+            ):
                 raise ValueError("checkpoint policy allocation metadata is invalid")
             if record.idempotency_key is not None:
                 _hashable(record.idempotency_key, "checkpoint idempotency key")
@@ -556,7 +561,10 @@ class ContiguousAllocator:
             raise ValueError("checkpoint allocation counter is stale")
         rebuilt_idempotency: dict[tuple[Hashable, Hashable], int] = {}
         for owner, key, allocation_id in checkpoint.idempotency:
-            map_key = (_hashable(owner, "checkpoint owner"), _hashable(key, "checkpoint key"))
+            map_key = (
+                _hashable(owner, "checkpoint owner"),
+                _hashable(key, "checkpoint key"),
+            )
             if map_key in rebuilt_idempotency:
                 raise ValueError("checkpoint contains duplicate idempotency keys")
             indexed_record = records.get(allocation_id)

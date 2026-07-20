@@ -29,9 +29,7 @@ def test_fit_policies_inspect_chunks_with_deterministic_ties() -> None:
     assert best.allocate(8, owner="best", policy=FitPolicy.BEST).span == Span(20, 28)
 
     worst = ContiguousAllocator((0, 60), reserved=holes)
-    assert worst.allocate(8, owner="worst", policy=FitPolicy.WORST).span == Span(
-        40, 48
-    )
+    assert worst.allocate(8, owner="worst", policy=FitPolicy.WORST).span == Span(40, 48)
 
     tied = ContiguousAllocator((0, 30), reserved=(Span(10, 20),))
     assert tied.allocate(2, owner="tie", policy="best").start == 0
@@ -128,9 +126,7 @@ def test_checkpoint_restore_revives_state_without_reissuing_handle_ids() -> None
     expected_allocations = (retained,)
     assert allocator.snapshot().allocations == expected_allocations
     assert (
-        allocator.allocate(
-            3, owner="owner", alignment=2, idempotency_key="retained"
-        )
+        allocator.allocate(3, owner="owner", alignment=2, idempotency_key="retained")
         == retained
     )
     replacement = allocator.allocate(2, owner="later")
