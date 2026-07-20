@@ -387,6 +387,26 @@ class ContiguousAllocator:
                 next_allocation_id=self._next_allocation_id,
             )
 
+    def validate_checkpoint_geometry(
+        self,
+        checkpoint: AllocatorCheckpoint,
+        *,
+        reserved_ranges: tuple[Span, ...],
+    ) -> None:
+        """Validate immutable domain and wrapper-configured reservations."""
+        if not isinstance(checkpoint, AllocatorCheckpoint):
+            raise TypeError("checkpoint must be an AllocatorCheckpoint")
+        with self._lock:
+            if checkpoint.allocator_id != self._allocator_id:
+                raise ForeignAllocationError("checkpoint belongs to another allocator")
+            if (
+                checkpoint.domain != self._domain
+                or checkpoint.reserved_ranges != reserved_ranges
+            ):
+                raise ValueError(
+                    "checkpoint does not match configured allocator geometry"
+                )
+
     def restore(self, checkpoint: AllocatorCheckpoint) -> None:
         """Atomically restore a checkpoint created by this allocator."""
         if not isinstance(checkpoint, AllocatorCheckpoint):

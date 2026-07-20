@@ -75,6 +75,7 @@ class DiskBlockAllocator:
             raise ValueError("fit policy must be first, best, or worst") from error
         reserved = (Span(0, metadata_blocks),) if metadata_blocks else ()
         self._allocator = ContiguousAllocator((0, total_blocks), reserved=reserved)
+        self._reserved = reserved
         self._block_size = block_size
         self._metadata = reserved[0] if reserved else None
         self._extents: dict[int, FileExtent] = {}
@@ -146,6 +147,9 @@ class DiskBlockAllocator:
         """Atomically restore a checkpoint created by this disk allocator."""
         if not isinstance(checkpoint, DiskCheckpoint):
             raise TypeError("checkpoint must be a DiskCheckpoint")
+        self._allocator.validate_checkpoint_geometry(
+            checkpoint.allocator, reserved_ranges=self._reserved
+        )
         allocator_handles = {record.handle for record in checkpoint.allocator.records}
         staged: dict[int, FileExtent] = {}
         for extent in checkpoint.extents:

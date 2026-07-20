@@ -1,5 +1,7 @@
 """Disk block application contracts."""
 
+from dataclasses import replace
+
 import pytest
 
 from tests.oracles.applications.allocation.disk_block_allocation import first_extent
@@ -31,3 +33,20 @@ def test_release_reuses_extent_and_checkpoint_restores() -> None:
     with pytest.raises(ForeignAllocationError):
         disk.free_extent(first, file_id="wrong")
     assert disk.snapshot() == before
+
+
+def test_restore_rejects_forged_metadata_reservation_atomically() -> None:
+    disk = DiskBlockAllocator(10, metadata_blocks=2)
+    checkpoint = disk.checkpoint()
+    forged_allocator = replace(
+        checkpoint.allocator,
+        reserved_ranges=(),
+        free_ranges=(Span(0, 10),),
+    )
+    before = disk.snapshot()
+
+    with pytest.raises(ValueError, match="configured allocator geometry"):
+        disk.restore(replace(checkpoint, allocator=forged_allocator))
+
+    assert disk.snapshot() == before
+    assert disk.allocate_extent("file", 1).blocks == Span(2, 3)

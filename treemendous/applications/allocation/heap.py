@@ -168,6 +168,9 @@ class HeapAllocator:
         """Atomically restore a structurally valid checkpoint from this heap."""
         if not isinstance(checkpoint, HeapCheckpoint):
             raise TypeError("checkpoint must be a HeapCheckpoint")
+        self._allocator.validate_checkpoint_geometry(
+            checkpoint.allocator, reserved_ranges=()
+        )
         staged: dict[int, HeapBlock] = {}
         allocator_handles = {record.handle for record in checkpoint.allocator.records}
         for block in checkpoint.blocks:

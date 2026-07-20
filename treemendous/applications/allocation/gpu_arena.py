@@ -211,6 +211,9 @@ class GPUMemoryArena:
         """Atomically restore a valid local arena checkpoint."""
         if not isinstance(checkpoint, GPUArenaCheckpoint):
             raise TypeError("checkpoint must be a GPUArenaCheckpoint")
+        self._allocator.validate_checkpoint_geometry(
+            checkpoint.allocator, reserved_ranges=()
+        )
         handles = {record.handle for record in checkpoint.allocator.records}
         buffers: dict[int, GPUBuffer] = {}
         for buffer in checkpoint.buffers:

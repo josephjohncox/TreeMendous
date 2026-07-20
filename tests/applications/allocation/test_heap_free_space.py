@@ -1,10 +1,13 @@
 """Heap application contracts."""
 
+from dataclasses import replace
+
 import pytest
 
 from tests.oracles.applications.allocation.heap_free_space import place
 from treemendous.applications._shared.allocation import AllocationUnavailableError
 from treemendous.applications.allocation.heap import HeapAllocator
+from treemendous.domain import Span
 
 
 def test_payload_alignment_overhead_and_oracle() -> None:
@@ -30,3 +33,19 @@ def test_checkpoint_and_failure_atomicity() -> None:
         heap.allocate(100, owner="b")
     assert heap.snapshot() == before
     assert before.diagnostics.allocated_space == retained.raw_handle.size
+
+
+def test_restore_rejects_forged_reserved_geometry_atomically() -> None:
+    heap = HeapAllocator(32)
+    checkpoint = heap.checkpoint()
+    forged_allocator = replace(
+        checkpoint.allocator,
+        reserved_ranges=(Span(0, 4),),
+        free_ranges=(Span(4, 32),),
+    )
+    before = heap.snapshot()
+
+    with pytest.raises(ValueError, match="configured allocator geometry"):
+        heap.restore(replace(checkpoint, allocator=forged_allocator))
+
+    assert heap.snapshot() == before

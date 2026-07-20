@@ -89,8 +89,8 @@ class CDNByteRangeCache:
         """Mark one exact, previously absent byte segment resident."""
         validate_coordinate(start, "start")
         validate_length(length)
-        if not cache_key:
-            raise ValueError("cache_key must be nonempty")
+        if not isinstance(cache_key, str) or not cache_key:
+            raise ValueError("cache_key must be a nonempty string")
         with self._lock:
             handle = self._allocator.reserve(
                 start, length, owner=self._object_id, idempotency_key=cache_key
@@ -169,6 +169,9 @@ class CDNByteRangeCache:
         """Atomically restore a valid local cache checkpoint."""
         if not isinstance(checkpoint, CacheCheckpoint):
             raise TypeError("checkpoint must be a CacheCheckpoint")
+        self._allocator.validate_checkpoint_geometry(
+            checkpoint.allocator, reserved_ranges=()
+        )
         validate_coordinate(checkpoint.evictions, "evictions")
         if checkpoint.evictions < 0:
             raise ValueError("evictions must be nonnegative")
@@ -182,6 +185,7 @@ class CDNByteRangeCache:
                 or segment.handle not in records
                 or records[segment.handle].idempotency_key != segment.cache_key
                 or segment.handle.owner != self._object_id
+                or not isinstance(segment.cache_key, str)
                 or not segment.cache_key
                 or segment.handle.allocation_id in staged
             ):
@@ -196,12 +200,20 @@ class CDNByteRangeCache:
 
     @staticmethod
     def _intersections(requested: Span, spans: tuple[Span, ...]) -> tuple[Span, ...]:
-        intersections = (
+        intersections = sorted(
             Span(max(requested.start, span.start), min(requested.end, span.end))
             for span in spans
             if span.start < requested.end and requested.start < span.end
         )
-        return tuple(sorted(intersections))
+        normalized: list[Span] = []
+        for span in intersections:
+            if normalized and span.start <= normalized[-1].end:
+                normalized[-1] = Span(
+                    normalized[-1].start, max(normalized[-1].end, span.end)
+                )
+            else:
+                normalized.append(span)
+        return tuple(normalized)
 
 
 def create_application(**kwargs: object) -> CDNByteRangeCache:

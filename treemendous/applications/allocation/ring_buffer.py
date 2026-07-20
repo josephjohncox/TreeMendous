@@ -203,8 +203,30 @@ class RingBuffer:
             or checkpoint.producer_cursor < checkpoint.consumer_cursor
             or checkpoint.producer_cursor - checkpoint.consumer_cursor > self._capacity
             or checkpoint.overwritten < 0
+            or checkpoint.overwritten
+            > checkpoint.consumer_cursor - self._initial
+            or (
+                self._policy is FullPolicy.BACKPRESSURE
+                and checkpoint.overwritten != 0
+            )
         ):
             raise ValueError("checkpoint contains invalid ring cursors")
+        expected_highest = (
+            None
+            if checkpoint.producer_cursor == self._initial
+            else checkpoint.producer_cursor - 1
+        )
+        expected_reference = (
+            self._initial if expected_highest is None else expected_highest
+        )
+        if (
+            checkpoint.sequences.origin != self._initial
+            or checkpoint.sequences.reference != expected_reference
+            or checkpoint.sequences.highest_received != expected_highest
+        ):
+            raise ValueError(
+                "checkpoint tracker origin and high-water state do not match cursors"
+            )
         ranges = checkpoint.sequences.received_ranges
         expected = (
             ()

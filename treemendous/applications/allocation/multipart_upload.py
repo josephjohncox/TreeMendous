@@ -164,6 +164,9 @@ class MultipartUploadTracker:
         """Atomically restore a valid checkpoint from this upload tracker."""
         if not isinstance(checkpoint, MultipartCheckpoint):
             raise TypeError("checkpoint must be a MultipartCheckpoint")
+        self._allocator.validate_checkpoint_geometry(
+            checkpoint.allocator, reserved_ranges=()
+        )
         handles = {record.handle for record in checkpoint.allocator.records}
         staged: dict[int, CompletedPart] = {}
         for part in checkpoint.completed:
@@ -175,6 +178,7 @@ class MultipartUploadTracker:
                 or part.handle.owner != self._upload_id
                 or part.byte_range != expected
                 or part.handle.span != expected
+                or not isinstance(part.etag, str)
                 or not part.etag
                 or part.attempt <= 0
                 or part.part_number in staged

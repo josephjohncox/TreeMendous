@@ -80,6 +80,7 @@ class DatabasePageAllocator:
             raise ValueError("metadata_pages must be within the tablespace")
         reserved = (Span(0, metadata_pages),) if metadata_pages else ()
         self._allocator = ContiguousAllocator((0, total_pages), reserved=reserved)
+        self._reserved = reserved
         self._tablespace = tablespace
         self._page_size = page_size
         self._extents: dict[int, PageExtent] = {}
@@ -151,9 +152,25 @@ class DatabasePageAllocator:
         """Atomically restore a valid local checkpoint."""
         if not isinstance(checkpoint, DatabaseCheckpoint):
             raise TypeError("checkpoint must be a DatabaseCheckpoint")
+        self._allocator.validate_checkpoint_geometry(
+            checkpoint.allocator, reserved_ranges=self._reserved
+        )
         validate_coordinate(checkpoint.reuse_allocations, "reuse_allocations")
         if checkpoint.reuse_allocations < 0:
             raise ValueError("reuse_allocations must be nonnegative")
+        if any(not isinstance(span, Span) for span in checkpoint.freed_history):
+            raise TypeError("freed-page history must contain only Span values")
+        if any(
+            not self._allocator.domain.contains(span)
+            or any(
+                reserved.start < span.end and span.start < reserved.end
+                for reserved in self._reserved
+            )
+            for span in checkpoint.freed_history
+        ):
+            raise ValueError(
+                "freed-page history must stay within allocatable page geometry"
+            )
         history = self._merge(checkpoint.freed_history)
         if history != checkpoint.freed_history:
             raise ValueError("freed-page history must be normalized")
@@ -176,6 +193,12 @@ class DatabasePageAllocator:
             staged[extent.handle.allocation_id] = extent
         if len(staged) != len(handles):
             raise ValueError("checkpoint is missing page extent metadata")
+        if checkpoint.reuse_allocations < sum(
+            extent.reused for extent in staged.values()
+        ):
+            raise ValueError(
+                "reuse_allocations cannot be less than live reused extents"
+            )
         with self._lock:
             self._allocator.restore(checkpoint.allocator)
             self._extents = staged

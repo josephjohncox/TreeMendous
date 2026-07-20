@@ -10,6 +10,7 @@ from treemendous.applications._shared.allocation import (
     AllocationHandle,
     AllocatorCheckpoint,
     ContiguousAllocator,
+    ForeignAllocationError,
     FragmentationDiagnostics,
 )
 from treemendous.domain import Span, validate_coordinate, validate_length
@@ -76,6 +77,7 @@ class VirtualAddressSpace:
         self._allocator = ContiguousAllocator(
             (self._base_page, self._base_page + total_pages), reserved=reserved_pages
         )
+        self._reserved_pages = self._allocator.snapshot().reserved_ranges
         self._mappings: dict[int, VirtualMapping] = {}
         self._lock = RLock()
 
@@ -131,12 +133,14 @@ class VirtualAddressSpace:
         """Atomically move a movable mapping to an exact or selected address."""
         if not isinstance(mapping, VirtualMapping):
             raise TypeError("mapping must be a VirtualMapping")
-        if not mapping.movable:
-            raise ValueError("fixed mapping cannot be relocated")
-        if address == mapping.address:
-            return mapping
         with self._lock:
             self._require_live(mapping)
+            if owner != mapping.owner:
+                raise ForeignAllocationError("mapping belongs to another owner")
+            if not mapping.movable:
+                raise ValueError("fixed mapping cannot be relocated")
+            if address == mapping.address:
+                return mapping
             checkpoint = self._allocator.checkpoint()
             old_mappings = dict(self._mappings)
             try:
@@ -179,6 +183,9 @@ class VirtualAddressSpace:
         """Atomically restore a structurally valid local checkpoint."""
         if not isinstance(checkpoint, AddressSpaceCheckpoint):
             raise TypeError("checkpoint must be an AddressSpaceCheckpoint")
+        self._allocator.validate_checkpoint_geometry(
+            checkpoint.allocator, reserved_ranges=self._reserved_pages
+        )
         handles = {record.handle for record in checkpoint.allocator.records}
         staged: dict[int, VirtualMapping] = {}
         for mapping in checkpoint.mappings:
