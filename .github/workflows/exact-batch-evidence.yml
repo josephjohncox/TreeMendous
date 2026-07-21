@@ -110,7 +110,7 @@ jobs:
           rm -rf "$OUTPUT_DIR"
           mkdir -p "$OUTPUT_DIR"
           uv run --frozen --no-sync python \
-            tests/performance/exact_batch_benchmark.py \
+            -m tests.performance.exact_batch_benchmark \
             --samples "$EXACT_SAMPLES" \
             --target-operations 20000 \
             --output "$EXACT_JSON" \
@@ -141,12 +141,12 @@ jobs:
         run: |
           set -euo pipefail
           uv run --frozen --no-sync python \
-            scripts/verify_mutation_attribution.py "$SCALAR_JSON" \
+            -m scripts.verify_mutation_attribution "$SCALAR_JSON" \
             --expected-baseline "$BASELINE_SHA" \
             --expected-candidate "$CANDIDATE_SHA" \
             --require-samples "$SCALAR_SAMPLES"
           uv run --frozen --no-sync python \
-            scripts/verify_exact_batch_benchmark.py "$EXACT_JSON" \
+            -m scripts.verify_exact_batch_benchmark "$EXACT_JSON" \
             --expected-baseline "$BASELINE_SHA" \
             --expected-candidate "$CANDIDATE_SHA" \
             --require-samples "$EXACT_SAMPLES" \

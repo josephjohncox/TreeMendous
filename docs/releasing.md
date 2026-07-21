@@ -25,7 +25,7 @@ uv lock --check
 just check
 just validate
 just build
-uv run python scripts/verify_artifact_contents.py dist/*.whl dist/*.tar.gz
+uv run python -m scripts.verify_artifact_contents dist/*.whl dist/*.tar.gz
 ```
 
 `just check` enforces formatting, lint, typing, unit tests, and branch coverage.

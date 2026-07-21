@@ -50,6 +50,27 @@ def test_every_documented_just_command_exists() -> None:
     assert documented - recipes == set()
 
 
+def test_benchmark_commands_use_package_module_entry_points() -> None:
+    workflows = tuple(sorted((ROOT / ".github/workflows").glob("*.y*ml")))
+    tracked_markdown_result = subprocess.run(
+        ["git", "ls-files", "--", "*.md"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    tracked_documents = tuple(
+        ROOT / relative_path
+        for relative_path in tracked_markdown_result.stdout.splitlines()
+    )
+    assert tracked_documents
+    command_sources = (ROOT / "Justfile", *workflows, *tracked_documents)
+    for source in command_sources:
+        content = re.sub(r"\\\s*\n\s*", " ", source.read_text(encoding="utf-8"))
+        assert "python tests/performance/" not in content, source
+        assert "python scripts/verify_" not in content, source
+
+
 def test_documented_application_matrix_matches_scenario_manifest() -> None:
     documented = set(
         re.findall(

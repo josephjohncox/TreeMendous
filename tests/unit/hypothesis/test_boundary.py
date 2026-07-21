@@ -1,22 +1,36 @@
 from typing import List, Tuple
 
 import pytest
-from hypothesis import assume, given
+from hypothesis import assume, example, given
 from hypothesis import strategies as st
 
 from treemendous.basic.boundary import IntervalManager
 
 
-@given(
-    st.lists(
-        st.tuples(
-            st.integers(min_value=0, max_value=1000),
-            st.integers(min_value=0, max_value=1000),
-        ).filter(lambda x: x[0] < x[1])
-    )
-    .map(sorted)
-    .filter(lambda ops: all(ops[i][1] <= ops[i + 1][0] for i in range(len(ops) - 1)))
-)
+def _intervals_from_steps(steps: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+    intervals: List[Tuple[int, int]] = []
+    cursor = 0
+    for gap, length in steps:
+        start = cursor + gap
+        if start >= 1000:
+            break
+        end = min(start + length, 1000)
+        intervals.append((start, end))
+        cursor = end
+    return intervals
+
+
+_NON_OVERLAPPING_INTERVALS = st.lists(
+    st.tuples(
+        st.integers(min_value=0, max_value=50),
+        st.integers(min_value=1, max_value=100),
+    ),
+    max_size=40,
+).map(_intervals_from_steps)
+
+
+@example([(0, 10), (10, 20)])
+@given(_NON_OVERLAPPING_INTERVALS)
 def test_reserve_and_release_intervals(operations: List[Tuple[int, int]]) -> None:
     manager = IntervalManager()
     manager.release_interval(0, 1000)
@@ -46,8 +60,8 @@ def test_find_interval(point: int, length: int) -> None:
     manager.reserve_interval(400, 500)
 
     interval = manager.find_interval(point, length)
-    if interval:
-        assert interval.length >= length
+    if interval is not None:
+        assert interval.end - interval.start >= length
         assert interval.start >= point
         assert not (200 <= interval.start < 300 or 200 < interval.end <= 300)
         assert not (400 <= interval.start < 500 or 400 < interval.end <= 500)
@@ -93,7 +107,8 @@ def test_adjacent_intervals() -> None:
 
     # Should merge into single interval
     intervals = [(s, e) for s, (e, _) in manager.intervals.items()]
-    assert intervals == [(0, 200)]
+    expected = [(0, 200)]
+    assert intervals == expected
     assert manager.get_total_available_length() == 200
 
 
@@ -106,7 +121,8 @@ def test_overlapping_release() -> None:
     manager.release_interval(20, 80)
 
     intervals = [(s, e) for s, (e, _) in manager.intervals.items()]
-    assert intervals == [(0, 100)]
+    expected = [(0, 100)]
+    assert intervals == expected
     assert manager.get_total_available_length() == 100
 
 

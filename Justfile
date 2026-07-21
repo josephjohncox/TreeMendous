@@ -11,7 +11,7 @@ install-dev:
 build: install-dev
     rm -rf dist
     uv build
-    uv run python scripts/verify_artifact_contents.py dist
+    uv run python -m scripts.verify_artifact_contents dist
 
 clean-cpp:
     find build -mindepth 1 -maxdepth 1 ! -name benchmarks -exec rm -rf {} + 2>/dev/null || true
@@ -42,7 +42,7 @@ clean-metal:
     rm -rf treemendous/cpp/metal/resources
 
 verify-artifacts: install-dev
-    uv run python scripts/verify_artifact_contents.py dist wheelhouse
+    uv run python -m scripts.verify_artifact_contents dist wheelhouse
 
 test: install-dev
     uv run pytest
@@ -72,10 +72,10 @@ benchmark-attribution baseline_root candidate_root="." output="build/benchmarks/
         --output "{{output}}"
 
 verify-attribution artifact="build/benchmarks/mutation-attribution.json": install-dev
-    uv run python scripts/verify_mutation_attribution.py "{{artifact}}"
+    uv run python -m scripts.verify_mutation_attribution "{{artifact}}"
 
 gate-attribution artifact primary_ratio_limit regression_ratio_limit control_ratio_minimum control_ratio_maximum require_samples: install-dev
-    uv run python scripts/verify_mutation_attribution.py \
+    uv run python -m scripts.verify_mutation_attribution \
         "{{artifact}}" \
         --gate \
         --expected-primary-ratio-limit "{{primary_ratio_limit}}" \
@@ -94,30 +94,30 @@ benchmark-large output="build/benchmarks/large.json": build-cpp
     uv run python -m tests.performance.benchmark_suite --profile large --require-all-stable --output "{{output}}"
 
 test-gpu: install-dev
-    uv run python tests/performance/gpu_benchmark.py
+    uv run python -m tests.performance.gpu_benchmark
 
 test-gpu-quick: install-dev
-    uv run python tests/performance/gpu_benchmark.py --operations 100 --intervals 16
+    uv run python -m tests.performance.gpu_benchmark --operations 100 --intervals 16
 
 test-metal: install-dev
-    uv run python tests/performance/metal_benchmark.py
+    uv run python -m tests.performance.metal_benchmark
 
 test-metal-quick: install-dev
-    uv run python tests/performance/metal_benchmark.py --operations 100 --intervals 16
+    uv run python -m tests.performance.metal_benchmark --operations 100 --intervals 16
 
 benchmark: benchmark-standard benchmark-applications-standard
 
 benchmark-gpu-large: install-dev
-    uv run python tests/performance/gpu_benchmark.py --intervals 10000 --operations 5000
+    uv run python -m tests.performance.gpu_benchmark --intervals 10000 --operations 5000
 
 benchmark-gpu-quick: install-dev
-    uv run python tests/performance/gpu_benchmark.py --intervals 16 --operations 100
+    uv run python -m tests.performance.gpu_benchmark --intervals 16 --operations 100
 
 benchmark-gpu-focused: install-dev
-    uv run python tests/performance/gpu_benchmark.py --intervals 1000 --operations 5000
+    uv run python -m tests.performance.gpu_benchmark --intervals 1000 --operations 5000
 
 benchmark-batch backend="metal_boundary_summary": install-dev
-    uv run python tests/performance/batch_operations_benchmark.py --backend {{backend}}
+    uv run python -m tests.performance.batch_operations_benchmark --backend {{backend}}
 
 check-layout: install-dev
     uv run pytest tests/packaging/test_repository_layout.py -q

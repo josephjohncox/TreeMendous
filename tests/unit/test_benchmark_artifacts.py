@@ -167,7 +167,8 @@ def test_github_workflows_publish_verified_benchmark_triplets() -> None:
     for workflow in (ad_hoc, scheduled, pull_request):
         assert "canonical-local-mutation-throughput" in workflow
         assert "observed-fragmented-mutations" in workflow
-        assert "scripts/verify_benchmark_artifact.py" in workflow
+        assert "python -m scripts.verify_benchmark_artifact" in workflow
+        assert "python scripts/verify_benchmark_artifact.py" not in workflow
         assert "--require-all-stable" in workflow
         assert (
             "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"

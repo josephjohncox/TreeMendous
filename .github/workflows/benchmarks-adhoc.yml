@@ -92,7 +92,7 @@ jobs:
               --require-workload observed-fragmented-mutations
             )
           fi
-          uv run --no-sync python scripts/verify_benchmark_artifact.py \
+          uv run --no-sync python -m scripts.verify_benchmark_artifact \
             "$OUTPUT_JSON" \
             --expected-profile "$BENCHMARK_PROFILE" \
             --expected-section "$BENCHMARK_SECTION" \

@@ -362,3 +362,18 @@ def test_quick_scalar_gate_recomputes_ci_and_binds_candidate(
     )
     with pytest.raises(ValueError, match="does not match exact-batch candidate"):
         verifier.verify_scalar_attribution(scalar, expected_candidate=CANDIDATE)
+
+
+def test_exact_batch_workflow_uses_package_module_entry_points() -> None:
+    workflow = (
+        Path(__file__).parents[2] / ".github" / "workflows" / "exact-batch-evidence.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "-m tests.performance.exact_batch_benchmark" in workflow
+    assert "-m scripts.verify_mutation_attribution" in workflow
+    assert "-m scripts.verify_exact_batch_benchmark" in workflow
+    assert (
+        "python \\\n            tests/performance/exact_batch_benchmark.py"
+        not in workflow
+    )
+    assert "python \\\n            scripts/verify_" not in workflow

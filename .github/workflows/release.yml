@@ -69,7 +69,7 @@ jobs:
           python-version: "3.12"
       - run: uv sync --extra build --extra quality --extra test
       - run: uv build --sdist --out-dir artifacts
-      - run: uv run python scripts/verify_artifact_contents.py artifacts
+      - run: uv run python -m scripts.verify_artifact_contents artifacts
       # actions/upload-artifact v4
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -138,11 +138,11 @@ jobs:
       - name: Verify repaired manylinux wheel only
         if: runner.os == 'Linux'
         run: >-
-          uv run python scripts/verify_artifact_contents.py
+          uv run python -m scripts.verify_artifact_contents
           --require-manylinux artifacts
       - name: Verify platform wheel
         if: runner.os != 'Linux'
-        run: uv run python scripts/verify_artifact_contents.py artifacts
+        run: uv run python -m scripts.verify_artifact_contents artifacts
       - name: Clean install and arbitrary-CWD smoke
         shell: bash
         run: |
@@ -178,7 +178,7 @@ jobs:
         run: |
           count=$(find release-artifacts -name '*.tar.gz' | wc -l | tr -d ' ')
           test "$count" = 1
-      - run: uv run python scripts/verify_artifact_contents.py release-artifacts
+      - run: uv run python -m scripts.verify_artifact_contents release-artifacts
       # actions/upload-artifact v4
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

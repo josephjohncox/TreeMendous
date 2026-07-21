@@ -85,7 +85,7 @@ destruction. They exclude setup, validation/invariant snapshots, and `materializ
 materialization is reported separately. Ordinary runs are diagnostic:
 
 ```console
-python tests/performance/exact_batch_benchmark.py \
+python -m tests.performance.exact_batch_benchmark \
   --output build/benchmarks/exact-batch.json
 ```
 

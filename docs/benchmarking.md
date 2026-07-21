@@ -231,7 +231,7 @@ speedup intervals, and the fixed gates rather than trusting stored booleans.
 A local batch gate is explicitly callable with:
 
 ```bash
-uv run python tests/performance/exact_batch_benchmark.py \
+uv run python -m tests.performance.exact_batch_benchmark \
   --samples 20 \
   --output build/benchmarks/exact-batch.json \
   --enforce-hard-gates
