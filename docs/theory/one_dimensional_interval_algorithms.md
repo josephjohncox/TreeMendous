@@ -2,8 +2,9 @@
 
 Tree-Mendous represents free integer coordinates as a canonical set of half-open
 spans. The implementations differ in how they index those spans, which
-aggregates they maintain, and where they spend work. This document explains the
-algorithms. It does not claim that one backend wins every workload.
+aggregates they maintain, and where they spend work. This implementation guide
+complements the [formal model](one_dimensional_interval_formal_model.md). It does
+not claim that one backend wins every workload.
 
 ## Model and notation
 
@@ -30,10 +31,11 @@ with these invariants:
 3. `e_i < s_(i+1)`, so canonical spans neither overlap nor touch;
 4. the cached total, where present, equals `sum(e_i - s_i)`.
 
-Boundary-map and AVL implementations maintain this form directly. Some raw
-experimental or treap implementations may retain adjacent entries while
-representing the same union. `RangeSet` normalizes that backend state before it
-becomes observable through the stable API.
+Raw adjacency behavior is backend-specific. Boundary maps and `py_summary`
+coalesce touching spans. `py_avl_earliest` deliberately treats equality as
+non-overlap and may retain adjacent nodes; treap representations may do the
+same. `RangeSet` normalizes every raw backend state before it becomes observable
+through the stable API.
 
 The important workload variables are:
 
@@ -86,22 +88,24 @@ The name *boundary map* refers to indexing intervals by their left boundaries.
 It is not an endpoint-delta or sweep-line event map.
 
 An ordered predecessor search locates the only span that can cross the mutation
-start. The algorithm then moves forward through the affected neighborhood. At
-the data-structure level:
+start. The algorithm then moves forward through the affected neighborhood. For
+an unmanaged iterator-based balanced tree such as `std::map`, local release or
+reserve is `O(log n + k)`, earliest fit is `O(log n + s)` and worst-case `O(n)`,
+maintained total measure is `O(1)`, and full enumeration is `O(n)`. A managed
+mutation first locates the containing domain component, so the stable C++ path
+and public managed-domain validation add `O(log d)`: the complete mutation
+bound is `O(log d + log n + k)`.
 
-| Operation | Work |
-| --- | --- |
-| local release or reserve | `O(log n + k)` ordered navigation and affected entries |
-| earliest fit after a point | `O(log n + s)`, worst-case `O(n)` |
-| total free measure | `O(1)` when maintained incrementally |
-| enumerate all free spans | `O(n)` |
-
-Container details alter the constants. `py_boundary` uses
-`sortedcontainers.SortedDict`, whose blocked sorted lists avoid recursive Python
-tree walks and keep the representation small. A local mutation usually touches
-a predecessor, one or two current spans, and one insertion. That is why the
-plain Python boundary map can outperform more elaborate Python trees even
-though all of them have logarithmic search structures.
+Those bounds must not be copied mechanically onto `py_boundary`. Its
+`sortedcontainers.SortedDict` path performs one bisect, repeated rank-based
+`keys()[index]` access, `k` individual deletions, and one or two insertions.
+SortedContainers documents these operations as approximately logarithmic, but
+its segmented lists also incur block shifts and occasional split/merge work.
+The useful rigorous description is the ordered-map primitive count; the useful
+engineering description is the measured cost at the configured load factor. A
+local mutation usually touches a predecessor, one or two current spans, and one
+insertion, which is why the plain Python boundary map can outperform more
+elaborate Python trees despite weaker worst-case implementation bounds.
 
 The worst case still matters. A release covering the whole domain touches all
 `n` spans. A failed fit query can inspect all spans when no subtree or global
@@ -113,19 +117,27 @@ maximum proves that the request is impossible.
 `std::map<int64_t, int64_t>`. It uses checked signed 64-bit coordinate and
 measure arithmetic.
 
-The current mutation path does not copy the complete map. It first performs all
-fallible work:
+The Python exact-delta binding uses preview-then-mutate. It validates and
+converts the scalar arguments, asks the manager to preview the exact changed
+components without changing the map, constructs the Python `Span` and
+`MutationResult` objects, and only then calls the ordinary release or reserve
+mutation. Consequently Python result-construction failure occurs before the
+mutation. This is not a prepared transaction: the mutation performs its own
+ordered search and affected-range traversal after the preview.
 
-1. validate the request;
-2. scan the affected map range;
-3. compute checked changed and aggregate measures;
-4. allocate a new map node if a release or right split needs one.
+The ordinary mutation path itself does not copy the complete map. Before its
+commit it validates managed-domain containment, computes checked measure
+changes, and allocates any required insertion node. Its commit uses assignment,
+iterator erasure, and node insertion. Failed validation, checked arithmetic, or
+required allocation leaves the map and cached total unchanged. Common local
+mutation work is `O(log d + log n + k)` with constant mutation auxiliary state,
+but the exact-delta binding adds the separate preview traversal.
 
-It then commits with integer assignment and iterator erasure. A failed
-validation, checked arithmetic operation, or required allocation leaves the map
-and cached total unchanged. Common local mutations therefore perform
-`O(log n + k)` native work with constant auxiliary state rather than an `O(n)`
-transaction copy.
+Exact evidence is not constant-size: a delta with `z` components stores
+`Theta(z)` coordinate pairs in a native vector and publishes a Python tuple
+containing `z` `Span` objects. `get_intervals()` similarly creates a native
+vector of `n` pairs before pybind11 materializes Python values, so it requires
+`Theta(n)` time and output storage.
 
 Native speed comes from compiled loops, unboxed integers, and avoiding Python
 object creation inside the affected-range walk. `std::map` is still a
@@ -148,8 +160,10 @@ deletions, which gives deterministic `O(log n)` tree height.
 Earliest-fit search uses these summaries to reject a subtree when its longest
 span is too short or every span ends at or before the requested point. It then
 searches in order, so the first result is the earliest valid fit. Rotations must
-recompute the summaries bottom-up; a stale `max_length` can cause a false
-negative, while a stale `max_end` can defeat pruning.
+recompute the summaries bottom-up. Both fields are pruning upper bounds:
+underestimating either `max_length` or `max_end` can cause a false negative;
+overestimating either remains sound but defeats pruning. `min_start` is
+maintained but is not used by the current fit search.
 
 AVL mutation has higher Python constants than the boundary map. It allocates
 node objects, follows recursive calls, updates several fields on each ancestor,
@@ -184,24 +198,28 @@ whole-map summary. A geometry mutation marks the summary dirty. The first
 summary read scans all `n` spans; later reads return the cached value until the
 next effective mutation.
 
-For `q` summary reads between mutations, the aggregate summary cost is
-`O(n + q)`: one `O(n)` recomputation followed by `O(1)` cache hits. Alternating
-one mutation with one summary read remains `O(n)` per pair.
+For `q` summary reads between mutations in managed use, the aggregate summary
+cost is `O(n + q)`: one `O(n)` recomputation followed by `O(1)` cache hits.
+Alternating one mutation with one summary read remains `O(n)` per pair.
 
 Unmanaged raw use also tracks the union of every released region as a separate
-ordered boundary map. Materializing an immutable `ManagedDomain` is deferred
-until analytics need it, so constructing many disjoint spans does not rebuild a
-complete domain tuple after every release.
+ordered boundary map. Its first analytics read materializes an immutable
+`ManagedDomain` from `d` inferred components as well as scanning `n` free spans,
+so that read is `O(n + d)` and `q` reads cost `O(n + d + q)`. Materialization is
+deferred until analytics need it, so constructing many disjoint spans does not
+rebuild a complete domain tuple after every release.
 
-The reported fragmentation value is
+The reported fragmentation value is the floating-point evaluation of
 
 ```text
-1 - largest_free_span / total_free_measure
+(total_free_measure - largest_free_span) / total_free_measure
 ```
 
-when free measure is nonzero. It measures how concentrated free capacity is. It
-does not incorporate the application's request-size distribution and is not a
-universal allocation-failure predictor.
+when free measure is nonzero. This algebraically equivalent form avoids
+cancellation when the largest-span ratio rounds to one, although binary-float
+underflow remains possible at extreme integer magnitudes. It measures how
+concentrated free capacity is. It does not incorporate the application's
+request-size distribution and is not a universal allocation-failure predictor.
 
 ## Treaps
 
@@ -210,9 +228,15 @@ A treap combines two orders:
 1. span starts satisfy the binary-search-tree invariant;
 2. random priorities satisfy a heap invariant.
 
-Independent random priorities give expected logarithmic height, but the worst
-case remains linear. `py_treap` also stores subtree size and total measure, which
-support rank and random-sampling operations.
+For a fixed key set with independent continuous priorities, expected height is
+`Theta(log n)` and the worst case remains linear. `log2(n + 1)` is only an ideal
+balanced-tree baseline, not the treap's expected height. Reservation splits in
+the current implementations derive child priorities from the parent, so active
+priorities after arbitrary mutation histories are not IID. The theorem applies
+to fresh IID insertion states; seeded dynamic-height tests are structural smoke
+tests rather than proof of the probabilistic guarantee. `py_treap` also stores
+subtree size and total measure, which support rank and random-sampling
+operations.
 
 The current treap does not store a subtree maximum span length. Earliest fit can
 therefore search both subtrees and is worst-case `O(n)`. Randomization balances
@@ -232,18 +256,23 @@ The raw geometry backend is only one layer. `RangeSet` additionally owns:
 with the authoritative-geometry capability return exact mutation deltas and
 answer fit, overlap, allocation, and structural-statistics queries directly.
 For those payload-free sets, a successful mutation updates the cached total and
-invalidates a read-through interval snapshot; it does not publish a copied
-Python interval tuple. If the next operation observes geometry, `RangeSet`
-patches the cached tuple from that single mutation. Several effective mutations
-without an intervening observation instead trigger one authoritative backend
-snapshot when geometry is next requested. Repeated `intervals()` calls do no
-further publication work until another effective mutation.
+invalidates a read-through interval snapshot; it does not immediately publish a
+copied Python interval tuple. If the next operation observes geometry,
+`RangeSet` patches the cached tuple from that single mutation. The patch rebuilds
+only changed `IntervalResult` objects, but tuple slicing and unpacking still copy
+or scan `Theta(n)` references. Several effective mutations without an
+intervening observation instead trigger one authoritative backend snapshot when
+geometry is next requested. Repeated valid `intervals()` calls return the same
+cached tuple in `Theta(1)`.
 
 Fallback backends and payload-bearing sets retain the immutable Python geometry
 cache. Bisect locates a local change in `O(log n)`, but publishing a successful
 fallback mutation copies tuple references around the changed slice, which is
-`O(n)`. The fallback preserves one common semantic implementation for payload
-algebra and for backends without exact deltas.
+`Theta(n)`. The fallback preserves one common semantic implementation for
+payload algebra and for backends without exact deltas. `snapshot()` is a
+separate cost: `RangeSnapshot.__post_init__` currently recomputes the interval
+sum, so every snapshot is `Theta(n)` even when the tuple cache was already
+valid.
 
 The stable C++ boundary backend also accepts the normalized managed domain at
 construction. It validates geometry mutations and overlap queries against that
@@ -307,13 +336,16 @@ story.
 
 ## Choosing a backend by workload
 
-| Workload | Useful first choice | Reason |
-| --- | --- | --- |
-| high-rate local geometry churn | `py_boundary` or `cpp_boundary` | compact local boundary updates |
-| portable Python with lazy analytics | `py_boundary_summary` | boundary-map mutations and cached read bursts |
-| repeated earliest-fit searches | `py_avl_earliest` | maximum-length and endpoint pruning |
-| rich analytics and best-fit exploration | `py_summary` | per-node composable summaries |
-| rank or random interval sampling | `py_treap` | subtree-size augmentation |
+- For high-rate local geometry churn, start with `py_boundary` or
+  `cpp_boundary`; both provide compact local boundary updates.
+- For portable Python with lazy analytics, try `py_boundary_summary`; it pairs
+  boundary-map mutation with cached read bursts.
+- For repeated earliest-fit searches, try `py_avl_earliest`; maximum-length and
+  endpoint summaries provide pruning certificates.
+- For rich analytics and best-fit exploration, try `py_summary`; it maintains
+  composable per-node summaries.
+- For rank or random interval sampling, try `py_treap`; it maintains subtree
+  sizes.
 
 This table predicts mechanisms, not winners. Run the correctness-checked
 benchmark with the application's fragmentation, mutation/query ratio, domain

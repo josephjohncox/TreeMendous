@@ -63,6 +63,27 @@ benchmark-smoke output="build/benchmarks/smoke.json": build-cpp
 benchmark-standard output="build/benchmarks/standard.json": build-cpp
     uv run python -m tests.performance.benchmark_suite --profile standard --require-all-stable --output "{{output}}"
 
+benchmark-attribution baseline_root candidate_root="." output="build/benchmarks/mutation-attribution.json": install-dev
+    uv run python -m tests.performance.mutation_attribution \
+        --baseline-root "{{baseline_root}}" \
+        --candidate-root "{{candidate_root}}" \
+        --samples 20 \
+        --warmups 1 \
+        --output "{{output}}"
+
+verify-attribution artifact="build/benchmarks/mutation-attribution.json": install-dev
+    uv run python scripts/verify_mutation_attribution.py "{{artifact}}"
+
+gate-attribution artifact primary_ratio_limit regression_ratio_limit control_ratio_minimum control_ratio_maximum require_samples: install-dev
+    uv run python scripts/verify_mutation_attribution.py \
+        "{{artifact}}" \
+        --gate \
+        --expected-primary-ratio-limit "{{primary_ratio_limit}}" \
+        --expected-regression-ratio-limit "{{regression_ratio_limit}}" \
+        --expected-control-ratio-minimum "{{control_ratio_minimum}}" \
+        --expected-control-ratio-maximum "{{control_ratio_maximum}}" \
+        --require-samples "{{require_samples}}"
+
 benchmark-applications-smoke output="build/benchmarks/applications-smoke.json": install-dev
     uv run python -m tests.performance.application_benchmark_suite --profile smoke --output "{{output}}"
 

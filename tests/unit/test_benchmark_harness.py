@@ -625,9 +625,14 @@ def test_multiprocess_harness_initializes_warmups_in_sampling_worker(monkeypatch
         "sum of declared public-call durations"
         in report["methodology"]["execution_timing"]
     )
-    assert "validation_overhead" in report["results"]["py_boundary"]
-    operation = report["results"]["py_boundary"]["operation_latency"]["add"]
+    backend_result = report["results"]["py_boundary"]
+    assert "validation_overhead" in backend_result
+    assert len(backend_result["execution"]["samples_ns"]) == 20
+    assert len(backend_result["setup"]["samples_ns"]) == 20
+    assert len(backend_result["validation_overhead"]["samples_ns"]) == 20
+    operation = backend_result["operation_latency"]["add"]
     assert operation["per_run_median"]["independent_runs"] == 20
+    assert len(operation["per_run_median"]["samples_ns"]) == 20
     assert "confidence_95_ns" not in operation["invocation_distribution_descriptive"]
 
 

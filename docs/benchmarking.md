@@ -134,9 +134,88 @@ replay.
 
 The sampled generic measurements use at least 20 independent runs, warmups,
 deterministically randomized backend order, medians, median absolute deviation,
-and a run-level bootstrap interval for the median. The single timed replay used
-for each large qualification is only a load observation. No profile enforces a
-wall-clock regression threshold.
+and a run-level bootstrap interval for the median. Schema v4 persists the raw
+run-level setup, execution, validation, and per-operation run-median timing
+samples as well as their robust summaries. The single timed replay used for
+each large qualification is only a load observation. No generic profile enforces a wall-clock regression
+threshold.
+
+## Paired native-mutation attribution
+
+`tests.performance.mutation_attribution` is a separate paired diagnostic. It
+force-builds both source roots before sampling, hashes the imported native
+extensions, records compiler output and build flags, and alternates
+baseline/candidate process order for each of at least 20 paired rounds. Every
+cumulative boundary uses the standard 64-interval, 1,000-mutation, seed-50
+trace. Setup, callable resolution, Python argument-object construction,
+evidence freezing, checksums, and final-state validation are outside timing for
+every boundary. Checked scalar conversion and all work performed by the invoked
+production callable remain inside timing.
+
+The cumulative boundaries are:
+
+- `binding_no_result`: `release_interval` / `reserve_interval`, without exact
+  result construction;
+- `binding_result`: production `release_with_delta` / `reserve_with_delta`,
+  including the native preview, Python `Span` and `MutationResult` construction,
+  and the subsequent native mutation;
+- `adapter`: authoritative `BackendAdapter` dispatch and result type enforcement;
+- `rangeset_public`: production `RangeSet.add` / `discard`, including public
+  validation, locking, guarding, accounting, and cache invalidation;
+- `observed_publication`: public mutation immediately followed by `snapshot()`.
+
+Differences between cumulative boundaries are diagnostic; policy evaluation
+uses directly timed boundaries rather than subtracting noisy samples. An
+untimed replay of every boundary must reproduce the same per-operation changed
+spans, `changed_length`, `fully_covered`, counters, and final-state checksum.
+A full comparison also pairs every exact standard representative workload for
+`cpp_boundary`, the five Python environmental controls, and four focused traces:
+no-op mutations, allocation hits, fragmented unbounded allocation misses, and
+bounded allocation misses.
+
+For paired round `i`, the comparator records
+`r_i = candidate_ns_i / baseline_ns_i`, takes `median(r_i)`, and bootstraps the
+paired ratios with 10,000 fixed-seed resamples. It persists raw paired samples,
+paired ratios, median improvement, the versioned exact representative-workload
+manifest and digest, trace digests, and each round's timing, semantic,
+environment, and binary-provenance evidence. The verifier reconstructs the
+standard manifest independently and recomputes those derived fields.
+
+There is no repository-wide attribution threshold. Diagnostic generation takes
+no policy by default and exits successfully after writing a semantically valid
+artifact even when an explicitly supplied policy classifies performance as
+`fail` or `inconclusive`. A full, clean, environment-matched run can become
+promotion-eligible only when all policy inputs were explicitly supplied. Dirty
+and `--quick` runs remain diagnostic. The explicit gate command additionally
+requires the caller's expected limits and rejects dirty, quick, failed, or
+inconclusive artifacts; there is no dirty bypass.
+
+```bash
+# Diagnostic generation and structural/derived-field verification.
+just benchmark-attribution /absolute/path/to/baseline \
+  /absolute/path/to/candidate \
+  build/benchmarks/mutation-attribution.json
+just verify-attribution build/benchmarks/mutation-attribution.json
+
+# To produce a policy-bearing artifact, pass all four policy bounds explicitly.
+uv run python -m tests.performance.mutation_attribution \
+  --baseline-root /absolute/path/to/baseline \
+  --candidate-root /absolute/path/to/candidate \
+  --samples 20 --warmups 1 \
+  --primary-ratio-limit "$PRIMARY_LIMIT" \
+  --regression-ratio-limit "$REGRESSION_LIMIT" \
+  --control-ratio-minimum "$CONTROL_MIN" \
+  --control-ratio-maximum "$CONTROL_MAX" \
+  --output build/benchmarks/mutation-attribution.json
+
+just gate-attribution build/benchmarks/mutation-attribution.json \
+  "$PRIMARY_LIMIT" "$REGRESSION_LIMIT" "$CONTROL_MIN" "$CONTROL_MAX" 20
+```
+
+The comparator writes canonical JSON, Markdown, and a SHA-256 sidecar. It does
+not publish an operations-per-second headline: throughput is derived only from
+measured elapsed time and the declared operation count in the artifact. Native
+attribution is not a mandatory scheduled parent-commit promotion gate.
 
 ## Concrete application suite
 
@@ -177,9 +256,9 @@ for 30 days.
 
 The weekly benchmark workflow runs the generic standard sections and the
 concrete application standard suite. Each generated bundle is checksum-checked
-before its 90-day GitHub Actions artifact is published. Generic sections are sampled,
-qualification catalog, qualification lease, qualification scheduling, legacy
-applications, and payload. The concrete job writes
+before its 90-day GitHub Actions artifact is published. Generic sections are
+sampled, qualification catalog, qualification lease, qualification scheduling,
+legacy applications, and payload. The concrete job writes
 `applications-standard.json` and its companion files. Weekly artifacts are
 retained for 90 days.
 
@@ -204,5 +283,6 @@ uv run python -m tests.performance.application_benchmark_suite \
 Artifacts include the commit, runtime and platform metadata, exact profile,
 scenario or workload dimensions, validation evidence, and methodology. Jobs
 fail on semantic divergence, missing required backends, invalid application
-samples, incomplete writes, or checksum failures. They do not fail merely
-because a wall-clock value changed.
+samples, incomplete writes, or checksum failures. Generic and application jobs
+do not fail merely because a wall-clock value changed. Attribution policy is
+only enforced when a caller explicitly invokes its gate verifier.
