@@ -23,8 +23,8 @@ just benchmark-applications-standard
 ```
 
 `just benchmark` runs both standard suites. `just run-examples` executes the 50
-application examples plus the basic and multidimensional examples from an
-unrelated working directory.
+application examples plus the basic, exact-batch, and multidimensional examples
+from an unrelated working directory.
 
 A manually dispatched GitHub Actions run publishes verified generic benchmark
 artifacts for 90 days:

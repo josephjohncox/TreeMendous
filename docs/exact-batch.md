@@ -24,7 +24,8 @@ The public names are `ExactBatchRangeSet`, `MutationOpcode`, immutable
 `BatchMutation`, immutable `BatchLimits`, `PackedMutationResults`, and
 `BatchLimitError`. An exact-batch range set owns independent geometry. It has no
 payloads, payload policy, allocation operation, or generic range-query API.
-Its only operations are `mutate`, `mutate_packed`, `snapshot`, and `domain`.
+Its only operations are `mutate`, `mutate_packed`, and `snapshot`, plus the
+read-only `domain` and `limits` properties.
 
 A managed domain is non-empty and normalized by the canonical `ManagedDomain`
 rules. All endpoints and aggregate measures must fit signed 64-bit integers.
@@ -58,9 +59,9 @@ instance in the child.
 
 ## Limits
 
-Every instance has checked `BatchLimits`. Values must be positive integers, must
-not be booleans, and must fit Python's signed size range. Conservative defaults
-are:
+Every instance has checked `BatchLimits`, available unchanged through its
+read-only `limits` property. Values must be positive integers, must not be
+booleans, and must fit Python's signed size range. Conservative defaults are:
 
 | limit | default |
 | --- | ---: |

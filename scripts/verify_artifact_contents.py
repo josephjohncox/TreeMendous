@@ -24,6 +24,11 @@ GENERATED_SUFFIXES = {
 WHEEL_FORBIDDEN_GENERATED_SUFFIXES = {".o", ".obj", ".a", ".lib", ".air"}
 SOURCE_SUFFIXES = {".cpp", ".h", ".cu", ".mm", ".metal"}
 LOCAL_METADATA_NAMES = {".context.md", ".gitrepo"}
+STABLE_TYPING_API_FILES = {
+    "treemendous/py.typed",
+    "treemendous/exact_batch.py",
+    "treemendous/cpp/_exact_batch.pyi",
+}
 REQUIRED_SDIST = {
     "MANIFEST.in",
     "pyproject.toml",
@@ -35,12 +40,12 @@ REQUIRED_SDIST = {
     "docs/theory/box_index_denotation.md",
     "examples/README.md",
     "examples/basic_rangeset.py",
+    "examples/exact_batch.py",
     "examples/multidimensional/core/linear_box_index.py",
     "treemendous/cpp/interval_types.h",
     "treemendous/cpp/boundary_bindings.cpp",
     "treemendous/cpp/exact_batch_bindings.cpp",
-    "treemendous/cpp/_exact_batch.pyi",
-    "treemendous/exact_batch.py",
+    *STABLE_TYPING_API_FILES,
     "treemendous/cpp/gpu/boundary_summary_gpu.cu",
     "treemendous/cpp/gpu/boundary_summary_gpu_bindings.cpp",
     "treemendous/cpp/metal/boundary_summary_metal.h",
@@ -149,6 +154,7 @@ def verify_wheel(path: Path, *, require_manylinux: bool = False) -> dict[str, ob
     missing_cpu = sorted(
         stem for stem in CPU_EXTENSIONS if not _contains_extension(names, stem)
     )
+    missing_stable_api = sorted(STABLE_TYPING_API_FILES - names)
     metal_present = _contains_extension(names, METAL_EXTENSION)
     resource_present = METAL_RESOURCE in names
     metal_mismatch = metal_present != resource_present
@@ -158,6 +164,7 @@ def verify_wheel(path: Path, *, require_manylinux: bool = False) -> dict[str, ob
         leaked_sources
         or generated
         or missing_cpu
+        or missing_stable_api
         or metal_mismatch
         or (require_manylinux and generic_linux)
         or missing_manylinux
@@ -165,7 +172,8 @@ def verify_wheel(path: Path, *, require_manylinux: bool = False) -> dict[str, ob
         raise ArtifactPolicyError(
             "wheel policy failure: "
             f"sources={leaked_sources!r}; generated={generated!r}; "
-            f"cpu_extensions={missing_cpu!r}; metal_extension={metal_present!r}; "
+            f"cpu_extensions={missing_cpu!r}; stable_api={missing_stable_api!r}; "
+            f"metal_extension={metal_present!r}; "
             f"metal_resource={resource_present!r}; generic_linux={generic_linux!r}; "
             f"manylinux_required={require_manylinux!r}"
         )

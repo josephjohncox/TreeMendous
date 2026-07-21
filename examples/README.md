@@ -17,8 +17,8 @@ process-local engines. Browse them by family:
   fencing-aware lease engines
 
 The [application documentation index](../docs/applications.md) links each
-example to its scenario contract. Run every application example plus the two
-examples below from an unrelated working directory with:
+example to its scenario contract. Run every application example plus the stable
+and experimental examples below from an unrelated working directory with:
 
 ```bash
 just run-examples
@@ -37,6 +37,16 @@ API:
 
 ```bash
 uv run python examples/basic_rangeset.py
+```
+
+## Stable exact-batch API
+
+[`exact_batch.py`](exact_batch.py) demonstrates ergonomic ordered mutations,
+exact per-row results, explicit resource limits, and restoration of the initial
+snapshot:
+
+```bash
+uv run python examples/exact_batch.py
 ```
 
 ## Experimental multidimensional API

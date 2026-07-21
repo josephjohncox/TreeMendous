@@ -288,6 +288,20 @@ print(json.dumps({
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout.strip() == "allocated [9, 11)"
 
+    exact_example = readme.parent / "examples/exact_batch.py"
+    completed = subprocess.run(
+        [str(python), str(exact_example)],
+        cwd=unrelated,
+        env=clean_environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert (
+        completed.stdout.strip() == "changed=12,4,4,12 restored=True max_operations=4"
+    )
+
     application_example = (
         readme.parent / "examples/applications/partitioning/document_search.py"
     )

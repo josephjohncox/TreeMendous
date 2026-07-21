@@ -1,6 +1,6 @@
 [project]
 name = "treemendous"
-version = "1.0.0"
+version = "1.1.0"
 description = "Integer range sets with interchangeable Python and native CPU backends."
 authors = [{ name = "Joseph Cox", email = "joseph@codensity.io" }]
 license = "BSD-3-Clause"
@@ -61,6 +61,8 @@ where = ["."]
 include = ["treemendous*"]
 
 [tool.setuptools.package-data]
+"treemendous" = ["py.typed"]
+"treemendous.cpp" = ["*.pyi"]
 "treemendous.cpp.metal" = ["resources/*.metallib"]
 
 [tool.setuptools.exclude-package-data]

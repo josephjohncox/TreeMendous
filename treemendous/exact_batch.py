@@ -140,6 +140,11 @@ class ExactBatchRangeSet:
         """Return the normalized immutable managed domain."""
         return self._domain
 
+    @property
+    def limits(self) -> BatchLimits:
+        """Return the immutable resource limits configured for this instance."""
+        return self._limits
+
     def mutate(self, operations: Iterable[BatchMutation]) -> tuple[MutationResult, ...]:
         """Validate and apply an ergonomic ordered batch atomically."""
         try:

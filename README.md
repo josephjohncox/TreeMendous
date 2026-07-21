@@ -65,6 +65,39 @@ assert cpus.first_fit(2, not_before=0).data == "cpu"
 See [API and payload policies](docs/api.md) for join and ordered policies.
 All raw backends store geometry only.
 
+## Stable exact batches
+
+Version 1.1 adds `treemendous.exact_batch`, a specialized native CPU API for
+exact, ordered, whole-batch-atomic geometry mutation. It is deliberately not
+exported from `treemendous`, is not a backend or protocol capability, and does
+not support payloads, allocation, or generic queries.
+
+```python
+from treemendous import Span
+from treemendous.exact_batch import (
+    BatchLimits,
+    BatchMutation,
+    ExactBatchRangeSet,
+    MutationOpcode,
+)
+
+limits = BatchLimits(max_operations=2)
+ranges = ExactBatchRangeSet((0, 64), initially_available=False, limits=limits)
+results = ranges.mutate([
+    BatchMutation(MutationOpcode.ADD, 8, 20),
+    BatchMutation(MutationOpcode.DISCARD_REQUIRE_COVERED, 10, 14),
+])
+assert [result.changed for result in results] == [(Span(8, 20),), (Span(10, 14),)]
+assert [result.changed_length for result in results] == [12, 4]
+```
+
+Rows run in input order and either the complete batch publishes or the exact
+pre-batch snapshot remains visible. Per-instance `BatchLimits` bound operation
+count, live intervals, changed spans, packed-result bytes, and staging work.
+See the [exact-batch contract](docs/exact-batch.md), the
+[API summary](docs/api.md#stable-exact-batch-api), and the
+[executable example](examples/exact_batch.py).
+
 ## Application engines
 
 The application registry is an explicit namespace and is not re-exported from
@@ -113,7 +146,8 @@ Details and probe behavior are in [Backends](docs/backends.md).
 - [Multidimensional batch and device acceleration design](docs/theory/multidimensional_acceleration.md)
 - [Contributing and quality gates](docs/contributing.md)
 - [Release process](docs/releasing.md)
-- [Stable executable example](examples/basic_rangeset.py)
+- [Stable `RangeSet` example](examples/basic_rangeset.py)
+- [Stable exact-batch example](examples/exact_batch.py)
 - [Experimental multidimensional example](examples/multidimensional/core/linear_box_index.py)
 
 ## Development
@@ -130,7 +164,7 @@ contracts, and bytecode/artifact-policy sanity. The generic backend suites are
 The concrete engine suites are `just benchmark-applications-smoke` and
 `just benchmark-applications-standard`. `just benchmark` runs both standard
 suites, and `just run-examples` executes all 50 application examples plus the
-basic and multidimensional examples. All benchmark recipes write JSON,
+basic, exact-batch, and multidimensional examples. All benchmark recipes write JSON,
 Markdown, and checksum artifacts. See [Benchmarking](docs/benchmarking.md) and
 [Contributing](docs/contributing.md).
 

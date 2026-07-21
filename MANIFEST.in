@@ -8,6 +8,7 @@ include setup_metal.py
 include Justfile
 
 recursive-include treemendous *.py *.pyi
+include treemendous/py.typed
 recursive-include treemendous/cpp *.cpp *.h *.cu *.mm *.metal
 recursive-include tests *.py
 recursive-include scripts *.py
