@@ -34,9 +34,10 @@ just run-examples
 `just check` enforces formatting, lint, typing, focused/full non-hardware tests,
 documentation and packaging contracts, and branch coverage. `just validate`
 reruns the test contract and compiles Python sources. For 1.1.0, the reusable
-exact-batch evidence workflow must also pass against baseline tag `v1.0.0`; its
-correctness-attested benchmark, scaling, and scalar-attribution artifacts are
-release evidence rather than a substitute for the test suite.
+exact-batch evidence workflow must also pass against immutable pre-promotion
+commit `fdb4efd5f407717c8e18b94e6f4c21cbfb8e5daa`; its correctness-attested
+benchmark, scaling, and scalar-attribution artifacts are release evidence rather
+than a substitute for the test suite.
 
 ## Platform artifacts
 
@@ -77,7 +78,7 @@ A skipped CUDA lane does not promote or validate CUDA.
    publication.
 5. Create and push the matching tag, for example `v1.1.0`.
 6. Let the release workflow aggregate, verify, run exact-batch evidence against
-   `v1.0.0`, and publish all artifacts once.
+   the immutable pre-promotion commit, and publish all artifacts once.
 
 Do not upload artifacts manually from a platform build job. Do not run multiple
 publishers for one release.

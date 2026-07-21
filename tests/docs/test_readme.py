@@ -114,6 +114,7 @@ def test_release_tag_contract_tracks_the_releasable_major_version() -> None:
     ) in workflow
     assert workflow.count("persist-credentials: false") == 5
     assert workflow.count("enable-cache: false") == 4
+    assert "baseline-ref: fdb4efd5f407717c8e18b94e6f4c21cbfb8e5daa" in workflow
     assert 'version = "1.1.0"' in (ROOT / "pyproject.toml").read_text()
 
 

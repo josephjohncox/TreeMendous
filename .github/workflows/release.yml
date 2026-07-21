@@ -92,11 +92,11 @@ jobs:
             --requirement /tmp/treemendous-core-requirements.txt
 
   exact-batch-evidence:
-    name: Exact-batch evidence against v1.0.0
+    name: Exact-batch evidence against pre-promotion main
     needs: version
     uses: ./.github/workflows/exact-batch-evidence.yml
     with:
-      baseline-ref: v1.0.0
+      baseline-ref: fdb4efd5f407717c8e18b94e6f4c21cbfb8e5daa
 
   sdist:
     name: Build the only sdist
