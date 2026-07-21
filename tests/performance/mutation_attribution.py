@@ -254,15 +254,18 @@ def representative_workload_manifest() -> dict[str, Any]:
         _workload_manifest_entry(workload)
         for workload in benchmark_profile("standard").sampled_workloads
     ]
-    body = json.loads(
-        json.dumps(
-            {
-                "schema": REPRESENTATIVE_MANIFEST_SCHEMA,
-                "profile": "standard",
-                "workloads": workloads,
-            }
+    try:
+        body = json.loads(
+            json.dumps(
+                {
+                    "schema": REPRESENTATIVE_MANIFEST_SCHEMA,
+                    "profile": "standard",
+                    "workloads": workloads,
+                }
+            )
         )
-    )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("representative workload manifest is not JSON-safe") from exc
     return {**body, "digest": _checksum(body)}
 
 
@@ -565,7 +568,9 @@ def _build_root(source_root: Path) -> dict[str, str]:
         text=True,
     )
     build_output = "\n".join((completed.stdout, completed.stderr))
-    normalized = build_output.replace(str(source_root.resolve()), "<ROOT>")
+    normalized = build_output.replace(
+        str(Path(sys.prefix).resolve()), "<PYTHON_ENV>"
+    ).replace(str(source_root.resolve()), "<ROOT>")
     compiler_lines = [
         line.strip()
         for line in normalized.splitlines()
@@ -1039,6 +1044,8 @@ def compare_roots(
         for label in ("baseline", "candidate")
     )
     primary = layer_comparisons[PRIMARY_LAYER]["classification"]
+    controls_failed = controls_valid is not None and not controls_valid
+    controls_passed = controls_valid is not None and controls_valid
     regression_gates = [
         comparison
         for name, comparison in layer_comparisons.items()
@@ -1064,13 +1071,13 @@ def compare_roots(
     elif (
         primary == "fail"
         or any(item["classification"] == "fail" for item in regression_gates)
-        or controls_valid is False
+        or controls_failed
     ):
         status = "fail"
     elif (
         primary == "pass"
         and all(item["classification"] == "pass" for item in regression_gates)
-        and controls_valid is True
+        and controls_passed
     ):
         status = "pass"
     else:

@@ -333,6 +333,36 @@ def test_malformed_commit_is_diagnostic_and_never_promotion_eligible(
         _verify_gate(report)
 
 
+def test_build_provenance_normalizes_shared_python_environment_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    baseline_root = tmp_path / "baseline"
+    candidate_root = Path(attribution.sys.prefix).resolve().parent
+
+    def fake_run(
+        command: list[str], *, cwd: Path, check: bool, capture_output: bool, text: bool
+    ) -> subprocess.CompletedProcess[str]:
+        assert check and capture_output and text
+        compiler_output = (
+            f"clang++ -I{attribution.sys.prefix}/include "
+            f"-c {cwd}/treemendous/cpp/boundary_bindings.cpp "
+            "-o build/boundary.o\n"
+        )
+        return subprocess.CompletedProcess(command, 0, compiler_output, "")
+
+    monkeypatch.setattr(attribution.subprocess, "run", fake_run)
+
+    baseline = attribution._build_root(baseline_root)
+    candidate = attribution._build_root(candidate_root)
+
+    assert baseline == candidate
+    assert "<PYTHON_ENV>/include" in baseline["compiler_invocations"]
+    assert (
+        str(Path(attribution.sys.prefix).resolve())
+        not in baseline["compiler_invocations"]
+    )
+
+
 def test_failed_git_status_is_recorded_as_unclean(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
