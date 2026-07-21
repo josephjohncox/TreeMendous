@@ -1,11 +1,11 @@
-name: Experimental exact-batch evidence
+name: Exact-batch production evidence
 
 on:
   pull_request:
     paths:
       - ".github/workflows/exact-batch-evidence.yml"
       - "docs/benchmarking.md"
-      - "docs/experimental-exact-batch.md"
+      - "docs/exact-batch.md"
       - "Justfile"
       - "MANIFEST.in"
       - "pyproject.toml"
@@ -16,7 +16,7 @@ on:
       - "setup_metal.py"
       - "tests/performance/**"
       - "tests/unit/test_exact_batch_benchmark_artifact.py"
-      - "tests/unit/test_experimental_exact_batch.py"
+      - "tests/unit/test_exact_batch.py"
       - "tests/unit/test_mutation_attribution.py"
       - "treemendous/**"
       - "uv.lock"
@@ -99,7 +99,7 @@ jobs:
       - name: Run focused correctness and evidence contracts
         run: >-
           uv run --frozen --no-sync pytest -q
-          tests/unit/test_experimental_exact_batch.py
+          tests/unit/test_exact_batch.py
           tests/performance/test_exact_batch_benchmark.py
           tests/unit/test_exact_batch_benchmark_artifact.py
 
@@ -201,7 +201,7 @@ jobs:
           scalar = json.loads(Path(os.environ["SCALAR_JSON"]).read_text())
           public = scalar["layers"]["rangeset_public"]
           gates = exact["gates"]
-          print("## Verified experimental exact-batch evidence\n")
+          print("## Verified stable exact-batch evidence\n")
           print(f"- Candidate: `{os.environ['CANDIDATE_SHA']}`")
           print(f"- Scalar baseline: `{os.environ['BASELINE_SHA']}`")
           workload_digest = exact["workload_manifest"]["digest"]

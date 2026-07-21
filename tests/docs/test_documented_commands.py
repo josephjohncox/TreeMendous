@@ -53,15 +53,24 @@ def test_every_documented_just_command_exists() -> None:
 def test_benchmark_commands_use_package_module_entry_points() -> None:
     workflows = tuple(sorted((ROOT / ".github/workflows").glob("*.y*ml")))
     tracked_markdown_result = subprocess.run(
-        ["git", "ls-files", "--", "*.md"],
+        [
+            "git",
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--",
+            "*.md",
+        ],
         cwd=ROOT,
         check=True,
         capture_output=True,
         text=True,
     )
     tracked_documents = tuple(
-        ROOT / relative_path
+        path
         for relative_path in tracked_markdown_result.stdout.splitlines()
+        if (path := ROOT / relative_path).is_file()
     )
     assert tracked_documents
     command_sources = (ROOT / "Justfile", *workflows, *tracked_documents)

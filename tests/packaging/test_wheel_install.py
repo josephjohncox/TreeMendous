@@ -91,20 +91,19 @@ print(json.dumps({'backend': 'cpp_boundary', 'free': ranges.snapshot().total_fre
     assert smoke_output["free"] == 90
 
     exact_batch_code = """
-from array import array
 from treemendous import Span
-from treemendous.experimental.exact_batch import ExactBatchRangeSet, MutationOpcode
+from treemendous.exact_batch import BatchMutation, ExactBatchRangeSet, MutationOpcode
 
 ranges = ExactBatchRangeSet((0, 64), initially_available=False)
-rows = array('q', [
-    MutationOpcode.ADD, 0, 8,
-    MutationOpcode.DISCARD, 2, 6,
-    MutationOpcode.ADD, 2, 6,
-    MutationOpcode.DISCARD_REQUIRE_COVERED, 8, 12,
-])
-results = ranges.mutate_packed(rows)
-assert results.changed_lengths.tolist() == [8, 4, 4, 0]
-assert results.materialize()[1].changed == (Span(2, 6),)
+rows = [
+    BatchMutation(MutationOpcode.ADD, 0, 8),
+    BatchMutation(MutationOpcode.DISCARD, 2, 6),
+    BatchMutation(MutationOpcode.ADD, 2, 6),
+    BatchMutation(MutationOpcode.DISCARD_REQUIRE_COVERED, 8, 12),
+]
+results = ranges.mutate(rows)
+assert [result.changed_length for result in results] == [8, 4, 4, 0]
+assert results[1].changed == (Span(2, 6),)
 assert ranges.snapshot().intervals[0].span == Span(0, 8)
 """
     subprocess.run(

@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import tarfile
+import tomllib
 import zipfile
 from pathlib import Path
 
@@ -23,6 +24,13 @@ from scripts.verify_artifact_contents import (
 from setup import PortableBuildPy
 
 pytestmark = pytest.mark.packaging
+
+
+def test_stable_exact_batch_requires_subinterpreter_safe_pybind11() -> None:
+    project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    requirement = "pybind11>=3.0.0"
+    assert requirement in project["build-system"]["requires"]
+    assert requirement in project["project"]["optional-dependencies"]["build"]
 
 
 def _sdist(path: Path, names: set[str]) -> None:
@@ -92,9 +100,8 @@ def test_sdist_policy_rejects_local_metadata(tmp_path: Path, leaked: str) -> Non
         "treemendous/cpp/metal/boundary_summary_metal.metal",
         "treemendous/cpp/exact_batch_bindings.cpp",
         "treemendous/cpp/_exact_batch.pyi",
-        "treemendous/experimental/__init__.py",
-        "treemendous/experimental/exact_batch.py",
-        "docs/experimental-exact-batch.md",
+        "treemendous/exact_batch.py",
+        "docs/exact-batch.md",
     ],
 )
 def test_sdist_policy_requires_every_backend_rebuild_input(

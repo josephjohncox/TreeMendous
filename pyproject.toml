@@ -20,7 +20,7 @@ classifiers = [
 dependencies = ["sortedcontainers>=2.4.0"]
 
 [project.optional-dependencies]
-build = ["build>=1.2.2", "pybind11>=2.13.6", "setuptools>=83.0.0"]
+build = ["build>=1.2.2", "pybind11>=3.0.0", "setuptools>=83.0.0"]
 quality = [
   "mypy>=1.15.0",
   "pip-audit>=2.8.0",
@@ -53,7 +53,7 @@ markers = [
 
 
 [build-system]
-requires = ["setuptools>=83.0.0", "pybind11>=2.13.6", "wheel"]
+requires = ["setuptools>=83.0.0", "pybind11>=3.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

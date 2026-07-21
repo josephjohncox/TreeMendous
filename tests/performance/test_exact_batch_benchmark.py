@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from array import array
 from typing import Any
 
 import pytest
 
 from tests.performance import exact_batch_benchmark as benchmark
 from treemendous import BackendUnavailableError, Span
-from treemendous.experimental.exact_batch import MutationOpcode
+from treemendous.exact_batch import MutationOpcode
 
 pytestmark = pytest.mark.benchmark
 
@@ -85,6 +84,5 @@ def test_cpp_boundary_is_the_only_scalar_baseline(
 
 def test_packed_rows_use_exact_native_int64_layout() -> None:
     packed = benchmark._packed(benchmark.trace_for_size(4))
-    assert isinstance(packed, array)
-    assert packed.typecode == "q"
-    assert len(packed) == 12
+    assert type(packed) is bytes
+    assert len(packed) == 12 * 8

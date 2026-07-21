@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Paired benchmark for the experimental exact whole-batch CPU mutation path."""
+"""Paired benchmark for the stable exact whole-batch CPU mutation path."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from typing import Any
 
 from tests.performance.mutation_attribution import paired_statistics
 from treemendous import BackendUnavailableError, Span, create_range_set
-from treemendous.experimental.exact_batch import ExactBatchRangeSet, MutationOpcode
+from treemendous.exact_batch import ExactBatchRangeSet, MutationOpcode
 
 BATCH_SIZES = (1, 2, 4, 8, 16, 32, 64)
 DOMAIN = (0, 1_024)
@@ -115,11 +115,14 @@ def mixed_trace() -> Trace:
     return trace_for_size(64)
 
 
-def _packed(trace: Trace) -> array[int]:
-    return array(
+def _packed(trace: Trace) -> bytes:
+    values = array(
         "q",
         (value for opcode, span in trace for value in (opcode, span.start, span.end)),
     )
+    if values.itemsize != 8:
+        raise RuntimeError("native signed long long is not 64 bits")
+    return values.tobytes()
 
 
 def _new_exact() -> ExactBatchRangeSet:
@@ -176,7 +179,7 @@ def _assert_initial_state(snapshot: Any, *, label: str) -> None:
         )
 
 
-def _validate(trace: Trace, packed_trace: array[int]) -> Any:
+def _validate(trace: Trace, packed_trace: bytes) -> Any:
     """Validate exact per-row semantics and the restorative state invariant."""
     exact = _new_exact()
     scalar = _new_scalar()

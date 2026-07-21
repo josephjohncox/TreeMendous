@@ -369,6 +369,8 @@ def test_exact_batch_workflow_uses_package_module_entry_points() -> None:
         Path(__file__).parents[2] / ".github" / "workflows" / "exact-batch-evidence.yml"
     ).read_text(encoding="utf-8")
 
+    assert workflow.startswith("name: Exact-batch production evidence\n")
+    assert "Verified stable exact-batch evidence" in workflow
     assert "-m tests.performance.exact_batch_benchmark" in workflow
     assert "-m scripts.verify_mutation_attribution" in workflow
     assert "-m scripts.verify_exact_batch_benchmark" in workflow

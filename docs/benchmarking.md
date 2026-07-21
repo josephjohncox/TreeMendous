@@ -217,10 +217,11 @@ not publish an operations-per-second headline: throughput is derived only from
 measured elapsed time and the declared operation count in the artifact. Native
 attribution is not a mandatory scheduled parent-commit promotion gate.
 
-## Experimental exact-batch evidence
+## Exact-batch evidence
 
-The opt-in exact whole-batch experiment has a separate path-filtered pull-request
-and manual workflow. Its batch-local artifact is not interchangeable with the
+The stable specialized exact whole-batch module has a separate path-filtered
+pull-request and manual workflow. Its batch-local artifact retains the existing
+schema in this phase and is not interchangeable with the
 stable native-mutation attribution report. The exact-batch producer writes
 canonical JSON, Markdown, and a SHA-256 sidecar containing raw paired samples,
 the exact candidate commit and clean state, compiler/build/native-binary metadata,
