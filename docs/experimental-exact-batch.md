@@ -85,17 +85,43 @@ destruction. They exclude setup, validation/invariant snapshots, and `materializ
 materialization is reported separately. Ordinary runs are diagnostic:
 
 ```console
-python tests/performance/exact_batch_benchmark.py --output report.json
+python tests/performance/exact_batch_benchmark.py \
+  --output build/benchmarks/exact-batch.json
 ```
 
-Absolute gates are explicitly callable with `--enforce-hard-gates`. Promotion
-requires all of the following without lowering thresholds:
+When an output is requested, the benchmark atomically publishes canonical JSON,
+a concise Markdown summary, and a SHA-256 sidecar. The JSON binds the exact
+candidate commit and clean-worktree state, runtime/compiler/build and native
+binary metadata, the independently reconstructable restorative workload manifest
+and digest, raw paired samples, bootstrap methodology, fixed thresholds, and all
+locally callable gate derivations. Standard output remains the complete diagnostic
+JSON. `scripts/verify_exact_batch_benchmark.py` rejects duplicate keys and
+recomputes the workload, every interval, speedup, throughput bound, and gate from
+raw samples; it also binds Markdown and the checksum to the canonical JSON bytes.
+
+`--enforce-hard-gates` is the local batch-only gate. It enforces, without lowering
+thresholds:
 
 - batch-16 throughput lower 95% bound at least 2 million logical operations/s;
 - batch-16 speedup lower 95% bound at least 2x stable scalar;
-- break-even lower 95% bound by batch size 4;
-- no more than 3% stable scalar regression, established independently with the
-  existing `mutation_attribution.py` baseline/candidate framework.
+- break-even lower 95% bound by batch size 4.
+
+Complete hosted promotion evidence additionally requires a separate, clean
+baseline/candidate `mutation_attribution.py --quick` artifact. The exact-batch
+verifier structurally verifies that artifact, independently recomputes the paired
+`rangeset_public` bootstrap interval, binds its candidate commit to the exact-batch
+artifact, and requires its upper 95% candidate/baseline bound to be at most 1.03.
+This bounded quick/layers comparison supports only the stable scalar regression
+gate. It omits representative and control workloads and must not be described as
+full scalar-promotion evidence. The fixed 1.03 threshold is not relaxed when a
+local or hosted run is inconclusive.
+
+The path-filtered `Experimental exact-batch evidence` pull-request/manual workflow
+builds the C++ CPU extensions, creates a clean baseline worktree, runs both paired
+measurements with 30 samples, verifies all six artifact files, enforces all four
+gates, retains the evidence for 90 days, and publishes the bound commits, digests,
+and gate values in the Actions summary. A failed or inconclusive scalar upper
+bound leaves promotion evidence incomplete.
 
 Sorted-vector staging is intentional, not a generic abstraction. Its cost scales
 with live interval count on every batch and therefore has a vector-scaling cliff:

@@ -43,7 +43,9 @@ class ExactBatchRangeSet:
     ) -> None:
         if not isinstance(initially_available, bool):
             raise TypeError("initially_available must be a bool")
-        normalized = domain if isinstance(domain, ManagedDomain) else ManagedDomain(domain)
+        normalized = (
+            domain if isinstance(domain, ManagedDomain) else ManagedDomain(domain)
+        )
         for span in normalized.spans:
             if not (_INT64_MIN <= span.start <= _INT64_MAX):
                 raise OverflowError("managed domain start is outside signed int64")

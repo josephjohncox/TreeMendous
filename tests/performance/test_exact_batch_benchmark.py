@@ -64,12 +64,12 @@ def test_batch_two_is_a_real_mutation_restore_pair_and_one_is_diagnostic() -> No
     results = exact.mutate_packed(benchmark._packed(trace2)).materialize()
     assert results[0].changed_length == results[1].changed_length == 4
     assert exact.snapshot() == benchmark._new_exact().snapshot()
-    assert benchmark.trace_for_size(1) == (
-        (MutationOpcode.ADD, Span(0, 8)),
-    )
+    assert benchmark.trace_for_size(1) == ((MutationOpcode.ADD, Span(0, 8)),)
 
 
-def test_cpp_boundary_is_the_only_scalar_baseline(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cpp_boundary_is_the_only_scalar_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     observed: list[str | None] = []
 
     def unavailable(*args: Any, **kwargs: Any) -> Any:

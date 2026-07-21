@@ -40,8 +40,7 @@ def stable_replay(rows: list[tuple[int, int, int]], initially_available: bool = 
             results.append(
                 ranges.discard(
                     Span(start, end),
-                    require_covered=opcode
-                    == MutationOpcode.DISCARD_REQUIRE_COVERED,
+                    require_covered=opcode == MutationOpcode.DISCARD_REQUIRE_COVERED,
                 )
             )
     return tuple(results), ranges.snapshot()
@@ -64,7 +63,9 @@ def test_ordered_exact_results_and_canonical_snapshot() -> None:
     assert len(result) == len(rows)
     assert result.materialize() == expected_results
     assert all(type(item) is MutationResult for item in result.materialize())
-    assert all(type(span) is Span for item in result.materialize() for span in item.changed)
+    assert all(
+        type(span) is Span for item in result.materialize() for span in item.changed
+    )
     assert manager.snapshot() == expected_snapshot
     assert type(manager.snapshot()) is RangeSnapshot
 
@@ -147,7 +148,9 @@ def test_indexed_operation_errors_are_atomic(
 
 
 @pytest.mark.parametrize("failure_index", range(5))
-def test_failure_after_each_staged_prefix_is_whole_batch_atomic(failure_index: int) -> None:
+def test_failure_after_each_staged_prefix_is_whole_batch_atomic(
+    failure_index: int,
+) -> None:
     valid = [(0, index, index + 1) for index in range(5)]
     rows = valid.copy()
     rows[failure_index] = (99, 0, 1)
@@ -264,17 +267,16 @@ def test_different_instances_can_enter_exporters_concurrently() -> None:
 
 
 def test_one_large_batch_equals_ordered_sub_batches() -> None:
-    rows = [
-        (index % 3, (index * 7) % 56, (index * 7) % 56 + 8)
-        for index in range(200)
-    ]
+    rows = [(index % 3, (index * 7) % 56, (index * 7) % 56 + 8) for index in range(200)]
     whole = ExactBatchRangeSet((0, 64), initially_available=False)
     split = ExactBatchRangeSet((0, 64), initially_available=False)
     whole_results = whole.mutate_packed(packed(rows)).materialize()
     split_results = tuple(
         result
         for offset in range(0, len(rows), 13)
-        for result in split.mutate_packed(packed(rows[offset : offset + 13])).materialize()
+        for result in split.mutate_packed(
+            packed(rows[offset : offset + 13])
+        ).materialize()
     )
     assert split_results == whole_results
     assert split.snapshot() == whole.snapshot()

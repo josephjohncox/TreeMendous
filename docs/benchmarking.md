@@ -217,6 +217,42 @@ not publish an operations-per-second headline: throughput is derived only from
 measured elapsed time and the declared operation count in the artifact. Native
 attribution is not a mandatory scheduled parent-commit promotion gate.
 
+## Experimental exact-batch evidence
+
+The opt-in exact whole-batch experiment has a separate path-filtered pull-request
+and manual workflow. Its batch-local artifact is not interchangeable with the
+stable native-mutation attribution report. The exact-batch producer writes
+canonical JSON, Markdown, and a SHA-256 sidecar containing raw paired samples,
+the exact candidate commit and clean state, compiler/build/native-binary metadata,
+and a versioned restorative workload manifest. The strict verifier reconstructs
+the workload and recomputes paired ratios, bootstrap intervals, throughput and
+speedup intervals, and the fixed gates rather than trusting stored booleans.
+
+A local batch gate is explicitly callable with:
+
+```bash
+uv run python tests/performance/exact_batch_benchmark.py \
+  --samples 20 \
+  --output build/benchmarks/exact-batch.json \
+  --enforce-hard-gates
+```
+
+That command covers only batch-4 break-even and batch-16 throughput/speedup. The
+hosted promotion lane additionally checks the fixed stable scalar regression gate
+against clean baseline and candidate commits. For bounded runtime it uses the
+existing mutation-attribution producer in `--quick` mode and independently
+recomputes the `rangeset_public` paired bootstrap interval. The upper 95%
+candidate/baseline bound must be no greater than 1.03. Quick mode intentionally
+omits representative workloads and Python controls, so this artifact is scoped
+only to stable scalar regression and is not full scalar-promotion evidence. An
+inconclusive interval fails the complete exact-batch promotion check; the 1.03
+limit is never widened.
+
+The workflow uploads both verified JSON/Markdown/checksum triplets for 90 days and
+records candidate/baseline commits, workload and JSON digests, and fixed gate
+values in the Actions summary. GitHub-hosted timing remains evidence for this
+bounded lane and workload, not a general machine-independent performance claim.
+
 ## Concrete application suite
 
 `tests.performance.application_benchmark_suite` is separate. It iterates the
