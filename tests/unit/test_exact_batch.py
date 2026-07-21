@@ -81,10 +81,11 @@ def test_ergonomic_batch_mutation_is_immutable_validated_and_exact() -> None:
         operation.start = 2  # type: ignore[misc]
     manager = ExactBatchRangeSet((0, 10), initially_available=False)
     results = manager.mutate([operation, BatchMutation(MutationOpcode.DISCARD, 2, 4)])
-    assert results == (
+    expected = (
         MutationResult((Span(1, 5),), 4, False),
         MutationResult((Span(2, 4),), 2, True),
     )
+    assert results == expected
     with pytest.raises(TypeError):
         manager.mutate([(0, 1, 2)])  # type: ignore[list-item]
 
@@ -114,15 +115,17 @@ def test_batch_mutation_rejects_invalid_spans(
 
 
 def test_opcode_and_native_abi_golden_values() -> None:
-    assert tuple(MutationOpcode) == (
+    expected_opcodes = (
         MutationOpcode.ADD,
         MutationOpcode.DISCARD,
         MutationOpcode.DISCARD_REQUIRE_COVERED,
     )
+    assert tuple(MutationOpcode) == expected_opcodes
     assert [member.value for member in MutationOpcode] == [0, 1, 2]
     expected = struct.pack("@qqq", 2, -7, 11)
     assert len(expected) == 24
-    assert packed([(2, -7, 11)]) == expected
+    actual = packed([(2, -7, 11)])
+    assert actual == expected
 
 
 def test_csr_buffers_are_owned_read_only_and_survive_owner_lifetimes() -> None:
@@ -133,10 +136,13 @@ def test_csr_buffers_are_owned_read_only_and_survive_owner_lifetimes() -> None:
     lengths = result.changed_lengths
     covered = result.fully_covered
     assert offsets.format == "Q" and offsets.tolist() == [0, 1, 2, 3]
-    assert spans.format == "q" and spans.shape == (3, 2)
+    assert spans.format == "q"
+    expected_shape = (3, 2)
+    assert spans.shape == expected_shape
     assert lengths.format == "q" and lengths.tolist() == [10, 4, 2]
     assert covered.format == "B" and covered.tolist() == [0, 1, 0]
-    assert all(view.readonly for view in (offsets, spans, lengths, covered))
+    views = [offsets, spans, lengths, covered]
+    assert all(view.readonly for view in views)
     with pytest.raises(TypeError):
         offsets[0] = 99
     del manager, result
@@ -341,6 +347,15 @@ def test_native_allocation_failpoints_preserve_exact_pre_state(failpoint: str) -
     manager._manager._set_failpoint(failpoint)
     with pytest.raises(MemoryError):
         manager.mutate_packed(packed([(0, 1, 2)]))
+    assert manager.snapshot() == before
+
+
+def test_ergonomic_materialization_failure_preserves_exact_pre_state() -> None:
+    manager = ExactBatchRangeSet((0, 8), initially_available=False)
+    before = manager.snapshot()
+    manager._manager._set_failpoint("materialized_results")
+    with pytest.raises(MemoryError):
+        manager.mutate([BatchMutation(MutationOpcode.ADD, 1, 2)])
     assert manager.snapshot() == before
 
 

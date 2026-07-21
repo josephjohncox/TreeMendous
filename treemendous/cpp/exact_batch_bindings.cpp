@@ -379,7 +379,15 @@ class ExactBatchManager {
         total_ = initially_available ? total : 0;
     }
 
-    py::object mutate(const py::handle& operations) {
+    py::object mutate_packed(const py::handle& operations) {
+        return mutate_impl(operations, false);
+    }
+
+    py::tuple mutate_materialized(const py::handle& operations) {
+        return mutate_impl(operations, true).cast<py::tuple>();
+    }
+
+    py::object mutate_impl(const py::handle& operations, bool materialize) {
         if (!PyBytes_CheckExact(operations.ptr()))
             throw py::type_error("operations must be exact immutable bytes");
         MutationGuard mutation_guard(mutation_active_);
@@ -556,8 +564,14 @@ class ExactBatchManager {
         auto packed = std::make_shared<PackedMutationResults>(
             packed_offsets, packed_spans, packed_lengths, packed_covered,
             operation_count, changed_spans.size());
-        maybe_fail("wrapper_preparation");
-        py::object prepared = py::cast(packed);
+        py::object prepared;
+        if (materialize) {
+            maybe_fail("materialized_results");
+            prepared = packed->materialize();
+        } else {
+            maybe_fail("wrapper_preparation");
+            prepared = py::cast(packed);
+        }
 
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
@@ -588,7 +602,7 @@ class ExactBatchManager {
         static const std::vector<std::string> names = {
             "operations_copy", "state_copy",       "result_reserve",
             "row_staging",    "packed_storage",   "python_bytes",
-            "wrapper_preparation"};
+            "wrapper_preparation", "materialized_results"};
         if (std::find(names.begin(), names.end(), name) == names.end())
             throw py::value_error("unknown exact-batch failpoint");
         std::lock_guard<std::mutex> lock(failpoint_mutex_);
@@ -684,7 +698,10 @@ PYBIND11_MODULE(_exact_batch, module) {
              py::arg("max_operations"), py::arg("max_live_intervals"),
              py::arg("max_changed_spans"), py::arg("max_result_bytes"),
              py::arg("max_work_units"))
-        .def("mutate_packed", &ExactBatchManager::mutate, py::arg("operations"))
+        .def("mutate_packed", &ExactBatchManager::mutate_packed,
+             py::arg("operations"))
+        .def("mutate_materialized", &ExactBatchManager::mutate_materialized,
+             py::arg("operations"))
         .def("snapshot_data", &ExactBatchManager::snapshot_data)
         .def("_set_failpoint", &ExactBatchManager::set_failpoint,
              py::arg("name"), py::arg("occurrence") = 0)

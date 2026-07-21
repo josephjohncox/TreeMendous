@@ -158,11 +158,15 @@ class ExactBatchRangeSet:
                 raise TypeError("operations must contain only BatchMutation values")
             if count >= self._limits.max_operations:
                 raise BatchLimitError("max_operations limit exceeded")
-            storage.extend(
-                _OPERATION.pack(int(operation.opcode), operation.start, operation.end)
-            )
+            try:
+                packed = _OPERATION.pack(
+                    int(operation.opcode), operation.start, operation.end
+                )
+            except struct.error as exc:  # defensive: BatchMutation is prevalidated
+                raise ValueError("operation cannot be encoded as signed int64") from exc
+            storage.extend(packed)
             count += 1
-        return self.mutate_packed(bytes(storage)).materialize()
+        return self._manager.mutate_materialized(bytes(storage))
 
     def mutate_packed(self, operations: bytes) -> PackedMutationResults:
         """Apply native-endian signed-int64 triples from exact immutable ``bytes``.
