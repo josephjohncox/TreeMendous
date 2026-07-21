@@ -30,14 +30,14 @@ INITIAL_INTERVAL_COUNT = 64
 ABSOLUTE_BATCH16_OPS_PER_SECOND = 2_000_000.0
 BATCH16_SPEEDUP = 2.0
 SCALAR_REGRESSION_LIMIT = 1.03
-SCHEMA = "treemendous-experimental-exact-batch-benchmark-v2"
+SCHEMA = "treemendous-exact-batch-benchmark-v3"
 WORKLOAD_SCHEMA = "treemendous-exact-batch-restorative-workload-v1"
 BOOTSTRAP_RESAMPLES = 10_000
 PAIRED_BOOTSTRAP_SEED = 50
 THROUGHPUT_BOOTSTRAP_SEED = 16
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
-Operation = tuple[int, Span]
+Operation = tuple[MutationOpcode, Span]
 Trace = tuple[Operation, ...]
 
 
@@ -208,7 +208,10 @@ def _validate(trace: Trace, packed_trace: bytes) -> Any:
 def _percentile(values: list[float], fraction: float) -> float:
     ordered = sorted(values)
     position = fraction * (len(ordered) - 1)
-    lower = int(position)
+    try:
+        lower = int(position)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError("percentile position must be finite") from exc
     upper = min(lower + 1, len(ordered) - 1)
     weight = position - lower
     return ordered[lower] * (1.0 - weight) + ordered[upper] * weight
@@ -239,7 +242,7 @@ def restorative_workload_manifest() -> dict[str, Any]:
                 "single-call-no-op-diagnostic" if batch_size == 1 else "restorative"
             ),
             "operations": [
-                [int(opcode), span.start, span.end]
+                [opcode.value, span.start, span.end]
                 for opcode, span in trace_for_size(batch_size)
             ],
         }
@@ -395,8 +398,9 @@ def _build_report(
             "batch_sizes": list(BATCH_SIZES),
             "workload": "deterministic per-size restorative traces; four-operation blocks preserve the exact initial state",
             "batch_1": "separately labelled no-op call-overhead diagnostic",
-            "timed_batch_layer": "buffer acquisition/copy, state staging, ordered execution, packed allocation, atomic commit, packed-result destruction",
-            "excluded": "manager/setup construction, invariant snapshots, validation, and materialize",
+            "timed_batch_layer": "buffer acquisition/copy, state staging, ordered execution, packed allocation, atomic commit, and packed-result destruction except one retained validation result per sample",
+            "post_timing_validation": "the last timed packed result and both timed instances are checked against canonical per-row results and final state outside timing",
+            "excluded": "manager/setup construction, invariant snapshots, post-timing validation, and materialize",
         },
         "workload_manifest": restorative_workload_manifest(),
         "rows": rows,
@@ -428,6 +432,10 @@ def run_benchmark(
         trace = trace_for_size(batch_size)
         packed_trace = _packed(trace)
         expected_state = _validate(trace, packed_trace)
+        oracle = _new_scalar()
+        expected_results = _scalar_results(oracle, trace)
+        if oracle.snapshot() != expected_state:
+            raise AssertionError("canonical result oracle changed the expected state")
         iterations = max(20, target_operations // batch_size)
         batch_samples: list[int] = []
         scalar_samples: list[int] = []
@@ -435,12 +443,18 @@ def run_benchmark(
             exact = _new_exact()
             scalar = _new_scalar()
 
-            def time_exact() -> int:
+            def time_exact() -> tuple[int, Any]:
+                last_result = None
                 started = time.perf_counter_ns()
                 for _ in range(iterations):
                     result = exact.mutate_packed(packed_trace)
-                    del result
-                return time.perf_counter_ns() - started
+                    if last_result is not None:
+                        del last_result
+                    last_result = result
+                elapsed = time.perf_counter_ns() - started
+                if last_result is None:
+                    raise AssertionError("timed exact loop produced no result")
+                return elapsed, last_result
 
             def time_scalar() -> int:
                 started = time.perf_counter_ns()
@@ -450,10 +464,16 @@ def run_benchmark(
 
             if sample % 2:
                 scalar_elapsed = time_scalar()
-                batch_elapsed = time_exact()
+                batch_elapsed, timed_packed_result = time_exact()
             else:
-                batch_elapsed = time_exact()
+                batch_elapsed, timed_packed_result = time_exact()
                 scalar_elapsed = time_scalar()
+            timed_exact_results = timed_packed_result.materialize()
+            timed_scalar_results = _scalar_results(scalar, trace)
+            if timed_exact_results != expected_results:
+                raise AssertionError("timed packed per-row results are not canonical")
+            if timed_scalar_results != expected_results:
+                raise AssertionError("timed scalar instance results are not canonical")
             if (
                 exact.snapshot() != expected_state
                 or scalar.snapshot() != expected_state
@@ -586,10 +606,10 @@ def main() -> int:
     if args.output:
         write_artifacts(report, args.output)
     print(encoded)
-    return int(
-        args.enforce_hard_gates
-        and not all(bool(gate["passed"]) for gate in report["gates"].values())
+    gate_failed = args.enforce_hard_gates and not all(
+        gate["passed"] for gate in report["gates"].values()
     )
+    return 1 if gate_failed else 0
 
 
 if __name__ == "__main__":

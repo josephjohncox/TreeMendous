@@ -220,14 +220,19 @@ attribution is not a mandatory scheduled parent-commit promotion gate.
 ## Exact-batch evidence
 
 The stable specialized exact whole-batch module has a separate path-filtered
-pull-request and manual workflow. Its batch-local artifact retains the existing
-schema in this phase and is not interchangeable with the
-stable native-mutation attribution report. The exact-batch producer writes
+pull-request and manual workflow. Its stable v3 batch-local artifact is not
+interchangeable with the stable native-mutation attribution report. The
+exact-batch producer writes
 canonical JSON, Markdown, and a SHA-256 sidecar containing raw paired samples,
 the exact candidate commit and clean state, compiler/build/native-binary metadata,
-and a versioned restorative workload manifest. The strict verifier reconstructs
-the workload and recomputes paired ratios, bootstrap intervals, throughput and
-speedup intervals, and the fixed gates rather than trusting stored booleans.
+and a versioned restorative workload manifest. One packed result from every
+timed sample is retained and materialized after timing; its exact per-row values
+and both timed instances' final states are checked against the canonical scalar
+oracle. Destruction for the other packed results remains timed, while the one
+retained result and all validation are excluded. Materialization has a separate
+reported timing. The strict verifier reconstructs the workload, compares JSON
+types exactly, and recomputes paired ratios, bootstrap intervals, throughput,
+speedup intervals, and fixed gates rather than trusting stored booleans.
 
 A local batch gate is explicitly callable with:
 
