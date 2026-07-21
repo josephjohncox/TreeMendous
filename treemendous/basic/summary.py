@@ -488,20 +488,29 @@ class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode]):
     def _merge_subtrees(
         self, left: SummaryIntervalNode | None, right: SummaryIntervalNode | None
     ) -> SummaryIntervalNode | None:
-        """Merge two subtrees"""
+        """Join two ordered AVL subtrees without assuming similar heights."""
         if not left:
             return right
         if not right:
             return left
 
-        # Find minimum node in right subtree
+        left_height = SummaryIntervalNode.get_height(left)
+        right_height = SummaryIntervalNode.get_height(right)
+        if left_height > right_height + 1:
+            left.right = self._merge_subtrees(left.right, right)
+            left.update_stats()
+            return self._rebalance(left)
+        if right_height > left_height + 1:
+            right.left = self._merge_subtrees(left, right.left)
+            right.update_stats()
+            return self._rebalance(right)
+
+        # Similar-height trees can be joined through the minimum right node.
         min_node = self._get_min(right)
         right = self._delete_min(right)
-
         min_node.left = left
         min_node.right = right
         min_node.update_stats()
-
         return self._rebalance(min_node)
 
     def _get_min(self, node: SummaryIntervalNode) -> SummaryIntervalNode:
@@ -520,25 +529,29 @@ class SummaryIntervalTree(IntervalTreeBase[SummaryIntervalNode]):
         return self._rebalance(node)
 
     def _rebalance(self, node: SummaryIntervalNode) -> SummaryIntervalNode:
-        """Rebalance AVL tree"""
+        """Repair balance after both single edits and bulk range deletion."""
         balance = self._get_balance(node)
-
         if balance > 1:
-            # Left heavy
             if self._get_balance(node.left) < 0:
                 node.left = self._rotate_left(node.left)
             rotated = self._rotate_right(node)
-            assert rotated is not None
+            if rotated is None:
+                raise RuntimeError("left-heavy node has no left child")
             node = rotated
+            if node.right is not None and abs(self._get_balance(node.right)) > 1:
+                node.right = self._rebalance(node.right)
+            node.update_stats()
         elif balance < -1:
-            # Right heavy
             if self._get_balance(node.right) > 0:
                 node.right = self._rotate_right(node.right)
             rotated = self._rotate_left(node)
-            assert rotated is not None
+            if rotated is None:
+                raise RuntimeError("right-heavy node has no right child")
             node = rotated
-
-        return node
+            if node.left is not None and abs(self._get_balance(node.left)) > 1:
+                node.left = self._rebalance(node.left)
+            node.update_stats()
+        return self._rebalance(node) if abs(self._get_balance(node)) > 1 else node
 
     def _get_balance(self, node: SummaryIntervalNode | None) -> int:
         """Get balance factor for AVL tree"""

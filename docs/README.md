@@ -26,6 +26,7 @@ evidence from generic stable-backend evidence.
 
 ## Project guides
 
+- [One-dimensional interval formal model](theory/one_dimensional_interval_formal_model.md)
 - [One-dimensional interval algorithms and performance](theory/one_dimensional_interval_algorithms.md)
 - [Experimental multidimensional `BoxIndex` semantics](theory/box_index_denotation.md)
 - [Experimental optimized multidimensional indexes](theory/optimized_box_indexes.md)
