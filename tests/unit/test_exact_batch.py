@@ -457,6 +457,104 @@ def test_hypothesis_differential_ordered_replay(
     assert exact.snapshot() == final
 
 
+_INT64_MIN = -(1 << 63)
+_INT64_MAX = (1 << 63) - 1
+_MALFORMED_DOMAIN = (
+    (_INT64_MIN, _INT64_MIN + 32),
+    (-32, 32),
+    (_INT64_MAX - 32, _INT64_MAX),
+)
+
+
+def _multi_component_replay(rows: list[tuple[int, int, int]]):
+    ranges = create_range_set(
+        _MALFORMED_DOMAIN,
+        backend="py_boundary",
+        initially_available=False,
+    )
+    results = []
+    for opcode, start, end in rows:
+        span = Span(start, end)
+        if opcode == MutationOpcode.ADD:
+            results.append(ranges.add(span))
+        else:
+            results.append(
+                ranges.discard(
+                    span,
+                    require_covered=(opcode == MutationOpcode.DISCARD_REQUIRE_COVERED),
+                )
+            )
+    return tuple(results), ranges.snapshot()
+
+
+@given(st.binary(max_size=24 * 12))
+@settings(max_examples=100, deadline=None)
+def test_malformed_immutable_bytes_never_publish_partial_state(blob: bytes) -> None:
+    manager = ExactBatchRangeSet(_MALFORMED_DOMAIN, initially_available=False)
+    before = manager.snapshot()
+    try:
+        observed = manager.mutate_packed(blob).materialize()
+    except (ValueError, OverflowError):
+        assert manager.snapshot() == before
+        return
+
+    rows = [tuple(row) for row in struct.iter_unpack("@qqq", blob)]
+    expected, final = _multi_component_replay(rows)
+    assert observed == expected
+    assert manager.snapshot() == final
+
+
+_VALID_EXTREME_ROWS = (
+    (0, _INT64_MIN, _INT64_MIN + 1),
+    (1, _INT64_MIN, _INT64_MIN + 1),
+    (0, -32, 32),
+    (2, -16, 16),
+    (1, -32, 0),
+    (0, _INT64_MAX - 1, _INT64_MAX),
+    (2, _INT64_MAX - 1, _INT64_MAX),
+)
+
+
+@given(st.lists(st.sampled_from(_VALID_EXTREME_ROWS), max_size=40))
+@settings(max_examples=75, deadline=None)
+def test_extreme_int64_multi_component_bytes_match_scalar_semantics(
+    rows: list[tuple[int, int, int]],
+) -> None:
+    manager = ExactBatchRangeSet(_MALFORMED_DOMAIN, initially_available=False)
+    observed = manager.mutate_packed(packed(rows)).materialize()
+    expected, final = _multi_component_replay(rows)
+    assert observed == expected
+    assert manager.snapshot() == final
+
+
+@given(
+    st.lists(st.sampled_from(_VALID_EXTREME_ROWS), min_size=1, max_size=30),
+    st.one_of(
+        st.tuples(
+            st.sampled_from((-1, 3, 99, _INT64_MIN, _INT64_MAX)),
+            st.just(-1),
+            st.just(1),
+        ),
+        st.sampled_from(
+            (
+                (0, _INT64_MIN, _INT64_MAX),
+                (1, -40, -20),
+                (2, 0, 0),
+            )
+        ),
+    ),
+)
+@settings(max_examples=75, deadline=None)
+def test_late_random_opcode_or_span_failure_is_atomic(
+    prefix: list[tuple[int, int, int]], invalid: tuple[int, int, int]
+) -> None:
+    manager = ExactBatchRangeSet(_MALFORMED_DOMAIN, initially_available=False)
+    before = manager.snapshot()
+    with pytest.raises((ValueError, OverflowError), match=rf"operation {len(prefix)}"):
+        manager.mutate_packed(packed([*prefix, invalid]))
+    assert manager.snapshot() == before
+
+
 @pytest.mark.skipif(not hasattr(signal, "setitimer"), reason="requires interval timers")
 def test_signal_interrupt_rolls_back_staged_mutation() -> None:
     manager = ExactBatchRangeSet(

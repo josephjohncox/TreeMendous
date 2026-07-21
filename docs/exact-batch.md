@@ -122,7 +122,32 @@ python -m tests.performance.exact_batch_benchmark \
   --output build/benchmarks/exact-batch.json
 ```
 
-The benchmark deliberately characterizes a 64-live-interval workload. Sorted
-vector staging scales with live interval count, so fragmented states and small
-batches can erase its advantage; the benchmark is not evidence for arbitrary
-state sizes.
+The original benchmark deliberately characterizes a 64-live-interval workload
+and retains its fixed batch-4 break-even, batch-16 2x speedup, and batch-16
+2,000,000-logical-operations/second gates.
+
+`tests.performance.exact_batch_scaling` separately qualifies the production
+sorted-vector envelope at 64, 1,000, 10,000, and 100,000 live intervals with a
+batch size of 16. Each case starts with N disjoint managed-domain components
+available. Restorative remove/re-add operations, strict rejections, and no-ops
+near the end of the vector make every timed call begin and end with exactly N
+intervals while exercising whole-state staging. The fixed production gate is
+the upper bound of the bootstrap 95% confidence interval for median batch
+latency at 100,000 intervals: no more than 10 ms. A clean candidate checkout
+can generate and verify the canonical triplet with:
+
+```console
+python -m tests.performance.exact_batch_scaling --samples 20 \
+  --output build/benchmarks/exact-batch-scaling.json --enforce-gate
+python -m scripts.verify_exact_batch_scaling \
+  build/benchmarks/exact-batch-scaling.json \
+  --expected-candidate "$(git rev-parse HEAD)" --require-samples 20 --enforce-gate
+```
+
+This is the supported performance envelope, not a general latency promise. The
+evidence covers one native CPU extension, immutable packed batches of 16, the
+fixed fragmented/restorative workload, and the recorded CI environment. It does
+not qualify larger live states, other batch sizes, arbitrary mutation shapes,
+concurrent load, or end-to-end application latency. Sorted-vector staging is
+linear in live interval count; the matrix intentionally exposes that scaling
+cliff rather than extrapolating the faster 64-interval result.

@@ -249,10 +249,30 @@ only to stable scalar regression and is not full scalar-promotion evidence. An
 inconclusive interval fails the complete exact-batch promotion check; the 1.03
 limit is never widened.
 
-The workflow uploads both verified JSON/Markdown/checksum triplets for 90 days and
-records candidate/baseline commits, workload and JSON digests, and fixed gate
-values in the Actions summary. GitHub-hosted timing remains evidence for this
-bounded lane and workload, not a general machine-independent performance claim.
+A separate scaling producer qualifies batch-16 calls over 64, 1,000, 10,000,
+and 100,000 disjoint live managed-domain components. Setup is excluded from
+timing. Deterministic remove/restore, strict-reject, and no-op rows target the
+end of the sorted vector, and every call begins and ends with N intervals. Every
+result row and final snapshot is checked against stable canonical semantics
+after timing. Each matrix case stores at least 20 raw batch-latency samples, a
+fixed-seed bootstrap median interval, logical throughput, packed-result bytes,
+process peak RSS, exact environment/commit/native-binary provenance, workload
+digests, and the production `BatchLimits` values.
+
+The fixed envelope gate requires the upper 95% median-latency bound for 100,000
+intervals and batch size 16 to be no greater than 10 ms. This bounded evidence
+makes the sorted-vector scaling cliff visible: staging work grows linearly with
+live interval count. It does not support extrapolation past 100,000 intervals or
+to different batch sizes, workloads, concurrency, machines, or application
+latency. The original 64-interval 2,000,000 operations/second, 2x batch-16,
+batch-4 break-even, and scalar-regression gates remain unchanged.
+
+The workflow uploads three verified JSON/Markdown/checksum triplets for 90 days:
+exact-batch, scoped scalar attribution, and scaling. All three bind the same
+candidate SHA. The Actions summary records candidate/baseline commits, workload
+and JSON digests, and fixed gate values. GitHub-hosted timing remains evidence
+for this bounded lane and workload, not a general machine-independent
+performance claim.
 
 ## Concrete application suite
 
