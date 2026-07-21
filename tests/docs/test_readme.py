@@ -112,6 +112,8 @@ def test_release_tag_contract_tracks_the_releasable_major_version() -> None:
         "uv run --frozen --no-sync pytest \\\n"
         "            tests/packaging/test_wheel_install.py -q"
     ) in workflow
+    assert workflow.count("persist-credentials: false") == 5
+    assert workflow.count("enable-cache: false") == 4
     assert 'version = "1.1.0"' in (ROOT / "pyproject.toml").read_text()
 
 
