@@ -107,6 +107,11 @@ def make_cpu_extensions() -> list[Pybind11Extension]:
     }
     return [
         Pybind11Extension(
+            "treemendous.cpp._exact_batch",
+            ["treemendous/cpp/exact_batch_bindings.cpp"],
+            **common,
+        ),
+        Pybind11Extension(
             "treemendous.cpp.boundary",
             ["treemendous/cpp/boundary_bindings.cpp"],
             **common,
