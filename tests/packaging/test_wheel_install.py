@@ -46,6 +46,7 @@ def test_wheel_clean_install_and_arbitrary_cwd(tmp_path: Path) -> None:
         check=True,
     )
     required_modules = (
+        "treemendous.cpp._exact_batch",
         "treemendous.cpp.boundary",
         "treemendous.cpp.treap",
         "treemendous.cpp.boundary_summary",
@@ -88,6 +89,30 @@ print(json.dumps({'backend': 'cpp_boundary', 'free': ranges.snapshot().total_fre
     except json.JSONDecodeError as exc:
         pytest.fail(f"wheel smoke produced invalid JSON: {result.stdout!r}: {exc}")
     assert smoke_output["free"] == 90
+
+    exact_batch_code = """
+from array import array
+from treemendous import Span
+from treemendous.experimental.exact_batch import ExactBatchRangeSet, MutationOpcode
+
+ranges = ExactBatchRangeSet((0, 64), initially_available=False)
+rows = array('q', [
+    MutationOpcode.ADD, 0, 8,
+    MutationOpcode.DISCARD, 2, 6,
+    MutationOpcode.ADD, 2, 6,
+    MutationOpcode.DISCARD_REQUIRE_COVERED, 8, 12,
+])
+results = ranges.mutate_packed(rows)
+assert results.changed_lengths.tolist() == [8, 4, 4, 0]
+assert results.materialize()[1].changed == (Span(2, 6),)
+assert ranges.snapshot().intervals[0].span == Span(0, 8)
+"""
+    subprocess.run(
+        [str(python), "-c", exact_batch_code],
+        cwd=unrelated,
+        env=clean_environment,
+        check=True,
+    )
 
     application_code = """
 import importlib

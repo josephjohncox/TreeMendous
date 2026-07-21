@@ -7,7 +7,7 @@ include setup_gpu.py
 include setup_metal.py
 include Justfile
 
-recursive-include treemendous *.py
+recursive-include treemendous *.py *.pyi
 recursive-include treemendous/cpp *.cpp *.h *.cu *.mm *.metal
 recursive-include tests *.py
 recursive-include scripts *.py

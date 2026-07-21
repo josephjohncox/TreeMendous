@@ -188,8 +188,12 @@ class AvailabilityStats:
                 self, "avg_chunk_size", self.total_free / self.free_chunks
             )
         if self.total_free and self.largest_chunk:
+            # Divide the free measure outside the largest chunk directly.
+            # This avoids cancellation when largest_chunk / total_free rounds to 1.0.
             object.__setattr__(
-                self, "fragmentation", 1.0 - self.largest_chunk / self.total_free
+                self,
+                "fragmentation",
+                (self.total_free - self.largest_chunk) / self.total_free,
             )
 
 

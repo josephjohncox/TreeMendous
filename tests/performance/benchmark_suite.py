@@ -21,7 +21,7 @@ from tests.performance.profiles import BenchmarkProfile, benchmark_profile
 from treemendous import BackendRegistry
 from treemendous.backends.types import Available, Maturity
 
-SCHEMA = "treemendous-validated-benchmark-suite-v3"
+SCHEMA = "treemendous-validated-benchmark-suite-v4"
 PROFILE_NAMES = ("smoke", "standard", "large")
 SECTION_NAMES = (
     "all",

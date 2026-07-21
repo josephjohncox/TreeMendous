@@ -10,7 +10,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "treemendous-validated-benchmark-suite-v3"
+from tests.performance.harness import timing_statistics
+
+SCHEMA = "treemendous-validated-benchmark-suite-v4"
 STABLE_BACKENDS = (
     "py_boundary",
     "py_avl_earliest",
@@ -36,13 +38,64 @@ def _strict_json(encoded: bytes) -> dict[str, Any]:
     def reject_constant(value: str) -> None:
         raise ValueError(f"non-finite JSON value is not permitted: {value}")
 
+    def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key is not permitted: {key}")
+            result[key] = value
+        return result
+
     try:
-        decoded = json.loads(encoded, parse_constant=reject_constant)
+        decoded = json.loads(
+            encoded,
+            parse_constant=reject_constant,
+            object_pairs_hook=reject_duplicates,
+        )
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise ValueError("benchmark JSON is invalid") from exc
     if not isinstance(decoded, dict):
         raise ValueError("benchmark JSON root must be an object")
     return decoded
+
+
+def _require_mapping(value: Any, description: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{description} must be an object")
+    return value
+
+
+def _verify_timing_samples(value: Any, description: str, expected_count: int) -> None:
+    timing = _require_mapping(value, description)
+    samples = timing.get("samples_ns")
+    if not isinstance(samples, list):
+        raise ValueError(f"{description} samples_ns must be an array")
+    if len(samples) != expected_count:
+        raise ValueError(f"{description} sample count is inconsistent")
+    if any(
+        isinstance(sample, bool)
+        or not isinstance(sample, int)
+        or sample <= 0
+        or sample > 2**63 - 1
+        for sample in samples
+    ):
+        raise ValueError(
+            f"{description} samples must be positive signed 64-bit integers"
+        )
+    expected = timing_statistics(samples)
+    for key, expected_value in (
+        ("independent_runs", expected.independent_runs),
+        ("median_ns", expected.median_ns),
+        ("median_absolute_deviation_ns", expected.median_absolute_deviation_ns),
+        ("confidence_95_ns", expected.confidence_95_ns),
+        ("p10_ns", expected.p10_ns),
+        ("p90_ns", expected.p90_ns),
+    ):
+        observed = timing.get(key)
+        if key == "confidence_95_ns" and isinstance(observed, list):
+            observed = tuple(observed)
+        if observed != expected_value:
+            raise ValueError(f"{description} has inconsistent {key}")
 
 
 def verify_artifact(
@@ -105,12 +158,58 @@ def verify_artifact(
     if not isinstance(sampled_reports, list):
         raise ValueError("sampled benchmark reports are missing")
     workload_names: list[str] = []
-    for item in sampled_reports:
-        if not isinstance(item, dict):
-            continue
+    for index, raw_item in enumerate(sampled_reports):
+        item = _require_mapping(raw_item, f"sampled report {index}")
         workload = item.get("workload")
-        if isinstance(workload, str):
-            workload_names.append(workload)
+        if not isinstance(workload, str) or not workload:
+            raise ValueError(f"sampled report {index} workload is invalid")
+        workload_names.append(workload)
+        methodology = _require_mapping(
+            item.get("methodology"), f"sampled report {workload} methodology"
+        )
+        independent_runs = methodology.get("independent_runs")
+        if (
+            isinstance(independent_runs, bool)
+            or not isinstance(independent_runs, int)
+            or independent_runs < 1
+        ):
+            raise ValueError(f"sampled report {workload} independent_runs is invalid")
+        results = _require_mapping(
+            item.get("results"), f"sampled report {workload} results"
+        )
+        if not results:
+            raise ValueError(f"sampled report {workload} results are empty")
+        for backend_id, raw_result in results.items():
+            result = _require_mapping(
+                raw_result, f"sampled report {workload}/{backend_id}"
+            )
+            for timing_name in ("execution", "setup", "validation_overhead"):
+                _verify_timing_samples(
+                    result.get(timing_name),
+                    f"sampled report {workload}/{backend_id}/{timing_name}",
+                    independent_runs,
+                )
+            operation_latency = _require_mapping(
+                result.get("operation_latency"),
+                f"sampled report {workload}/{backend_id}/operation_latency",
+            )
+            if not operation_latency:
+                raise ValueError(
+                    f"sampled report {workload}/{backend_id} operation latency is empty"
+                )
+            for operation, raw_latency in operation_latency.items():
+                latency = _require_mapping(
+                    raw_latency,
+                    f"sampled report {workload}/{backend_id}/{operation} latency",
+                )
+                _verify_timing_samples(
+                    latency.get("per_run_median"),
+                    (
+                        f"sampled report {workload}/{backend_id}/{operation} "
+                        "per-run median"
+                    ),
+                    independent_runs,
+                )
     workloads = tuple(workload_names)
     missing = tuple(name for name in required_workloads if name not in workloads)
     if missing:

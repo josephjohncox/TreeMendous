@@ -10,6 +10,7 @@ import platform
 import random
 import statistics
 import subprocess
+import sysconfig
 import time
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass
@@ -895,19 +896,28 @@ def benchmark_backends(
                 operation_run_medians.setdefault(kind, []).append(
                     round(statistics.median(values))
                 )
+        execution_samples = [sample.execution_ns for sample in backend_samples]
+        setup_samples = [sample.setup_ns for sample in backend_samples]
+        validation_samples = [sample.validation_ns for sample in backend_samples]
         results[backend_id] = {
-            "execution": asdict(
-                timing_statistics([sample.execution_ns for sample in backend_samples])
-            ),
-            "setup": asdict(
-                timing_statistics([sample.setup_ns for sample in backend_samples])
-            ),
-            "validation_overhead": asdict(
-                timing_statistics([sample.validation_ns for sample in backend_samples])
-            ),
+            "execution": {
+                **asdict(timing_statistics(execution_samples)),
+                "samples_ns": execution_samples,
+            },
+            "setup": {
+                **asdict(timing_statistics(setup_samples)),
+                "samples_ns": setup_samples,
+            },
+            "validation_overhead": {
+                **asdict(timing_statistics(validation_samples)),
+                "samples_ns": validation_samples,
+            },
             "operation_latency": {
                 kind: {
-                    "per_run_median": asdict(timing_statistics(run_medians)),
+                    "per_run_median": {
+                        **asdict(timing_statistics(run_medians)),
+                        "samples_ns": run_medians,
+                    },
                     "invocation_distribution_descriptive": asdict(
                         descriptive_timing_statistics(operation_invocations[kind])
                     ),
@@ -1020,13 +1030,56 @@ def environment_metadata() -> dict[str, str]:
             text=True,
             timeout=5,
         ).stdout.strip()
+        dirty = bool(
+            subprocess.run(
+                ["git", "status", "--porcelain"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            ).stdout.strip()
+        )
     except (FileNotFoundError, subprocess.SubprocessError):
         commit = "unknown"
+        dirty = True
+
+    affinity = "unavailable"
+    get_affinity = getattr(os, "sched_getaffinity", None)
+    if get_affinity is not None:
+        try:
+            affinity = ",".join(str(cpu) for cpu in sorted(get_affinity(0)))
+        except OSError:
+            pass
+
+    governor = "unavailable"
+    governor_path = "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"
+    try:
+        with open(governor_path, encoding="utf-8") as source:
+            governor = source.read().strip() or "unknown"
+    except OSError:
+        pass
+
+    build_flags = {
+        name: os.environ.get(name, "0")
+        for name in (
+            "TREE_MENDOUS_DISABLE_OPTIMIZATIONS",
+            "TREE_MENDOUS_LOCAL_NATIVE",
+            "TREE_MENDOUS_SANITIZERS",
+            "TREE_MENDOUS_GLIBCXX_DEBUG",
+        )
+    }
     return {
         "commit": commit,
+        "dirty": str(dirty).lower(),
         "python": platform.python_version(),
         "implementation": platform.python_implementation(),
+        "python_compiler": platform.python_compiler(),
         "platform": platform.platform(),
         "processor": platform.processor() or "unknown",
         "cpu_count": str(os.cpu_count() or "unknown"),
+        "cpu_affinity": affinity,
+        "cpu_governor": governor,
+        "cc": str(sysconfig.get_config_var("CC") or "unknown"),
+        "cflags": str(sysconfig.get_config_var("CFLAGS") or "unknown"),
+        "tree_mendous_build_flags": json.dumps(build_flags, sort_keys=True),
     }

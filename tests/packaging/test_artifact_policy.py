@@ -86,12 +86,32 @@ def test_sdist_policy_rejects_local_metadata(tmp_path: Path, leaked: str) -> Non
         verify_sdist(artifact)
 
 
-def test_sdist_policy_requires_every_backend_rebuild_input(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "treemendous/cpp/metal/boundary_summary_metal.metal",
+        "treemendous/cpp/exact_batch_bindings.cpp",
+        "treemendous/cpp/_exact_batch.pyi",
+        "treemendous/experimental/__init__.py",
+        "treemendous/experimental/exact_batch.py",
+        "docs/experimental-exact-batch.md",
+    ],
+)
+def test_sdist_policy_requires_every_backend_rebuild_input(
+    tmp_path: Path, missing: str
+) -> None:
     artifact = tmp_path / "treemendous-0.tar.gz"
-    missing = "treemendous/cpp/metal/boundary_summary_metal.metal"
     _sdist(artifact, REQUIRED_SDIST - {missing})
-    with pytest.raises(ArtifactPolicyError, match="boundary_summary_metal.metal"):
+    with pytest.raises(ArtifactPolicyError, match=missing.rsplit("/", 1)[-1]):
         verify_sdist(artifact)
+
+
+def test_wheel_policy_rejects_exact_batch_native_source(tmp_path: Path) -> None:
+    artifact = tmp_path / "treemendous-0-cp312-macosx.whl"
+    leaked = "treemendous/cpp/exact_batch_bindings.cpp"
+    _wheel(artifact, _cpu_extension_names() | {leaked})
+    with pytest.raises(ArtifactPolicyError, match="exact_batch_bindings.cpp"):
+        verify_wheel(artifact)
 
 
 @pytest.mark.parametrize("suffix", [".o", ".obj", ".a", ".lib", ".air"])
@@ -102,6 +122,14 @@ def test_wheel_policy_rejects_generated_host_artifacts(
     leaked = f"treemendous/cpp/leaked{suffix}"
     _wheel(artifact, _cpu_extension_names() | {leaked})
     with pytest.raises(ArtifactPolicyError, match=rf"leaked{suffix}"):
+        verify_wheel(artifact)
+
+
+def test_wheel_policy_requires_exact_batch_extension(tmp_path: Path) -> None:
+    artifact = tmp_path / "treemendous-0-cp312-macosx.whl"
+    names = _cpu_extension_names() - {"treemendous/cpp/_exact_batch.fake.so"}
+    _wheel(artifact, names)
+    with pytest.raises(ArtifactPolicyError, match="_exact_batch"):
         verify_wheel(artifact)
 
 

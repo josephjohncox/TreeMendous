@@ -136,12 +136,24 @@ class IntervalTree(Generic[R], IntervalTreeBase[R]):
         return node
 
     def _merge_subtrees(self, left: R | None, right: R | None) -> R | None:
+        """Join two ordered AVL subtrees without assuming similar heights."""
         if not left:
             return right
         if not right:
             return left
 
-        # Find the node with the minimum start in the right subtree
+        left_height = IntervalNode.get_height(left)
+        right_height = IntervalNode.get_height(right)
+        if left_height > right_height + 1:
+            left.right = self._merge_subtrees(self._typed_child(left.right), right)
+            left.update_stats()
+            return self._rebalance(left)
+        if right_height > left_height + 1:
+            right.left = self._merge_subtrees(left, self._typed_child(right.left))
+            right.update_stats()
+            return self._rebalance(right)
+
+        # Similar-height trees can be joined through the minimum right node.
         min_node = self._get_min(right)
         right = self._delete_min(right)
         min_node.left = left
@@ -176,22 +188,25 @@ class IntervalTree(Generic[R], IntervalTreeBase[R]):
         return current
 
     def _rebalance(self, node: R) -> R:
+        """Repair balance even when a bulk deletion changes height by more than one."""
         balance = self._get_balance(node)
         if balance > 1:
-            # Left heavy
             if self._get_balance(node.left) < 0:
-                # Left-Right case
                 node.left = self._rotate_left(self._typed_child(node.left))
-            # Left-Left case
             node = self._rotate_right(node)
+            right = self._typed_child(node.right)
+            if right is not None and abs(self._get_balance(right)) > 1:
+                node.right = self._rebalance(right)
+            node.update_stats()
         elif balance < -1:
-            # Right heavy
             if self._get_balance(node.right) > 0:
-                # Right-Left case
                 node.right = self._rotate_right(self._typed_child(node.right))
-            # Right-Right case
             node = self._rotate_left(node)
-        return node
+            left = self._typed_child(node.left)
+            if left is not None and abs(self._get_balance(left)) > 1:
+                node.left = self._rebalance(left)
+            node.update_stats()
+        return self._rebalance(node) if abs(self._get_balance(node)) > 1 else node
 
     def _get_balance(self, node: IntervalNode | None) -> int:
         if not node:
