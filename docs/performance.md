@@ -141,3 +141,23 @@ This is a staged roadmap, not functionality delivered by 1.1.1:
 
 No speculative runtime, storage, snapshot, or application-integration change is
 part of the 1.1.1 documentation and metadata patch.
+
+## Experimental concrete-application backend qualification
+
+The Phase D experiment routes the private factories used by the contiguous and
+disk allocators, scoped lease pools, claim ledger, and partition runtime through
+the semantically probed backend registry. It exercises construction and every
+checkpoint/rebuild/restore path without changing public constructors or stable
+runtime selection. Run the bounded matrix and then independently verify its
+canonical JSON, Markdown, checksum, derivations, and provenance:
+
+```bash
+just experiment-application-backend-matrix
+just verify-application-backend-matrix
+```
+
+The command evaluates every locally available stable deterministic signed-64
+CORE backend against `py_boundary`, uses 20 balanced paired blocks per cell,
+and records fail-closed evidence for ineligible requests. A `REJECTED` result is
+expected evidence, not a command failure; no application backend injection is
+retained unless all fixed initial and confirmation gates pass.

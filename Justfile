@@ -63,6 +63,104 @@ benchmark-smoke output="build/benchmarks/smoke.json": build-cpp
 benchmark-standard output="build/benchmarks/standard.json": build-cpp
     uv run python -m tests.performance.benchmark_suite --profile standard --require-all-stable --output "{{output}}"
 
+# Compare two explicitly supplied native roots. The shipped checkout remains on
+# vector storage, so there is deliberately no current-tree candidate default.
+experiment-exact-batch-storage-matrix baseline_root candidate_root output="build/experiments/exact-batch-storage-matrix.json": install-dev
+    uv run python -m tests.performance.experiments.exact_batch_storage_matrix \
+        --baseline-root "{{baseline_root}}" \
+        --candidate-root "{{candidate_root}}" \
+        --blocks 20 \
+        --output "{{output}}"
+
+verify-exact-batch-storage-matrix artifact="build/experiments/exact-batch-storage-matrix.json": install-dev
+    uv run python -m tests.performance.experiments.exact_batch_storage_matrix \
+        --verify \
+        --output "{{artifact}}"
+
+verify-exact-batch-storage-archive artifact="docs/evidence/experiments/exact-batch-storage-segmented-tuned-rejection.json": install-dev
+    uv run python -m tests.performance.experiments.exact_batch_storage_matrix \
+        --verify \
+        --archive \
+        --output "{{artifact}}"
+
+# Intentionally expensive: two detached builds plus the historical 20-block smoke.
+reproduce-exact-batch-storage-rejection output="build/experiments/exact-batch-storage-segmented-reproduced.json": install-dev
+    scripts/reproduce_exact_batch_storage_rejection.sh "{{output}}"
+
+# Bounded diagnostic only; this does not replace any stable exact-batch gate.
+experiment-exact-batch-application-matrix profile="smoke" output="build/experiments/exact-batch-application-matrix.json": build-cpp
+    uv run python -m tests.performance.experiments.exact_batch_application_matrix \
+        --profile "{{profile}}" \
+        --samples 10 \
+        --output "{{output}}"
+
+verify-exact-batch-application-matrix artifact="build/experiments/exact-batch-application-matrix.json": install-dev
+    uv run python -m tests.performance.experiments.exact_batch_application_matrix \
+        --verify \
+        --output "{{artifact}}"
+
+# Private RangeSet transaction candidate; "full" omits --bounded.
+experiment-rangeset-transaction profile="bounded" output="build/experiments/rangeset-transaction.json": install-dev
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bounded=()
+    if [[ "{{profile}}" == "bounded" ]]; then
+        bounded+=(--bounded)
+    elif [[ "{{profile}}" != "full" ]]; then
+        echo "profile must be bounded or full" >&2
+        exit 2
+    fi
+    uv run python -m tests.performance.experiments.rangeset_transaction \
+        --samples 15 \
+        --output "{{output}}" \
+        "${bounded[@]}"
+
+verify-rangeset-transaction artifact="build/experiments/rangeset-transaction.json": install-dev
+    uv run python -m tests.performance.experiments.rangeset_transaction \
+        --verify \
+        --output "{{artifact}}"
+
+experiment-rangeset-snapshot-scaling output="build/experiments/rangeset-snapshot-scaling.json": install-dev
+    uv run python -m tests.performance.experiments.rangeset_snapshot_scaling \
+        --blocks 40 \
+        --output "{{output}}"
+
+verify-rangeset-snapshot-scaling artifact="build/experiments/rangeset-snapshot-scaling.json": install-dev
+    uv run python -m tests.performance.experiments.rangeset_snapshot_scaling \
+        --verify \
+        --output "{{artifact}}"
+
+# Experimental concrete-application qualification; never changes runtime selection.
+experiment-application-backend-matrix output="build/experiments/application-backend-matrix.json": build-cpp
+    uv run python -m tests.performance.experiments.application_backend_matrix \
+        --blocks 20 \
+        --output "{{output}}"
+
+verify-application-backend-matrix artifact="build/experiments/application-backend-matrix.json": install-dev
+    uv run python -m tests.performance.experiments.application_backend_matrix \
+        --verify \
+        --output "{{artifact}}"
+
+experiment-lease-state-scaling blocks="30" output="build/experiments/lease-state-scaling.json": install-dev
+    uv run python -m tests.performance.experiments.lease_state_scaling \
+        --blocks "{{blocks}}" \
+        --output "{{output}}"
+
+verify-lease-state-scaling artifact="build/experiments/lease-state-scaling.json": install-dev
+    uv run python -m tests.performance.experiments.lease_state_scaling \
+        --verify \
+        --output "{{artifact}}"
+
+# Experiment-only RadioSpectrumScheduler index injection; runtime remains linear
+# unless every fixed training, memory, and held-out gate passes.
+experiment-radio-spectrum-index-matrix output="build/experiments/radio-spectrum-index-matrix.json" timeout_seconds="3600": install-dev
+    uv run python -c 'import subprocess, sys; subprocess.run([sys.executable, "-m", "tests.performance.experiments.radio_spectrum_index_matrix", "--profile", "full", "--blocks", "25", "--output", "{{output}}"], check=True, timeout=int("{{timeout_seconds}}"))'
+
+verify-radio-spectrum-index-matrix artifact="build/experiments/radio-spectrum-index-matrix.json": install-dev
+    uv run python -m tests.performance.experiments.radio_spectrum_index_matrix \
+        --verify \
+        --output "{{artifact}}"
+
 benchmark-attribution baseline_root candidate_root="." output="build/benchmarks/mutation-attribution.json": install-dev
     uv run python -m tests.performance.mutation_attribution \
         --baseline-root "{{baseline_root}}" \

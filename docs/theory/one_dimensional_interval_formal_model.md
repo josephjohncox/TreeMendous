@@ -304,9 +304,11 @@ The patch rebuilds only changed `IntervalResult` objects, but tuple slicing and
 unpacking still copy or scan `Theta(n)` references. Payload-bearing sets use the
 payload path rather than this authoritative geometry state machine.
 
-`snapshot()` is distinct from cached `intervals()`. `RangeSnapshot.__post_init__`
-currently sums every interval to validate `total_free`, so every snapshot costs
-`Theta(n)` even when it reuses a valid tuple.
+`snapshot()` is distinct from cached `intervals()`. The first geometry-only
+snapshot for a state costs `Theta(n)` because `RangeSnapshot.__post_init__` sums
+every interval; unchanged calls then return that exact cached immutable value in
+`Theta(1)`. A changed state's first snapshot and every payload-bearing snapshot
+remain `Theta(n)` (plus payload cloning where applicable).
 
 The transition and enumeration claims are executed in
 `test_one_dimensional_publication.py` without timing assertions.

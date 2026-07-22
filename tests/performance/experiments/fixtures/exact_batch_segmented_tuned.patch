@@ -1,0 +1,527 @@
+--- a/treemendous/cpp/exact_batch_bindings.cpp
++++ b/treemendous/cpp/exact_batch_bindings.cpp
+@@ -5,6 +5,7 @@
+ 
+ #include <algorithm>
+ #include <atomic>
++#include <condition_variable>
+ #include <cstdint>
+ #include <cstring>
+ #include <limits>
+@@ -338,8 +339,81 @@
+     std::size_t changed_spans;
+     std::size_t result_bytes;
+     std::size_t work_units;
++};
++
++constexpr std::size_t kTargetBlockIntervals = 128;
++
++struct IntervalBlock {
++    explicit IntervalBlock(std::vector<Interval>& values) {
++        intervals.swap(values);
++        first_start = intervals.front().first;
++        last_end = intervals.back().second;
++    }
++
++    std::vector<Interval> intervals;
++    Coordinate first_start = 0;
++    Coordinate last_end = 0;
+ };
+ 
++using BlockPtr = std::shared_ptr<const IntervalBlock>;
++
++struct StorageCounters {
++    std::size_t directory_entries_copied = 0;
++    std::size_t blocks_rebuilt = 0;
++    std::size_t intervals_copied = 0;
++    std::int64_t block_delta = 0;
++    std::uint64_t generation = 0;
++    std::size_t live_count = 0;
++    std::size_t block_count = 0;
++    std::size_t transient_estimated_bytes = 0;
++    std::size_t retained_estimated_bytes = 0;
++};
++
++struct State {
++    State(std::vector<BlockPtr>& directory_value, std::size_t live_count_value,
++          Coordinate total_value, const StorageCounters& counters_value)
++        : live_count(live_count_value), total(total_value),
++          counters(counters_value) {
++        directory.swap(directory_value);
++    }
++
++    std::vector<BlockPtr> directory;
++    std::size_t live_count;
++    Coordinate total;
++    StorageCounters counters;
++};
++
++using StatePtr = std::shared_ptr<const State>;
++
++void estimated_byte_add(std::size_t& value, std::size_t amount) noexcept {
++    if (amount > std::numeric_limits<std::size_t>::max() - value) {
++        value = std::numeric_limits<std::size_t>::max();
++    } else {
++        value += amount;
++    }
++}
++
++void estimated_array_add(std::size_t& value, std::size_t count,
++                         std::size_t item_size) noexcept {
++    if (count != 0 &&
++        item_size > std::numeric_limits<std::size_t>::max() / count) {
++        value = std::numeric_limits<std::size_t>::max();
++        return;
++    }
++    estimated_byte_add(value, count * item_size);
++}
++
++std::size_t retained_storage_bytes(
++    const std::vector<BlockPtr>& directory) noexcept {
++    std::size_t result = sizeof(State);
++    estimated_array_add(result, directory.size(), sizeof(BlockPtr));
++    for (const auto& block : directory) {
++        estimated_byte_add(result, sizeof(IntervalBlock));
++        estimated_array_add(result, block->intervals.size(), sizeof(Interval));
++    }
++    return result;
++}
++
+ class ExactBatchManager {
+   public:
+     ExactBatchManager(const std::vector<Interval>& domain, bool initially_available,
+@@ -349,7 +423,6 @@
+                       std::size_t max_result_bytes,
+                       std::size_t max_work_units)
+         : domain_(domain),
+-          state_(initially_available ? domain_ : std::vector<Interval>{}),
+           limits_{max_operations, max_live_intervals, max_changed_spans,
+                   max_result_bytes, max_work_units} {
+         validate_limit(max_operations, "max_operations");
+@@ -357,8 +430,6 @@
+         validate_limit(max_changed_spans, "max_changed_spans");
+         validate_limit(max_result_bytes, "max_result_bytes");
+         validate_limit(max_work_units, "max_work_units");
+-        if (state_.size() > limits_.live_intervals)
+-            limit_error("max_live_intervals");
+ 
+         Coordinate total = 0;
+         Coordinate previous_end = 0;
+@@ -376,7 +447,26 @@
+             first = false;
+         }
+         if (domain_.empty()) throw py::value_error("managed domain must not be empty");
+-        total_ = initially_available ? total : 0;
++
++        std::vector<Interval> initial =
++            initially_available ? domain_ : std::vector<Interval>{};
++        if (initial.size() > limits_.live_intervals)
++            limit_error("max_live_intervals");
++        std::vector<BlockPtr> directory;
++        for (std::size_t begin = 0; begin < initial.size();
++             begin += kTargetBlockIntervals) {
++            const std::size_t end =
++                std::min(initial.size(), begin + kTargetBlockIntervals);
++            std::vector<Interval> chunk(initial.begin() + begin,
++                                        initial.begin() + end);
++            directory.push_back(std::make_shared<IntervalBlock>(chunk));
++        }
++        StorageCounters counters;
++        counters.live_count = initial.size();
++        counters.block_count = directory.size();
++        counters.retained_estimated_bytes = retained_storage_bytes(directory);
++        state_.reset(new State(directory, initial.size(),
++                               initially_available ? total : 0, counters));
+     }
+ 
+     py::object mutate_packed(const py::handle& operations) {
+@@ -409,14 +499,27 @@
+             std::memcpy(operation_bytes.data(), PyBytes_AS_STRING(operations.ptr()),
+                         expected);
+ 
+-        std::vector<Interval> scratch;
+-        Coordinate scratch_total;
++        StatePtr base_state;
+         {
+             std::lock_guard<std::mutex> lock(state_mutex_);
+             maybe_fail("state_copy");
+-            scratch = state_;
+-            scratch_total = total_;
++            base_state = state_;
+         }
++        maybe_fail("directory_clone");
++        const bool use_vector_scratch = base_state->directory.size() <= 1;
++        std::vector<BlockPtr> scratch;
++        std::vector<Interval> vector_scratch;
++        Coordinate scratch_total = base_state->total;
++        std::size_t scratch_live = base_state->live_count;
++        StorageCounters counters;
++        counters.directory_entries_copied = base_state->directory.size();
++        if (use_vector_scratch) {
++            if (!base_state->directory.empty())
++                vector_scratch = base_state->directory.front()->intervals;
++            counters.intervals_copied = vector_scratch.size();
++        } else {
++            scratch = base_state->directory;
++        }
+ 
+         std::vector<std::uint64_t> offsets;
+         std::vector<Interval> changed_spans;
+@@ -451,7 +554,7 @@
+                 }
+                 maybe_fail("row_staging");
+                 const std::size_t row_work = checked_size_add(
+-                    scratch.size(), 1, "work unit count overflow");
++                    scratch_live, 1, "work unit count overflow");
+                 work_units = checked_size_add(work_units, row_work,
+                                               "work unit count overflow");
+                 if (work_units > limits_.work_units) limit_error("max_work_units");
+@@ -469,16 +572,31 @@
+                     operation_error(
+                         index,
+                         "span is outside or crosses a managed-domain component");
+-                const bool covered = fully_covered(scratch, start, end);
++                const bool covered =
++                    use_vector_scratch
++                        ? fully_covered(vector_scratch, start, end)
++                        : fully_covered_directory(scratch, start, end);
+                 std::vector<Interval> changed;
+-                if (opcode == 0) {
+-                    changed = add_span(scratch, start, end);
++                if (use_vector_scratch) {
++                    if (opcode == 0) {
++                        changed = add_span(vector_scratch, start, end);
++                    } else if (opcode == 2 && !covered) {
++                        // Strict rejection is an exact no-op.
++                    } else {
++                        changed = discard_span(vector_scratch, start, end);
++                    }
++                    scratch_live = vector_scratch.size();
++                } else if (opcode == 0) {
++                    if (!covered)
++                        changed = mutate_directory(scratch, start, end, true,
++                                                   scratch_live, counters);
+                 } else if (opcode == 2 && !covered) {
+                     // Strict rejection is an exact no-op.
+-                } else {
+-                    changed = discard_span(scratch, start, end);
++                } else if (has_overlap(scratch, start, end)) {
++                    changed = mutate_directory(scratch, start, end, false,
++                                               scratch_live, counters);
+                 }
+-                if (scratch.size() > limits_.live_intervals)
++                if (scratch_live > limits_.live_intervals)
+                     limit_error("max_live_intervals");
+ 
+                 Coordinate changed_length = 0;
+@@ -573,22 +691,87 @@
+             prepared = py::cast(packed);
+         }
+ 
++        if (use_vector_scratch) {
++            const std::size_t old_blocks = base_state->directory.size();
++            const std::size_t new_blocks =
++                vector_scratch.empty()
++                    ? 0
++                    : checked_size_add(vector_scratch.size(),
++                                       kTargetBlockIntervals - 1,
++                                       "block count overflow") /
++                          kTargetBlockIntervals;
++            if (new_blocks > old_blocks) maybe_fail("block_split");
++            scratch.reserve(new_blocks);
++            for (std::size_t begin = 0; begin < vector_scratch.size();
++                 begin += kTargetBlockIntervals) {
++                const std::size_t end = std::min(
++                    vector_scratch.size(), begin + kTargetBlockIntervals);
++                std::vector<Interval> chunk(vector_scratch.begin() + begin,
++                                            vector_scratch.begin() + end);
++                maybe_fail("block_rebuild");
++                scratch.push_back(std::make_shared<IntervalBlock>(chunk));
++            }
++            counters.blocks_rebuilt = scratch.size();
++            counters.block_delta = static_cast<std::int64_t>(new_blocks) -
++                                   static_cast<std::int64_t>(old_blocks);
++            maybe_fail("directory_replacement");
++        }
++
++        counters.generation =
++            base_state->counters.generation ==
++                    std::numeric_limits<std::uint64_t>::max()
++                ? base_state->counters.generation
++                : base_state->counters.generation + 1;
++        counters.live_count = scratch_live;
++        counters.block_count = scratch.size();
++        counters.retained_estimated_bytes = retained_storage_bytes(scratch);
++        counters.transient_estimated_bytes = sizeof(State);
++        estimated_array_add(counters.transient_estimated_bytes,
++                            counters.directory_entries_copied,
++                            sizeof(BlockPtr));
++        estimated_array_add(counters.transient_estimated_bytes,
++                            counters.intervals_copied, sizeof(Interval));
++        estimated_array_add(counters.transient_estimated_bytes,
++                            counters.blocks_rebuilt, sizeof(IntervalBlock));
++
++        maybe_fail("root_creation");
++        StatePtr prepared_state(
++            new State(scratch, scratch_live, scratch_total, counters));
++        StatePtr displaced;
+         {
+             std::lock_guard<std::mutex> lock(state_mutex_);
+-            state_.swap(scratch);  // allocation-free and noexcept
+-            total_ = scratch_total;
++            displaced.swap(state_);
++            state_.swap(prepared_state);  // allocation-free and noexcept
+         }
++        displaced.reset();  // release the old root outside the publication latch
+         return prepared;
+     }
+ 
+     py::tuple snapshot_data() const {
++        StatePtr pinned;
+         std::vector<Interval> copy;
+         Coordinate total;
+         {
+             py::gil_scoped_release release;
+-            std::lock_guard<std::mutex> lock(state_mutex_);
+-            copy = state_;
+-            total = total_;
++            {
++                std::lock_guard<std::mutex> lock(state_mutex_);
++                pinned = state_;
++            }
++            {
++                std::unique_lock<std::mutex> latch_lock(snapshot_latch_mutex_);
++                if (snapshot_latch_armed_) {
++                    snapshot_latch_pinned_ = true;
++                    snapshot_latch_cv_.notify_all();
++                    snapshot_latch_cv_.wait(latch_lock, [this] {
++                        return !snapshot_latch_armed_;
++                    });
++                }
++            }
++            copy.reserve(pinned->live_count);
++            for (const auto& block : pinned->directory)
++                copy.insert(copy.end(), block->intervals.begin(),
++                            block->intervals.end());
++            total = pinned->total;
+         }
+         py::tuple intervals(
+             checked_shape(copy.size(), "snapshot tuple shape overflow"));
+@@ -598,11 +781,56 @@
+         return py::make_tuple(intervals, total);
+     }
+ 
++    void arm_snapshot_latch() {
++        std::lock_guard<std::mutex> lock(snapshot_latch_mutex_);
++        if (snapshot_latch_armed_)
++            throw py::value_error("snapshot latch is already armed");
++        snapshot_latch_pinned_ = false;
++        snapshot_latch_armed_ = true;
++    }
++
++    void wait_snapshot_latch() {
++        py::gil_scoped_release release;
++        std::unique_lock<std::mutex> lock(snapshot_latch_mutex_);
++        snapshot_latch_cv_.wait(lock, [this] {
++            return snapshot_latch_pinned_ || !snapshot_latch_armed_;
++        });
++    }
++
++    void release_snapshot_latch() {
++        std::lock_guard<std::mutex> lock(snapshot_latch_mutex_);
++        snapshot_latch_armed_ = false;
++        snapshot_latch_cv_.notify_all();
++    }
++
++    py::dict storage_counters() const {
++        StatePtr pinned;
++        {
++            std::lock_guard<std::mutex> lock(state_mutex_);
++            pinned = state_;
++        }
++        const auto& values = pinned->counters;
++        py::dict output;
++        output["directory_entries_copied"] = values.directory_entries_copied;
++        output["blocks_rebuilt"] = values.blocks_rebuilt;
++        output["intervals_copied"] = values.intervals_copied;
++        output["block_delta"] = values.block_delta;
++        output["generation"] = values.generation;
++        output["live_count"] = values.live_count;
++        output["block_count"] = values.block_count;
++        output["transient_estimated_bytes"] =
++            values.transient_estimated_bytes;
++        output["retained_estimated_bytes"] = values.retained_estimated_bytes;
++        return output;
++    }
++
+     void set_failpoint(const std::string& name, std::size_t occurrence) {
+         static const std::vector<std::string> names = {
+-            "operations_copy", "state_copy",       "result_reserve",
+-            "row_staging",    "packed_storage",   "python_bytes",
+-            "wrapper_preparation", "materialized_results"};
++            "operations_copy", "state_copy",       "directory_clone",
++            "result_reserve",  "row_staging",      "block_rebuild",
++            "block_split",     "packed_storage",   "python_bytes",
++            "wrapper_preparation", "materialized_results", "directory_replacement",
++            "root_creation"};
+         if (std::find(names.begin(), names.end(), name) == names.end())
+             throw py::value_error("unknown exact-batch failpoint");
+         std::lock_guard<std::mutex> lock(failpoint_mutex_);
+@@ -630,6 +858,132 @@
+         return length;
+     }
+ 
++    static void counter_add(std::size_t& value, std::size_t amount) noexcept {
++        if (amount > std::numeric_limits<std::size_t>::max() - value) {
++            value = std::numeric_limits<std::size_t>::max();
++        } else {
++            value += amount;
++        }
++    }
++
++    static bool fully_covered_directory(const std::vector<BlockPtr>& directory,
++                                        Coordinate start, Coordinate end) {
++        auto block = std::upper_bound(
++            directory.begin(), directory.end(), start,
++            [](Coordinate point, const BlockPtr& candidate) {
++                return point < candidate->first_start;
++            });
++        if (block != directory.begin()) --block;
++        if (block == directory.end() || (*block)->last_end <= start) return false;
++        const auto& intervals = (*block)->intervals;
++        auto interval = std::upper_bound(
++            intervals.begin(), intervals.end(), start,
++            [](Coordinate point, const Interval& candidate) {
++                return point < candidate.first;
++            });
++        if (interval != intervals.begin()) --interval;
++        return interval != intervals.end() && interval->first <= start &&
++               end <= interval->second;
++    }
++
++    static bool has_overlap(const std::vector<BlockPtr>& directory,
++                            Coordinate start, Coordinate end) {
++        auto block = std::upper_bound(
++            directory.begin(), directory.end(), start,
++            [](Coordinate point, const BlockPtr& candidate) {
++                return point < candidate->last_end;
++            });
++        for (; block != directory.end() && (*block)->first_start < end; ++block) {
++            const auto& intervals = (*block)->intervals;
++            auto interval = std::upper_bound(
++                intervals.begin(), intervals.end(), start,
++                [](Coordinate point, const Interval& candidate) {
++                    return point < candidate.second;
++                });
++            if (interval != intervals.end() && interval->first < end) return true;
++        }
++        return false;
++    }
++
++    std::vector<Interval> mutate_directory(std::vector<BlockPtr>& directory,
++                                           Coordinate start, Coordinate end,
++                                           bool adding,
++                                           std::size_t& live_count,
++                                           StorageCounters& counters) {
++        auto first = adding
++                         ? std::lower_bound(
++                               directory.begin(), directory.end(), start,
++                               [](const BlockPtr& block, Coordinate point) {
++                                   return block->last_end < point;
++                               })
++                         : std::upper_bound(
++                               directory.begin(), directory.end(), start,
++                               [](Coordinate point, const BlockPtr& block) {
++                                   return point < block->last_end;
++                               });
++        auto last = first;
++        if (adding) {
++            while (last != directory.end() && (*last)->first_start <= end) ++last;
++        } else {
++            while (last != directory.end() && (*last)->first_start < end) ++last;
++        }
++
++        std::size_t begin_index =
++            static_cast<std::size_t>(first - directory.begin());
++        std::size_t end_index =
++            static_cast<std::size_t>(last - directory.begin());
++        if (begin_index != 0) --begin_index;
++        if (end_index < directory.size()) ++end_index;
++
++        std::vector<Interval> local;
++        std::size_t local_count = 0;
++        for (std::size_t index = begin_index; index < end_index; ++index)
++            local_count = checked_size_add(local_count,
++                                           directory[index]->intervals.size(),
++                                           "local interval count overflow");
++        local.reserve(checked_size_add(local_count, adding ? 1 : 0,
++                                       "local interval count overflow"));
++        for (std::size_t index = begin_index; index < end_index; ++index) {
++            const auto& intervals = directory[index]->intervals;
++            local.insert(local.end(), intervals.begin(), intervals.end());
++        }
++        counter_add(counters.intervals_copied, local_count);
++
++        std::vector<Interval> changed =
++            adding ? add_span(local, start, end)
++                   : discard_span(local, start, end);
++        const std::size_t old_blocks = end_index - begin_index;
++        const std::size_t new_blocks =
++            local.empty()
++                ? 0
++                : checked_size_add(local.size(), kTargetBlockIntervals - 1,
++                                   "block count overflow") /
++                      kTargetBlockIntervals;
++        if (new_blocks > old_blocks) maybe_fail("block_split");
++
++        std::vector<BlockPtr> replacements;
++        replacements.reserve(new_blocks);
++        for (std::size_t begin = 0; begin < local.size();
++             begin += kTargetBlockIntervals) {
++            const std::size_t chunk_end =
++                std::min(local.size(), begin + kTargetBlockIntervals);
++            std::vector<Interval> chunk(local.begin() + begin,
++                                        local.begin() + chunk_end);
++            maybe_fail("block_rebuild");
++            replacements.push_back(std::make_shared<IntervalBlock>(chunk));
++        }
++        counter_add(counters.blocks_rebuilt, replacements.size());
++        counters.block_delta += static_cast<std::int64_t>(new_blocks) -
++                                static_cast<std::int64_t>(old_blocks);
++        directory.erase(directory.begin() + begin_index,
++                        directory.begin() + end_index);
++        directory.insert(directory.begin() + begin_index, replacements.begin(),
++                         replacements.end());
++        maybe_fail("directory_replacement");
++        live_count = live_count - local_count + local.size();
++        return changed;
++    }
++
+     bool inside_component(Coordinate start, Coordinate end) const {
+         auto item = std::upper_bound(
+             domain_.begin(), domain_.end(), start,
+@@ -651,8 +1005,11 @@
+ 
+     std::vector<Interval> domain_;
+     mutable std::mutex state_mutex_;
+-    std::vector<Interval> state_;
+-    Coordinate total_ = 0;
++    StatePtr state_;
++    mutable std::mutex snapshot_latch_mutex_;
++    mutable std::condition_variable snapshot_latch_cv_;
++    mutable bool snapshot_latch_armed_ = false;
++    mutable bool snapshot_latch_pinned_ = false;
+     Limits limits_;
+     std::atomic<bool> mutation_active_{false};
+     std::mutex failpoint_mutex_;
+@@ -703,6 +1060,10 @@
+         .def("mutate_materialized", &ExactBatchManager::mutate_materialized,
+              py::arg("operations"))
+         .def("snapshot_data", &ExactBatchManager::snapshot_data)
++        .def("_arm_snapshot_latch", &ExactBatchManager::arm_snapshot_latch)
++        .def("_wait_snapshot_latch", &ExactBatchManager::wait_snapshot_latch)
++        .def("_release_snapshot_latch", &ExactBatchManager::release_snapshot_latch)
++        .def("_storage_counters", &ExactBatchManager::storage_counters)
+         .def("_set_failpoint", &ExactBatchManager::set_failpoint,
+              py::arg("name"), py::arg("occurrence") = 0)
+         .def("_clear_failpoint", &ExactBatchManager::clear_failpoint);
