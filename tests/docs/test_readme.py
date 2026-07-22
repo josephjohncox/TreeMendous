@@ -51,8 +51,32 @@ RUNNABLE_EXAMPLES = (
         "free=10000-10001,10003-10005,10006-10008 changed=2,1",
     ),
     (
+        ROOT / "examples/patterns/atomic_memory_map_updates.py",
+        "mapped=-4096:-2048,0:4096 changed=2048,4096,1024,1024",
+    ),
+    (
+        ROOT / "examples/patterns/atomic_partition_availability_updates.py",
+        "available=0:2,8:10,12:16 changed=2,4,2",
+    ),
+    (
+        ROOT / "examples/patterns/genomic_mask_batch_updates.py",
+        "masks=100:180 changed=40,40,20,20",
+    ),
+    (
         ROOT / "examples/patterns/spatiotemporal_geofences.py",
         "matches=alpha,beta handles=1,2,3 process_local=True",
+    ),
+    (
+        ROOT / "examples/patterns/warehouse_space_time_reservations.py",
+        "conflicts=forklift-a,forklift-b handles=1,2,3 remaining=1,3",
+    ),
+    (
+        ROOT / "examples/patterns/video_region_timeline_overlap.py",
+        "matches=title,title-copy order=1,2 touching=later remaining=2,3",
+    ),
+    (
+        ROOT / "examples/patterns/robot_volume_time_conflicts.py",
+        "conflicts=arm-a,arm-b handles=1,2,3 moved=2 remaining=2,3",
     ),
 )
 

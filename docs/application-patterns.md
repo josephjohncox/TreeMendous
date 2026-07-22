@@ -4,6 +4,24 @@ Tree-Mendous exposes reusable primitives and 50 concrete process-local engines.
 A pattern shows how a primitive can fit inside a larger design; it is not a new
 registered engine and does not add the surrounding service guarantees.
 
+## Pattern catalog
+
+| Pattern | Primitive | Geometry represented | Required external semantics |
+| --- | --- | --- | --- |
+| [Port-pool reconciliation](../examples/patterns/atomic_port_pool_reconciliation.py) | `ExactBatchRangeSet` | Free port spans | Lease identity, TTL, fencing, persistence, coordination |
+| [Memory-map updates](../examples/patterns/atomic_memory_map_updates.py) | `ExactBatchRangeSet` | Mapped address spans | Mapping identity, page/protection rules, OS publication, recovery |
+| [Partition availability](../examples/patterns/atomic_partition_availability_updates.py) | `ExactBatchRangeSet` | Available partition-number spans | Partition generations, replica health, quorum, durable catalog |
+| [Genomic mask updates](../examples/patterns/genomic_mask_batch_updates.py) | `ExactBatchRangeSet` | Masked coordinate spans | Build/contig identity, strand/features, conversion, provenance |
+| [Spatiotemporal geofences](../examples/patterns/spatiotemporal_geofences.py) | experimental `BoxIndex3D` | x/y/time boxes | Coordinate reference system, polygons, authorization, durability |
+| [Warehouse reservations](../examples/patterns/warehouse_space_time_reservations.py) | experimental `BoxIndex3D` | x/y/time occupancy boxes | Map/units, routing, vehicle geometry, booking coordination |
+| [Video region timeline](../examples/patterns/video_region_timeline_overlap.py) | experimental `BoxIndex3D` | x/y/time media boxes | Timebase, codec/pixel semantics, track identity, edit persistence |
+| [Robot volume-time conflicts](../examples/patterns/robot_volume_time_conflicts.py) | experimental `BoxIndex4D` | x/y/z/time broad-phase boxes | Continuous motion, rotation, collision physics, planning |
+
+All eight are executable, self-asserting examples outside the 50-engine
+registry. The exact-batch patterns use ordered geometry rows and explicit
+`BatchLimits`; the box patterns preserve owner-scoped duplicate identity and
+deterministic insertion order where records share geometry.
+
 ## Atomic geometry reconciliation
 
 Use `ExactBatchRangeSet` when a controller has already decided which integer
@@ -75,9 +93,9 @@ the generic multidimensional index:
   two-dimensional cells into one-dimensional Morton bands for candidate
   selection, then apply exact Cartesian filtering.
 
-The new `BoxIndex3D` prototype is outside the registry and does not inherit the
-radio scheduler's reservation semantics or the Morton catalog's filtering
-contract.
+The `BoxIndex3D` and `BoxIndex4D` patterns are outside the registry and do not
+inherit the radio scheduler's reservation semantics or the Morton catalog's
+filtering contract.
 
 ## Combining primitives safely
 

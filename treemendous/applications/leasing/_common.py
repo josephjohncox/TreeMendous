@@ -11,7 +11,6 @@ from treemendous.applications._shared.clock import Clock
 from treemendous.applications._shared.leasing import (
     FenceValidator,
     ForeignLeaseError,
-    InvalidLeaseError,
     Lease,
     LeaseDiagnostics,
     LeasePool,
@@ -295,19 +294,7 @@ class PoolGroup:
         pool = self.pool(handle.scope)
         if handle.pool_id != pool.pool_id:
             raise ForeignLeaseError("lease belongs to another pool lineage")
-        issued = next(
-            (lease for lease in pool.snapshot().leases if lease.token == handle.token),
-            None,
-        )
-        if issued is None:
-            raise InvalidLeaseError("lease token was not issued by this pool")
-        if (
-            issued.owner != handle.owner
-            or issued.resource != handle.resource
-            or issued.acquired_at != handle.lease.acquired_at
-            or issued.request_id != handle.lease.request_id
-        ):
-            raise InvalidLeaseError("lease evidence differs from issued history")
+        pool._lookup_fence_lease(handle.lease)
         identity = (handle.pool_id, handle.token)
         return self.fences.validate_fence(
             key,

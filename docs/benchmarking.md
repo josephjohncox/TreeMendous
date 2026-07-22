@@ -217,6 +217,264 @@ not publish an operations-per-second headline: throughput is derived only from
 measured elapsed time and the declared operation count in the artifact. Native
 attribution is not a mandatory scheduled parent-commit promotion gate.
 
+## Segmented ExactBatch storage qualification
+
+The Phase G2 storage experiment compared the immutable vector baseline at
+commit `2a384f7` with the now-rejected segmented candidate in isolated
+subprocesses. The durable proof of the rejection is the tracked patch
+`tests/performance/experiments/fixtures/exact_batch_segmented_tuned.patch` plus
+its pinned SHAs: applying it to the baseline `exact_batch_bindings.cpp` at
+`2a384f7` reproduces the segmented source SHA-256
+`f5a368f011bcbbe9f49ba954b7014268ab7c711ecfb1d46b8b4d9da6a8858267`. That patch
+chain is checked unconditionally by the storage experiment test suite and does
+not depend on any measured artifact.
+
+The measured 20-block tuned-smoke triplet is reproducible evidence, not tracked
+source: like every other benchmark artifact it lives under the ignored
+`build/`/`docs/evidence/` output tree or is attached as a release asset. Once a
+copy exists at
+`docs/evidence/experiments/exact-batch-storage-segmented-tuned-rejection.json`
+(with its Markdown and `.json.sha256` sidecars), verify it offline without the
+historical binaries:
+
+```bash
+just verify-exact-batch-storage-archive
+```
+
+The archive binds baseline commit/source/binary hashes, candidate binary and
+runtime provenance, the exact reconstructed patch SHA-256, and the resulting
+segmented `exact_batch_bindings.cpp` SHA-256.
+Verification reapplies the patch to the baseline source from Git and strictly
+reconstructs worker schemas, all scalar-oracle digests, raw block ratios,
+bootstrap summaries, matrix order, and the rejected 1.10 small-N gate. It does
+not require the rolled-back package to expose segmented counters. The
+archive-data contracts in the test suite skip automatically when no such copy is
+present.
+
+To reproduce rather than verify, use the intentionally expensive recipe below.
+It creates two detached temporary worktrees at the baseline commit, applies and
+hash-checks the patch only in the candidate, builds distinct binaries, invokes
+the fixed smoke harness for 20 balanced blocks, and removes both worktrees on
+exit:
+
+```bash
+just reproduce-exact-batch-storage-rejection \
+  build/experiments/exact-batch-storage-segmented-reproduced.json
+```
+
+The fixed matrix covers N={64,1000,10000,100000}, B={0,1,16,256}, local,
+strict-only, duplicate-only, 1/10/100%-width, and K-1/K/K+1 block-boundary
+cells. Twenty fixed blocks alternate which isolated root process runs first.
+Each process measures the complete promotion matrix; bootstrap intervals
+resample whole block ratios. Setup, canonical `cpp_boundary` replay, packed
+result materialization, final snapshots, counter inspection, RSS, and artifact
+writing are outside mutation timers. Construction, mutation, snapshot, and
+materialization are separate cells.
+
+The verifier requires canonical JSON plus matching Markdown and SHA-256,
+rejects duplicate keys and non-finite values, reconstructs matrix identity and
+every ratio/bootstrap/gate derivation, and recomputes source, runtime, compiler,
+and native-binary provenance. The pre-registered gates are not adjusted after
+measurement. A failed required gate rejects the segmented runtime rather than
+weakening a threshold. The sole small-N tuning confirmation was rejected: its
+20-block N64/B16 candidate/vector median was 1.065273 and its upper-95 bound was
+1.115916, above the unchanged 1.10 gate. The package therefore retains vector
+storage and does not expose the segmented counters or failpoints.
+
+## Experimental exact-batch application matrix
+
+The first roadmap experiment is a correctness-attested diagnostic under
+`tests/performance/experiments`; it is not stable package code and does not
+change the existing exact-batch gates. A bounded smoke run is:
+
+```bash
+just experiment-exact-batch-application-matrix smoke \
+  build/experiments/exact-batch-application-smoke.json
+just verify-exact-batch-application-matrix \
+  build/experiments/exact-batch-application-smoke.json
+```
+
+The complete local profile uses at least 10 paired raw samples for every cell
+across batch sizes 1, 4, 16, and 64; pre-call live state counts 64, 1,000, and
+10,000; head/middle/tail locality; and strict accept/reject, idempotent
+real/no-op, fragment/restore, coalesce/restore, and eight-span fan-out shapes:
+
+```bash
+just experiment-exact-batch-application-matrix local \
+  build/experiments/exact-batch-application-local.json
+```
+
+The 100,000-state slice is manual and explicitly opt-in:
+
+```bash
+uv run python -m tests.performance.experiments.exact_batch_application_matrix \
+  --profile local --include-100000 --samples 10 \
+  --output build/experiments/exact-batch-application-100000.json
+```
+
+Manager/domain setup, operation packing, scalar-oracle construction, result
+materialization, snapshots, validation, and artifact writing are outside both
+timers. Each paired sample alternates packed-first/scalar-first order. Every
+packed row and final state is checked against scalar `cpp_boundary` replay.
+The JSON records raw packed/scalar samples, paired ratios, bootstrap median
+intervals, packed input/result bytes, exact declared work, workload digest, and
+source/build/environment provenance; Markdown and SHA-256 companions bind the
+report.
+
+Interpret observed median break-even only for the named state, shape, locality,
+machine, build, and timed layers. A confidence interval crossing 1.0 is
+inconclusive. A local dirty-worktree artifact remains useful for diagnosis but
+is not promotion evidence. This experiment makes no universal performance
+claim and leaves the stable v3/v1 gates and their workflows unchanged.
+
+## Experimental payload-aware RangeSet transaction
+
+The private `tests.performance.experiments.rangeset_transaction` prototype
+copies complete geometry, payload, and ordered-event state to a fresh proven
+catalog backend, replays ordered scalar mutations, and publishes only after all
+fallible work succeeds. It adds no `RangeSet` method or stable protocol. Run the
+short diagnostic or the complete B={0,1,4,16,64}, N={64,1000}, four-policy,
+two-trace matrix with:
+
+```bash
+just experiment-rangeset-transaction bounded \
+  build/experiments/rangeset-transaction-bounded.json
+just experiment-rangeset-transaction full \
+  build/experiments/rangeset-transaction-full.json
+just verify-rangeset-transaction \
+  build/experiments/rangeset-transaction-full.json
+```
+
+Every cell alternates transaction/scalar order for at least 15 paired samples;
+setup and exact same-instance result/final-state validation remain outside the
+timers. `tracemalloc` is inactive for both latency paths; peak memory comes from
+a separate untimed transaction replay that is also validated against the scalar
+oracle. The canonical JSON/Markdown/SHA-256 triplet records raw total, staging,
+backend-load, memory, interval, resource, source, and backend provenance. Fixed
+gates require B16/N1000 upper-95 ratios at most 1.00 for every payload, one
+non-restorative upper-95 ratio at most 0.90, and no nonempty cell above 1.10.
+Failure marks the experiment `REJECTED`; it is not a reason to weaken a gate or
+promote the candidate into the stable package.
+
+## Experimental geometry snapshot cache
+
+The stable `RangeSet` reuses one exact immutable `RangeSnapshot` only for an
+unchanged geometry-only state. Payload-bearing snapshots retain their existing
+clone-and-detach behavior. The E4-A scaling experiment compares public cached
+`snapshot()` with faithful uncached `RangeSnapshot` construction on the same
+state. Setup and same-instance validation remain outside retained-block timing:
+
+```bash
+just experiment-rangeset-snapshot-scaling \
+  build/experiments/rangeset-snapshot-scaling.json
+just verify-rangeset-snapshot-scaling \
+  build/experiments/rangeset-snapshot-scaling.json
+```
+
+The pre-registered N={100,1000,10000} confirmation matrix uses exactly 40
+balanced blocks, not sample-until-pass collection. Every retained block contains
+both a cached-first and an uncached-first ordering; the ordering-pair sequence is
+reversed in alternating blocks. Cached elapsed time is totaled across its two
+positions, uncached elapsed time is totaled across its two positions, and one
+ratio is then derived for the whole block. Bootstrap 95% median intervals
+resample whole blocks, never pooled individual calls. Unchanged 16-read bursts
+use the same balanced-block analysis as restorative write-then-observe cycles.
+
+Each timed position repeats one common number of cached or uncached iterations.
+An excluded pilot starts at two iterations and doubles until both position
+durations reach at least 5 ms or the deterministic 64-iteration cap. The JSON
+records every pilot duration, the selected count, every raw position and block
+total, and the derivations. Pilot observations never enter samples, bootstrap
+intervals, or gates. Fixed acceptance gates remain unchanged: the N=10000
+unchanged upper-95 cached/uncached ratio must be at most 0.25, the cached
+N=10000/N=1000 per-iteration median ratio at most 1.50, and every
+write-then-observe upper-95 ratio at most 1.10. Canonical JSON, Markdown, and
+SHA-256 artifacts bind exact-type verification plus source, worktree, runtime,
+and backend-binary provenance.
+
+This balanced-block protocol corrects an order-confounding defect in the prior
+pooled single-call analysis. The earlier artifact treated AB and BA calls as
+exchangeable despite a strong order effect and is invalidated; it is not
+confirmation evidence for accepting or rejecting the cache.
+
+## Lease-state publication scaling
+
+The E4-B/D lease-state experiment writes a canonical JSON/Markdown/SHA-256
+triplet and supports generation and verification as distinct commands:
+
+```bash
+just experiment-lease-state-scaling 30 \
+  build/experiments/lease-state-scaling.json
+just verify-lease-state-scaling \
+  build/experiments/lease-state-scaling.json
+```
+
+The fixed matrix is the ordered Cartesian product of four workload kinds and
+N={128,512,2048,8192}. The verifier requires exact per-kind schemas and JSON
+types, recomputes every balanced block total, ratio, bootstrap summary, gate,
+semantic result/final-state digest, fixed instrumentation count, and retained
+memory settling ratio, and binds current source/runtime provenance. Generation
+performs semantic validation and digest construction outside timing. The
+verifier rejects noncanonical bytes, duplicate keys or matrix rows, relabeling,
+missing fields, and numeric bool/int coercion.
+
+## Experimental radio-spectrum index representation
+
+The E6 experiment injects `BoxIndex2D` axis projection and a guarded
+`BoundedBoxIndex` into an empty, real `RadioSpectrumScheduler` only from the
+performance harness. The stable scheduler constructor remains unchanged and
+continues to construct linear `BoxIndex(2)`. Run the fixed matrix with an
+explicit one-hour subprocess timeout, then independently verify its artifact:
+
+```bash
+just experiment-radio-spectrum-index-matrix \
+  build/experiments/radio-spectrum-index-matrix.json 3600
+just verify-radio-spectrum-index-matrix \
+  build/experiments/radio-spectrum-index-matrix.json
+```
+
+The training sizes are 32, 128, 512, 2,000, and 10,000 active entries. Separate
+deterministic held-out sizes are 64, 256, 1,000, and 5,000. Five workload cells
+cover materially different low, medium, and high-overlap seed/query geometry;
+narrow and broad channel/time queries; 3:1, 2:2, and 1:3
+insertion/cancellation call mixes; and balanced, channel, time, and dual-axis
+skew. The fifth, separately named `idempotent-replay` cell measures replay and
+is not counted as any insertion/cancellation mix. Timed mix insertions use
+distinct request IDs and reservations, and cancellations target distinct live
+handles; any live-handle preparation is untimed and independently replayed.
+Every timed position contains eight real scheduler operations. Twenty-five
+fixed AB/BA blocks are recorded before the run, and bootstrap intervals
+resample whole blocks. Construction, seeding, preparation, independent-oracle
+replay, exact same-instance validation, snapshots, diagnostics,
+candidate/posting observations, retained-graph memory, and the RSS high-water
+proxy remain outside operation timers.
+
+The sparse grid is constructed only with explicit finite channel/time bounds,
+cell sizes, and all resource guards. A broad-query adversary deliberately
+exceeds `max_cells_per_query`; its `ValueError` must propagate with unchanged
+state and no catch-and-fallback behavior. Correctness evidence also covers
+reservation and conflict results, duplicate request identity and idempotency,
+cancellation, snapshot order/version, diagnostic algorithm, and exact final
+state against an independent sorted-list radio oracle and the linear scheduler.
+
+Fixed gates are not tuned by a run. A representation needs upper-95 latency
+ratio at most 0.80 at two adjacent training sizes; its crossover is the lower
+size in that passing adjacent pair. Every selected crossover must have at least
+one predetermined held-out size at or above the crossover, and empty held-out
+evidence fails qualification. A policy may select only training cells at most
+0.90; every applicable selected held-out cell must also be at most 0.90. A
+balanced raw-block control separately measures the untouched default scheduler
+against an explicitly injected linear `BoxIndex(2)` and requires an upper-95
+ratio at most 1.10. Selected retained memory must be at most 1.25 times linear.
+There is no live migration. Failure to pass every gate retains no scheduler
+factory seam and leaves runtime linear. The prior full artifact predates this
+v2 protocol and is marked stale; it is not qualification evidence. The strict
+canonical JSON/Markdown/SHA-256 verifier reconstructs exact Cartesian
+membership and order and rejects row relabeling or duplication, duplicate keys,
+non-finite numbers, exact-type changes, query-diagnostic derivation or final
+state digest tampering, decision tampering, and source/runtime/backend
+provenance drift.
+
 ## Exact-batch evidence
 
 The stable specialized exact whole-batch module has a separate path-filtered

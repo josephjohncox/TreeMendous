@@ -269,10 +269,11 @@ Fallback backends and payload-bearing sets retain the immutable Python geometry
 cache. Bisect locates a local change in `O(log n)`, but publishing a successful
 fallback mutation copies tuple references around the changed slice, which is
 `Theta(n)`. The fallback preserves one common semantic implementation for
-payload algebra and for backends without exact deltas. `snapshot()` is a
-separate cost: `RangeSnapshot.__post_init__` currently recomputes the interval
-sum, so every snapshot is `Theta(n)` even when the tuple cache was already
-valid.
+payload algebra and for backends without exact deltas. For geometry-only state,
+the first `snapshot()` materialization is `Theta(n)` and the exact immutable
+value is then cached, making unchanged snapshots `Theta(1)`. A changed state
+must materialize a new `Theta(n)` snapshot. Payload snapshots remain `Theta(n)`
+plus cloning cost and are never identity-reused.
 
 The stable C++ boundary backend also accepts the normalized managed domain at
 construction. It validates geometry mutations and overlap queries against that

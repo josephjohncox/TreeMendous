@@ -350,6 +350,20 @@ def test_native_allocation_failpoints_preserve_exact_pre_state(failpoint: str) -
     assert manager.snapshot() == before
 
 
+def test_rejected_segmented_storage_hooks_are_not_shipped() -> None:
+    manager = ExactBatchRangeSet((0, 64), initially_available=True)
+    assert not hasattr(manager._manager, "_storage_counters")
+    for failpoint in (
+        "directory_clone",
+        "block_rebuild",
+        "block_split",
+        "directory_replacement",
+        "root_creation",
+    ):
+        with pytest.raises(ValueError, match="unknown exact-batch failpoint"):
+            manager._manager._set_failpoint(failpoint)
+
+
 def test_ergonomic_materialization_failure_preserves_exact_pre_state() -> None:
     manager = ExactBatchRangeSet((0, 8), initially_available=False)
     before = manager.snapshot()

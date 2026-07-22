@@ -211,6 +211,7 @@ class RangeSet:
         )
         self._geometry_cache_valid = True
         self._pending_geometry_update: tuple[bool, Span] | None = None
+        self._snapshot_cache: RangeSnapshot | None = None
         self._payload_segments = staged_payloads
         self._ordered_events = staged_events
 
@@ -315,6 +316,9 @@ class RangeSet:
     def _geometry_intervals(self) -> tuple[IntervalResult, ...]:
         return self._geometry_cache
 
+    def _invalidate_snapshot_cache(self) -> None:
+        self._snapshot_cache = None
+
     def _invalidate_authoritative_geometry_cache(
         self, span: Span, *, adding: bool
     ) -> None:
@@ -331,6 +335,7 @@ class RangeSet:
                     return tuple(self._clone_segments(self._payload_segments))
             if self._authoritative_geometry:
                 if not self._geometry_cache_valid:
+                    self._invalidate_snapshot_cache()
                     pending = self._pending_geometry_update
                     if pending is None:
                         self._geometry_cache = _normalize_geometry(
@@ -567,6 +572,8 @@ class RangeSet:
             self._adapter.release(span.start, span.end)
             self._geometry_cache = committed_geometry
             self._total_free = committed_total
+            if changed:
+                self._invalidate_snapshot_cache()
             if committed_payloads is not None:
                 self._payload_segments = committed_payloads
             if committed_events is not None:
@@ -649,6 +656,8 @@ class RangeSet:
             self._adapter.reserve(span.start, span.end)
             self._geometry_cache = committed_geometry
             self._total_free = committed_total
+            if changed:
+                self._invalidate_snapshot_cache()
             if committed_payloads is not None:
                 self._payload_segments = committed_payloads
             if committed_events is not None:
@@ -802,6 +811,17 @@ class RangeSet:
 
     def snapshot(self) -> RangeSnapshot:
         with self._lock:
+            if self._payload_policy is None:
+                cached = self._snapshot_cache
+                if cached is not None and self._geometry_cache_valid:
+                    return cached
+                snapshot = RangeSnapshot(
+                    self.intervals(),
+                    self._total_free,
+                    self._domain,
+                )
+                self._snapshot_cache = snapshot
+                return snapshot
             return RangeSnapshot(
                 self.intervals(),
                 self._total_free,

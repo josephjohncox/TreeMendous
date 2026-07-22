@@ -229,6 +229,9 @@ class LeasePool:
         self._next_fencing_token = 1
         self._last_observed_at = observed_at
         self._free = self._build_free(self._leases)
+        self._lease_projection_cache: tuple[Lease, ...] | None = None
+        self._available_projection_cache: tuple[Span, ...] | None = None
+        self._state_counts_cache: tuple[int, int, int] | None = None
         self._lock = RLock()
 
     @staticmethod
@@ -259,6 +262,7 @@ class LeasePool:
         )
 
     def _build_free(self, leases: dict[int, Lease]) -> RangeSet:
+        """Reconstruct free state when initializing or validating a restore."""
         free = self._new_range_set()
         active = sorted(
             (lease for lease in leases.values() if lease.state is LeaseState.ACTIVE),
@@ -293,9 +297,56 @@ class LeasePool:
     def _commit(
         self, leases: dict[int, Lease], free: RangeSet, observed_at: int
     ) -> None:
+        leases_changed = leases is not self._leases
+        free_changed = free is not self._free
         self._leases = leases
         self._free = free
         self._last_observed_at = observed_at
+        if leases_changed:
+            self._lease_projection_cache = None
+            self._state_counts_cache = None
+        if free_changed:
+            self._available_projection_cache = None
+
+    def _lease_projection(self, leases: dict[int, Lease]) -> tuple[Lease, ...]:
+        if leases is self._leases and self._lease_projection_cache is not None:
+            return self._lease_projection_cache
+        return tuple(sorted(leases.values(), key=lambda lease: lease.token))
+
+    def _available_projection(self, free: RangeSet) -> tuple[Span, ...]:
+        if free is self._free and self._available_projection_cache is not None:
+            return self._available_projection_cache
+        return tuple(interval.span for interval in free.intervals())
+
+    def _state_counts(self, leases: dict[int, Lease]) -> tuple[int, int, int]:
+        if leases is self._leases and self._state_counts_cache is not None:
+            return self._state_counts_cache
+        active = expired = released = 0
+        for lease in leases.values():
+            if lease.state is LeaseState.ACTIVE:
+                active += 1
+            elif lease.state is LeaseState.EXPIRED:
+                expired += 1
+            else:
+                released += 1
+        return active, expired, released
+
+    def _publish_projection_caches(
+        self,
+        leases: dict[int, Lease],
+        free: RangeSet,
+        *,
+        lease_projection: tuple[Lease, ...] | None = None,
+        available_projection: tuple[Span, ...] | None = None,
+        state_counts: tuple[int, int, int] | None = None,
+    ) -> None:
+        if leases is self._leases:
+            if lease_projection is not None:
+                self._lease_projection_cache = lease_projection
+            if state_counts is not None:
+                self._state_counts_cache = state_counts
+        if free is self._free and available_projection is not None:
+            self._available_projection_cache = available_projection
 
     @staticmethod
     def _aligned_at_or_after(value: int, alignment: int) -> int:
@@ -386,9 +437,6 @@ class LeasePool:
                 self._commit(staged, staged_free, now)
                 return lease
 
-            # Allocate against a staged RangeSet even when no expiry occurred;
-            # the live free set is untouched until the complete lease record is
-            # ready to commit.
             allocation_free = self._build_free(staged)
             resource = self._select_span(
                 allocation_free,
@@ -539,22 +587,20 @@ class LeasePool:
             return expired
 
     def _diagnostics_at(
-        self, now: int, leases: dict[int, Lease], free: RangeSet
+        self,
+        now: int,
+        available: tuple[Span, ...],
+        state_counts: tuple[int, int, int],
     ) -> LeaseDiagnostics:
-        intervals = free.intervals()
-        states = tuple(lease.state for lease in leases.values())
+        active, expired, released = state_counts
         return LeaseDiagnostics(
             observed_at=now,
             total_capacity=self._domain.measure,
-            available_capacity=sum(
-                interval.end - interval.start for interval in intervals
-            ),
-            largest_available_span=max(
-                (interval.end - interval.start for interval in intervals), default=0
-            ),
-            active_leases=states.count(LeaseState.ACTIVE),
-            expired_leases=states.count(LeaseState.EXPIRED),
-            released_leases=states.count(LeaseState.RELEASED),
+            available_capacity=sum(span.length for span in available),
+            largest_available_span=max((span.length for span in available), default=0),
+            active_leases=active,
+            expired_leases=expired,
+            released_leases=released,
             issued_tokens=self._next_fencing_token - 1,
             next_fencing_token=self._next_fencing_token,
         )
@@ -564,17 +610,27 @@ class LeasePool:
         with self._lock:
             now = self._observe_time()
             staged, free, _ = self._stage_expirations(now)
+            available = self._available_projection(free)
+            counts = self._state_counts(staged)
+            result = self._diagnostics_at(now, available, counts)
             self._commit(staged, free, now)
-            return self._diagnostics_at(now, staged, free)
+            self._publish_projection_caches(
+                staged,
+                free,
+                available_projection=available,
+                state_counts=counts,
+            )
+            return result
 
     def snapshot(self) -> LeasePoolSnapshot:
         """Return an immutable, time-consistent observable snapshot."""
         with self._lock:
             now = self._observe_time()
             staged, free, _ = self._stage_expirations(now)
-            leases = tuple(sorted(staged.values(), key=lambda lease: lease.token))
-            available = tuple(interval.span for interval in free.intervals())
-            diagnostics = self._diagnostics_at(now, staged, free)
+            leases = self._lease_projection(staged)
+            available = self._available_projection(free)
+            counts = self._state_counts(staged)
+            diagnostics = self._diagnostics_at(now, available, counts)
             result = LeasePoolSnapshot(
                 now,
                 self._pool_id,
@@ -584,6 +640,13 @@ class LeasePool:
                 diagnostics,
             )
             self._commit(staged, free, now)
+            self._publish_projection_caches(
+                staged,
+                free,
+                lease_projection=leases,
+                available_projection=available,
+                state_counts=counts,
+            )
             return result
 
     def checkpoint(self) -> LeasePoolCheckpoint:
@@ -591,10 +654,11 @@ class LeasePool:
         with self._lock:
             now = self._observe_time()
             staged, free, _ = self._stage_expirations(now)
+            leases = self._lease_projection(staged)
             result = LeasePoolCheckpoint(
                 pool_id=self._pool_id,
                 allowed_spans=self._domain.spans,
-                leases=tuple(sorted(staged.values(), key=lambda lease: lease.token)),
+                leases=leases,
                 requests=tuple(
                     sorted(self._requests.values(), key=lambda item: item.request_id)
                 ),
@@ -602,7 +666,35 @@ class LeasePool:
                 last_observed_at=now,
             )
             self._commit(staged, free, now)
+            self._publish_projection_caches(
+                staged,
+                free,
+                lease_projection=leases,
+            )
             return result
+
+    def _lookup_fence_lease(self, evidence: Lease) -> Lease:
+        """Validate issued fence evidence without constructing public state."""
+        if not isinstance(evidence, Lease):
+            raise TypeError("evidence must be a Lease")
+        with self._lock:
+            now = self._observe_time()
+            staged, free, _ = self._stage_expirations(now)
+            issued = staged.get(evidence.token)
+            # A public snapshot previously materialized expiry before the
+            # facade rejected missing or altered evidence. Preserve that order.
+            self._commit(staged, free, now)
+            if issued is None:
+                raise InvalidLeaseError("lease token was not issued by this pool")
+            if (
+                issued.pool_id != evidence.pool_id
+                or issued.owner != evidence.owner
+                or issued.resource != evidence.resource
+                or issued.acquired_at != evidence.acquired_at
+                or issued.request_id != evidence.request_id
+            ):
+                raise InvalidLeaseError("lease evidence differs from issued history")
+            return issued
 
     @classmethod
     def from_checkpoint(
@@ -689,6 +781,9 @@ class LeasePool:
         }
         pool._leases = transitioned
         pool._free = pool._build_free(transitioned)
+        pool._lease_projection_cache = None
+        pool._available_projection_cache = None
+        pool._state_counts_cache = None
         return pool
 
 

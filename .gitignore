@@ -8,6 +8,10 @@ __pycache__/
 *.so
 compile_commands.json
 
+# Generated benchmark/experiment evidence (reproduced locally or attached as
+# release assets, never committed to source).
+docs/evidence/
+
 # Distribution / packaging
 .Python
 build/
