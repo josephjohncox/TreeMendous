@@ -42,10 +42,24 @@ class BackendAdapter:
             self._supports_authoritative_geometry
             and callable(getattr(implementation, "set_managed_domain", None))
         )
+        # Fully-native scalar mutators return only the changed length, building
+        # no Span/MutationResult.  They are an accelerated addition to the
+        # authoritative surface, never a replacement for it.
+        self._supports_scalar_delta = self._supports_authoritative_geometry and all(
+            callable(getattr(implementation, name, None))
+            for name in (
+                "release_delta_length",
+                "reserve_delta_length",
+            )
+        )
 
     @property
     def supports_authoritative_geometry(self) -> bool:
         return self._supports_authoritative_geometry
+
+    @property
+    def supports_scalar_delta(self) -> bool:
+        return self._supports_scalar_delta
 
     @property
     def supports_atomic_allocate(self) -> bool:
@@ -90,6 +104,12 @@ class BackendAdapter:
     ) -> MutationResult:
         raw = self.implementation.reserve_with_delta(start, end, require_covered)
         return self._mutation_result(raw)
+
+    def release_delta_length(self, start: int, end: int) -> int:
+        return self.implementation.release_delta_length(start, end)
+
+    def reserve_delta_length(self, start: int, end: int, require_covered: bool) -> int:
+        return self.implementation.reserve_delta_length(start, end, require_covered)
 
     def first_fit(self, start: int, length: int) -> IntervalResult | None:
         return normalize_interval(self.implementation.find_interval(start, length))

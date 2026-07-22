@@ -101,8 +101,75 @@ latency, or a general memory ceiling. See the
 [1.1.0 release notes](releases/1.1.0.md) and
 [exact-batch contract](exact-batch.md) for the stable semantic envelope.
 
+## Locking levels and the fully-native scalar path
+
+`RangeSet` exposes two first-class, comparable ways to reach the same
+authoritative `cpp_boundary` geometry, plus a selectable locking level. Both are
+reported alongside the plain-native floor by
+[`tests/performance/rangeset_hotpath_benchmark.py`](../tests/performance/rangeset_hotpath_benchmark.py),
+verified by [`scripts/verify_rangeset_hotpath_benchmark.py`](../scripts/verify_rangeset_hotpath_benchmark.py),
+and generated with `just benchmark-hotpath`.
+
+### Mutation interfaces
+
+- `add(span)` / `discard(span, require_covered=...)` return a `MutationResult`
+  describing the exact changed geometry, changed length, and pre-mutation
+  coverage. This is the default, evidence-rich surface.
+- `release(span)` / `reserve(span, *, require_covered=...)` are the fully-native
+  scalar mutators. They apply the identical geometry mutation and return only
+  the integer `changed_length`, building no `Span`/`MutationResult`. They are
+  exactly geometry-consistent with `add`/`discard`. They require an
+  authoritative geometry backend and no payload policy; otherwise they raise
+  `ValueError` rather than falling back silently. `require_covered` rejects a
+  span that is not fully covered as a `0` no-op.
+
+### Locking level (`synchronized`)
+
+`RangeSet(..., synchronized=True)` (the default), `create_range_set(...,
+synchronized=True)`, and `BackendRegistry.create(..., synchronized=True)` keep
+the reentrant internal lock and the existing concurrent snapshot/mutation
+consistency. `synchronized=False` installs a no-op lock: the reentrancy guard
+still rejects nested mutations, but **there is no internal synchronization**.
+The caller alone guarantees single-threaded access or supplies external
+locking, and snapshot/mutation consistency becomes the caller's
+responsibility. Choose `synchronized=False` only when the caller already owns a
+coarser lock or the range set is confined to one thread.
+
+### Scoped measurements
+
+Measured on an Apple M5 Max (macOS 26.5.1, CPython 3.12.7) over a deterministic
+restorative trace on a single validated `cpp_boundary` instance, 30 samples,
+timing only the public mutation calls (construction, setup, and correctness
+validation excluded):
+
+| Path | Median throughput | Scope |
+| --- | ---: | --- |
+| `add`/`discard` (MutationResult), synchronized | about 1.54M ops/s | default locked geometry mutations |
+| `add`/`discard` (MutationResult), unsynchronized | about 1.65M ops/s | no internal lock; caller owns synchronization |
+| `release`/`reserve` (scalar), synchronized | about 4.32M ops/s | native changed-length only, locked |
+| `release`/`reserve` (scalar), unsynchronized | about 5.06M ops/s | native changed-length only, caller-synchronized |
+| plain-native floor | about 7.9M ops/s | raw `IntervalManager` scalar mutators, no wrapper |
+
+This is scoped evidence for one interface family, one restorative workload, one
+host, and one timed layer. It is not a universal speed claim. Two levers
+compound. Dropping eager `MutationResult`/`Span` construction — the scalar
+`release`/`reserve` path returns only the changed length — is the larger win,
+roughly tripling throughput over `add`/`discard` while staying exactly
+geometry-consistent. Choosing `synchronized=False` then removes the per-op
+`with self._lock:` protocol from the hot path (the context-manager
+enter/exit calls, not lock contention, are the cost), lifting the scalar path
+from about 4.3M to about 5.06M ops/s — within roughly 65% of the raw-native
+floor. Combined, the unsynchronized scalar surface is about 5.5x the default
+`add`/`discard` throughput. The unsynchronized level performs no internal
+locking: the caller alone owns cross-thread synchronization and
+snapshot/mutation consistency.
+
 ## Choosing the faster appropriate interface
 
+- Prefer `release`/`reserve` over `add`/`discard` when the changed length is the
+  only result you need on an authoritative geometry-only range set.
+- Use `synchronized=False` only under a caller-owned locking discipline or
+  confirmed single-threaded use; keep the default otherwise.
 - Use `RangeSet` when payload policies, allocation, generic queries, backend
   selection, or protocol compatibility are required.
 - Use `ExactBatchRangeSet` now for ordered, whole-batch-atomic,
