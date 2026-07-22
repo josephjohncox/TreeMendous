@@ -133,7 +133,7 @@ def test_maintained_relative_links_resolve() -> None:
 
 def test_installed_version_matches_project_metadata() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    assert project["project"]["version"] == "1.1.1"
+    assert project["project"]["version"] == "1.2.0"
     assert version("treemendous") == project["project"]["version"]
 
 
@@ -204,7 +204,7 @@ def test_release_tag_contract_tracks_the_releasable_major_version() -> None:
     assert workflow.count("persist-credentials: false") == 5
     assert workflow.count("enable-cache: false") == 4
     assert "baseline-ref: fdb4efd5f407717c8e18b94e6f4c21cbfb8e5daa" in workflow
-    assert 'version = "1.1.1"' in (ROOT / "pyproject.toml").read_text()
+    assert 'version = "1.2.0"' in (ROOT / "pyproject.toml").read_text()
 
 
 def test_release_artifact_jobs_run_unsplit_strict_twine_checks_before_upload() -> None:

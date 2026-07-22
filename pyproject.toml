@@ -1,6 +1,6 @@
 [project]
 name = "treemendous"
-version = "1.1.1"
+version = "1.2.0"
 description = "Exact integer range sets with Python/C++ backends, atomic native batches, experimental multidimensional indexes, and 50 application engines."
 authors = [{ name = "Joseph Cox", email = "joseph@codensity.io" }]
 license = "BSD-3-Clause"
