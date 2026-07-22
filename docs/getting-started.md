@@ -124,7 +124,12 @@ just test-gpu
 
 ## Next steps
 
+- [Choose the right interface](choosing-an-interface.md)
 - [Canonical API](api.md)
+- [Exact-batch contract](exact-batch.md)
+- [Application patterns](application-patterns.md)
+- [Application engine index](applications.md)
 - [Backend support](backends.md)
+- [Performance](performance.md)
 - [Benchmark methodology](benchmarking.md)
 - [Release process](releasing.md)

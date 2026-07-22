@@ -302,6 +302,27 @@ print(json.dumps({
         completed.stdout.strip() == "changed=12,4,4,12 restored=True max_operations=4"
     )
 
+    pattern_outputs = {
+        "atomic_port_pool_reconciliation.py": (
+            "free=10000-10001,10003-10005,10006-10008 changed=2,1"
+        ),
+        "spatiotemporal_geofences.py": (
+            "matches=alpha,beta handles=1,2,3 process_local=True"
+        ),
+    }
+    for filename, expected in pattern_outputs.items():
+        pattern = readme.parent / "examples/patterns" / filename
+        completed = subprocess.run(
+            [str(python), str(pattern)],
+            cwd=unrelated,
+            env=clean_environment,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert completed.returncode == 0, completed.stderr
+        assert completed.stdout.strip() == expected
+
     application_example = (
         readme.parent / "examples/applications/partitioning/document_search.py"
     )

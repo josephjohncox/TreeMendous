@@ -17,6 +17,11 @@ from tests.docs.inventory import tracked_markdown
 ROOT = Path(__file__).resolve().parents[2]
 README = ROOT / "README.md"
 MAINTAINED_DOCS = tracked_markdown(ROOT)
+DESCRIPTION = (
+    "Exact integer range sets with Python/C++ backends, atomic native batches, "
+    "experimental multidimensional indexes, and 50 application engines."
+)
+REPOSITORY_URL = "https://github.com/josephjohncox/TreeMendous"
 RUNNABLE_EXAMPLES = (
     (ROOT / "examples/basic_rangeset.py", "allocated [9, 11)"),
     (
@@ -41,6 +46,14 @@ RUNNABLE_EXAMPLES = (
         ROOT / "examples/multidimensional/core/bounded_box_index.py",
         "matches=2 handles=1,2 grid=(4, 4, 4) postings=9",
     ),
+    (
+        ROOT / "examples/patterns/atomic_port_pool_reconciliation.py",
+        "free=10000-10001,10003-10005,10006-10008 changed=2,1",
+    ),
+    (
+        ROOT / "examples/patterns/spatiotemporal_geofences.py",
+        "matches=alpha,beta handles=1,2,3 process_local=True",
+    ),
 )
 
 
@@ -50,7 +63,7 @@ def _python_blocks(markdown: str) -> list[str]:
 
 def test_readme_python_blocks_execute_from_unrelated_cwd(tmp_path: Path) -> None:
     blocks = _python_blocks(README.read_text())
-    assert blocks, "README must contain an executable Python quickstart"
+    assert len(blocks) == 2, "README must contain two independent API quickstarts"
     for index, block in enumerate(blocks):
         completed = subprocess.run(
             [sys.executable, "-c", block],
@@ -96,8 +109,60 @@ def test_maintained_relative_links_resolve() -> None:
 
 def test_installed_version_matches_project_metadata() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    assert project["project"]["version"] == "1.1.0"
+    assert project["project"]["version"] == "1.1.1"
     assert version("treemendous") == project["project"]["version"]
+
+
+def test_project_metadata_describes_and_links_the_user_surface() -> None:
+    import treemendous
+
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    assert project["description"] == DESCRIPTION
+    assert treemendous.__description__ == DESCRIPTION
+    assert project["readme"] == "README.md"
+    assert {
+        "intervals",
+        "range-set",
+        "allocation",
+        "scheduling",
+        "spatial-index",
+        "pybind11",
+    } <= set(project["keywords"])
+    assert project["urls"] == {
+        "Homepage": "https://pypi.org/project/treemendous/",
+        "Documentation": f"{REPOSITORY_URL}/blob/main/docs/README.md",
+        "Repository": REPOSITORY_URL,
+        "Issues": f"{REPOSITORY_URL}/issues",
+        "Changelog": f"{REPOSITORY_URL}/releases",
+    }
+
+
+def test_readme_links_are_absolute_and_pypi_safe() -> None:
+    targets = re.findall(r"!?\[[^]]*\]\(([^)]+)\)", README.read_text())
+    assert targets
+    assert all(target.startswith("https://") for target in targets)
+    repository_targets = [
+        target for target in targets if target.startswith("https://github.com/")
+    ]
+    assert repository_targets
+    assert all(target.startswith(f"{REPOSITORY_URL}/") for target in repository_targets)
+
+
+def test_performance_guide_binds_durable_release_evidence() -> None:
+    performance = (ROOT / "docs/performance.md").read_text()
+    assert "ec91793d0dbd5152b3bb2baf4231297df92692f0" in performance
+    assert (
+        "af70331fad467ba3cf6eeb3f24b2733b15e05dee4ee4e1acc2f7053cdfdb78e1"
+        in performance
+    )
+    assert "treemendous-rangeset-standard-ec91793.json" in performance
+    assert "treemendous-exact-batch-1.1.0.json" in performance
+    assert "treemendous-exact-batch-scaling-1.1.0.json" in performance
+    assert "treemendous-scalar-attribution-1.1.0.json" in performance
+    assert (
+        "7b63e752b0f12c765c0e099e7229d4f3492da7fd364cc370dda0d4b9860732d9"
+        in performance
+    )
 
 
 def test_release_tag_contract_tracks_the_releasable_major_version() -> None:
@@ -115,7 +180,31 @@ def test_release_tag_contract_tracks_the_releasable_major_version() -> None:
     assert workflow.count("persist-credentials: false") == 5
     assert workflow.count("enable-cache: false") == 4
     assert "baseline-ref: fdb4efd5f407717c8e18b94e6f4c21cbfb8e5daa" in workflow
-    assert 'version = "1.1.0"' in (ROOT / "pyproject.toml").read_text()
+    assert 'version = "1.1.1"' in (ROOT / "pyproject.toml").read_text()
+
+
+def test_release_artifact_jobs_run_unsplit_strict_twine_checks_before_upload() -> None:
+    workflow = (ROOT / ".github/workflows/release.yml").read_text()
+    artifact_check = (
+        "        run: >-\n"
+        "          uv run --frozen --no-sync python -m twine check --strict\n"
+        "          artifacts/*"
+    )
+    aggregate_check = (
+        "        run: >-\n"
+        "          uv run --frozen --no-sync python -m twine check --strict\n"
+        "          release-artifacts/*"
+    )
+    assert workflow.count(artifact_check) == 2
+    assert workflow.count(aggregate_check) == 1
+    assert workflow.count("python -m twine check --strict") == 3
+
+    sdist = workflow.split("  sdist:\n", 1)[1].split("  wheels:\n", 1)[0]
+    wheels = workflow.split("  wheels:\n", 1)[1].split("  verify-release:\n", 1)[0]
+    aggregate = workflow.split("  verify-release:\n", 1)[1].split("  publish:\n", 1)[0]
+    assert sdist.index(artifact_check) < sdist.index("actions/upload-artifact")
+    assert wheels.index(artifact_check) < wheels.index("actions/upload-artifact")
+    assert aggregate.index(aggregate_check) < aggregate.index("actions/upload-artifact")
 
 
 def test_version_resolution_uses_metadata_and_source_fallback(monkeypatch) -> None:

@@ -52,6 +52,14 @@ is private implementation code. The concrete scenario modules add the domain
 rules, validation, result types, diagnostics, and factory interfaces that
 callers should use.
 
+The separate `treemendous.exact_batch` API is not integrated into these 50
+engines. The radio-spectrum scheduler is the one current generic
+multidimensional integration: it wraps an experimental `BoxIndex(2)` behind
+application-specific channel/time reservation semantics. The Morton catalog
+does not use `BoxIndex`; it uses one-dimensional Morton candidate bands plus
+exact Cartesian filtering. See [Application patterns](application-patterns.md)
+for examples outside the registry.
+
 <!-- BEGIN GENERATED APPLICATION INDEX -->
 ## Partitioning and work claiming
 

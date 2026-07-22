@@ -26,12 +26,27 @@ from setup import PortableBuildPy
 
 pytestmark = pytest.mark.packaging
 
+NEW_USER_SDIST_FILES = {
+    "docs/application-patterns.md",
+    "docs/choosing-an-interface.md",
+    "docs/performance.md",
+    "docs/releases/1.1.1.md",
+    "examples/patterns/atomic_port_pool_reconciliation.py",
+    "examples/patterns/spatiotemporal_geofences.py",
+}
 
-def test_stable_exact_batch_requires_subinterpreter_safe_pybind11() -> None:
+
+def test_build_extra_contains_release_validation_tools() -> None:
     project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    build_extra = project["project"]["optional-dependencies"]["build"]
     requirement = "pybind11>=3.0.0"
     assert requirement in project["build-system"]["requires"]
-    assert requirement in project["project"]["optional-dependencies"]["build"]
+    assert requirement in build_extra
+    assert "twine>=6.2.0" in build_extra
+
+
+def test_sdist_policy_requires_new_user_guides_and_patterns() -> None:
+    assert NEW_USER_SDIST_FILES <= REQUIRED_SDIST
 
 
 def _sdist(path: Path, names: set[str]) -> None:
