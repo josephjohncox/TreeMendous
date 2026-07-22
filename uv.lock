@@ -951,7 +951,7 @@ wheels = [
 
 [[package]]
 name = "treemendous"
-version = "1.0.0"
+version = "1.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "sortedcontainers" },
@@ -983,7 +983,7 @@ requires-dist = [
     { name = "hypothesis", marker = "extra == 'test'", specifier = ">=6.119.4" },
     { name = "mypy", marker = "extra == 'quality'", specifier = ">=1.15.0" },
     { name = "pip-audit", marker = "extra == 'quality'", specifier = ">=2.8.0" },
-    { name = "pybind11", marker = "extra == 'build'", specifier = ">=2.13.6" },
+    { name = "pybind11", marker = "extra == 'build'", specifier = ">=3.0.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.3.3" },
     { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=6.0.0" },
     { name = "ruff", marker = "extra == 'quality'", specifier = ">=0.11.0" },

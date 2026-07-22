@@ -20,6 +20,10 @@ MAINTAINED_DOCS = tracked_markdown(ROOT)
 RUNNABLE_EXAMPLES = (
     (ROOT / "examples/basic_rangeset.py", "allocated [9, 11)"),
     (
+        ROOT / "examples/exact_batch.py",
+        "changed=12,4,4,12 restored=True max_operations=4",
+    ),
+    (
         ROOT / "examples/multidimensional/core/linear_box_index.py",
         ("matches=2 handles=1,2 updated=primary-updated removed=secondary remaining=1"),
     ),
@@ -92,7 +96,7 @@ def test_maintained_relative_links_resolve() -> None:
 
 def test_installed_version_matches_project_metadata() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    assert project["project"]["version"] == "1.0.0"
+    assert project["project"]["version"] == "1.1.0"
     assert version("treemendous") == project["project"]["version"]
 
 
@@ -104,7 +108,14 @@ def test_release_tag_contract_tracks_the_releasable_major_version() -> None:
     # GHCR image exists, not the tag-object SHA that yields `manifest unknown`.
     assert "ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e" in workflow
     assert "106e0b0b7c337fa67ed433972f777c6357f78598" not in workflow
-    assert 'version = "1.0.0"' in (ROOT / "pyproject.toml").read_text()
+    assert (
+        "uv run --frozen --no-sync pytest \\\n"
+        "            tests/packaging/test_wheel_install.py -q"
+    ) in workflow
+    assert workflow.count("persist-credentials: false") == 5
+    assert workflow.count("enable-cache: false") == 4
+    assert "baseline-ref: fdb4efd5f407717c8e18b94e6f4c21cbfb8e5daa" in workflow
+    assert 'version = "1.1.0"' in (ROOT / "pyproject.toml").read_text()
 
 
 def test_version_resolution_uses_metadata_and_source_fallback(monkeypatch) -> None:

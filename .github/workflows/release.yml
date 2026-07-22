@@ -11,9 +11,12 @@ jobs:
   version:
     name: Release tag matches project version
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       # actions/checkout v4
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       # actions/setup-python v5
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
@@ -38,15 +41,47 @@ jobs:
     name: Audit release build/test/quality and core runtime dependencies
     needs: version
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       # actions/checkout v4
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       # astral-sh/setup-uv v6
       - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
         with:
           python-version: "3.12"
-      - run: uv sync --extra build --extra quality --extra test
+          enable-cache: false
+      - run: uv sync --frozen --extra build --extra quality --extra test
       - run: uv lock --check
+      - name: Build native CPU extensions for release audit
+        run: >-
+          uv run --frozen --no-sync python setup.py
+          build_ext --inplace --force
+      - name: Enforce Ruff formatting and lint
+        run: |
+          uv run --frozen --no-sync ruff format --check .
+          uv run --frozen --no-sync ruff check .
+      - name: Enforce package typing
+        run: uv run --frozen --no-sync mypy treemendous
+      - name: Run focused stable exact-batch tests
+        run: >-
+          uv run --frozen --no-sync pytest -q
+          tests/unit/test_exact_batch.py
+          tests/unit/test_exact_batch_contract.py
+      - name: Run full non-hardware tests
+        run: >-
+          uv run --frozen --no-sync pytest -q
+          -m "not benchmark and not cuda and not metal and not icl"
+      - name: Run documentation and packaging contracts explicitly
+        run: >-
+          uv run --frozen --no-sync pytest -q
+          tests/docs tests/packaging/test_artifact_policy.py
+          tests/packaging/test_repository_layout.py
+      - name: Compile maintained Python sources
+        run: >-
+          uv run --frozen --no-sync python -m compileall -q
+          treemendous tests scripts setup.py setup_gpu.py setup_metal.py
       - run: uv run --frozen --no-sync pip-audit --skip-editable
       - name: Audit core runtime dependency export
         shell: bash
@@ -56,20 +91,40 @@ jobs:
           uv run --frozen --no-sync pip-audit \
             --requirement /tmp/treemendous-core-requirements.txt
 
+  exact-batch-evidence:
+    name: Exact-batch evidence against pre-promotion main
+    needs: version
+    uses: ./.github/workflows/exact-batch-evidence.yml
+    with:
+      baseline-ref: fdb4efd5f407717c8e18b94e6f4c21cbfb8e5daa
+
   sdist:
     name: Build the only sdist
     needs: [version, audit]
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       # actions/checkout v4
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       # astral-sh/setup-uv v6
       - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
         with:
           python-version: "3.12"
-      - run: uv sync --extra build --extra quality --extra test
+          enable-cache: false
+      - run: uv sync --frozen --extra build --extra quality --extra test
       - run: uv build --sdist --out-dir artifacts
-      - run: uv run python -m scripts.verify_artifact_contents artifacts
+      - run: >-
+          uv run --frozen --no-sync python
+          -m scripts.verify_artifact_contents artifacts
+      - name: Clean-install sdist and smoke stable APIs from arbitrary CWD
+        shell: bash
+        run: |
+          sdist=$(find artifacts -name '*.tar.gz' -print -quit)
+          TREEMENDOUS_SDIST="$PWD/$sdist" \
+            uv run --frozen --no-sync pytest \
+            tests/packaging/test_sdist_install.py -q
       # actions/upload-artifact v4
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -81,6 +136,7 @@ jobs:
     name: Wheel / ${{ matrix.os }} / Python ${{ matrix.python }}
     needs: [version, audit]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
@@ -109,11 +165,14 @@ jobs:
     steps:
       # actions/checkout v4
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       # astral-sh/setup-uv v6
       - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
         with:
           python-version: ${{ matrix.python }}
-      - run: uv sync --extra build --extra quality --extra test
+          enable-cache: false
+      - run: uv sync --frozen --extra build --extra quality --extra test
       - name: Build repaired manylinux CPU wheel
         if: runner.os == 'Linux'
         # pypa/cibuildwheel v2.23.3
@@ -134,21 +193,26 @@ jobs:
         if: runner.os == 'macOS'
         env:
           MACOSX_DEPLOYMENT_TARGET: "12.0"
-        run: uv run python setup_metal.py bdist_wheel --dist-dir artifacts
+        run: >-
+          uv run --frozen --no-sync python setup_metal.py
+          bdist_wheel --dist-dir artifacts
       - name: Verify repaired manylinux wheel only
         if: runner.os == 'Linux'
         run: >-
-          uv run python -m scripts.verify_artifact_contents
+          uv run --frozen --no-sync python -m scripts.verify_artifact_contents
           --require-manylinux artifacts
       - name: Verify platform wheel
         if: runner.os != 'Linux'
-        run: uv run python -m scripts.verify_artifact_contents artifacts
+        run: >-
+          uv run --frozen --no-sync python
+          -m scripts.verify_artifact_contents artifacts
       - name: Clean install and arbitrary-CWD smoke
         shell: bash
         run: |
           wheel=$(find artifacts -name '*.whl' -print -quit)
           TREEMENDOUS_WHEEL="$PWD/$wheel" \
-            uv run pytest tests/packaging/test_wheel_install.py -q
+            uv run --frozen --no-sync pytest \
+            tests/packaging/test_wheel_install.py -q
       # actions/upload-artifact v4
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -160,17 +224,27 @@ jobs:
     name: Aggregate and verify release artifacts
     needs: [sdist, wheels]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       # actions/checkout v4
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
       # astral-sh/setup-uv v6
       - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
         with:
           python-version: "3.12"
-      - run: uv sync --extra build --extra quality --extra test
+          enable-cache: false
+      - run: uv sync --frozen --extra build --extra quality --extra test
       # actions/download-artifact v4
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
+          name: release-sdist
+          path: release-artifacts
+      # actions/download-artifact v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: wheel-*
           path: release-artifacts
           merge-multiple: true
       - name: Require exactly one source distribution
@@ -178,7 +252,9 @@ jobs:
         run: |
           count=$(find release-artifacts -name '*.tar.gz' | wc -l | tr -d ' ')
           test "$count" = 1
-      - run: uv run python -m scripts.verify_artifact_contents release-artifacts
+      - run: >-
+          uv run --frozen --no-sync python
+          -m scripts.verify_artifact_contents release-artifacts
       # actions/upload-artifact v4
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -188,8 +264,9 @@ jobs:
 
   publish:
     name: Trusted publisher (single upload authority)
-    needs: verify-release
+    needs: [verify-release, exact-batch-evidence]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment:
       name: pypi
       url: https://pypi.org/p/treemendous

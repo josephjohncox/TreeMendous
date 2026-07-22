@@ -1,22 +1,30 @@
-name: Experimental exact-batch evidence
+name: Exact-batch production evidence
 
 on:
+  workflow_call:
+    inputs:
+      baseline-ref:
+        description: Immutable scalar-attribution baseline ref
+        required: true
+        type: string
   pull_request:
     paths:
       - ".github/workflows/exact-batch-evidence.yml"
       - "docs/benchmarking.md"
-      - "docs/experimental-exact-batch.md"
+      - "docs/exact-batch.md"
       - "Justfile"
       - "MANIFEST.in"
       - "pyproject.toml"
       - "scripts/verify_exact_batch_benchmark.py"
+      - "scripts/verify_exact_batch_scaling.py"
       - "scripts/verify_mutation_attribution.py"
       - "setup.py"
       - "setup_gpu.py"
       - "setup_metal.py"
       - "tests/performance/**"
       - "tests/unit/test_exact_batch_benchmark_artifact.py"
-      - "tests/unit/test_experimental_exact_batch.py"
+      - "tests/unit/test_exact_batch_scaling_artifact.py"
+      - "tests/unit/test_exact_batch.py"
       - "tests/unit/test_mutation_attribution.py"
       - "treemendous/**"
       - "uv.lock"
@@ -39,9 +47,12 @@ jobs:
     env:
       EXACT_SAMPLES: "30"
       SCALAR_SAMPLES: "30"
+      SCALING_SAMPLES: "30"
       OUTPUT_DIR: build/benchmarks/exact-batch-evidence
       EXACT_JSON: build/benchmarks/exact-batch-evidence/exact-batch.json
       SCALAR_JSON: build/benchmarks/exact-batch-evidence/scalar-attribution.json
+      SCALING_JSON: >-
+        build/benchmarks/exact-batch-evidence/exact-batch-scaling.json
       TREE_MENDOUS_BUILD_COMMAND: >-
         uv run --frozen --no-sync python setup.py build_ext --inplace --force
     steps:
@@ -64,7 +75,7 @@ jobs:
         shell: bash
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          DISPATCH_BASE_REF: ${{ inputs.baseline-ref }}
+          BASELINE_REF: ${{ inputs.baseline-ref }}
         run: |
           set -euo pipefail
           candidate=$(git rev-parse HEAD)
@@ -72,7 +83,7 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
             baseline=$(git rev-parse "$PR_BASE_SHA^{commit}")
           else
-            git fetch --no-tags origin "$DISPATCH_BASE_REF"
+            git fetch --no-tags origin "$BASELINE_REF"
             baseline=$(git rev-parse "FETCH_HEAD^{commit}")
           fi
           test "$baseline" != "$candidate"
@@ -99,9 +110,10 @@ jobs:
       - name: Run focused correctness and evidence contracts
         run: >-
           uv run --frozen --no-sync pytest -q
-          tests/unit/test_experimental_exact_batch.py
+          tests/unit/test_exact_batch.py
           tests/performance/test_exact_batch_benchmark.py
           tests/unit/test_exact_batch_benchmark_artifact.py
+          tests/unit/test_exact_batch_scaling_artifact.py
 
       - name: Generate exact-batch evidence
         shell: bash
@@ -115,6 +127,14 @@ jobs:
             --target-operations 20000 \
             --output "$EXACT_JSON" \
             --enforce-hard-gates
+
+      - name: Generate correctness-attested scaling evidence
+        run: >-
+          uv run --frozen --no-sync python
+          -m tests.performance.exact_batch_scaling
+          --samples "$SCALING_SAMPLES"
+          --output "$SCALING_JSON"
+          --enforce-gate
 
       - name: Generate bounded quick scalar attribution
         shell: bash
@@ -153,7 +173,12 @@ jobs:
             --require-scalar-samples "$SCALAR_SAMPLES" \
             --scalar-attribution "$SCALAR_JSON" \
             --enforce-gates
-          test "$(find "$OUTPUT_DIR" -maxdepth 1 -type f | wc -l)" -eq 6
+          uv run --frozen --no-sync python \
+            -m scripts.verify_exact_batch_scaling "$SCALING_JSON" \
+            --expected-candidate "$CANDIDATE_SHA" \
+            --require-samples "$SCALING_SAMPLES" \
+            --enforce-gate
+          test "$(find "$OUTPUT_DIR" -maxdepth 1 -type f | wc -l)" -eq 9
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
           test -z "$(git status --porcelain --untracked-files=no)"
           test "$(git -C "$BASELINE_ROOT" rev-parse HEAD)" = "$BASELINE_SHA"
@@ -161,8 +186,12 @@ jobs:
             --porcelain --untracked-files=no)"
           exact_digest=$(cut -d ' ' -f 1 "$EXACT_JSON.sha256")
           scalar_digest=$(cut -d ' ' -f 1 "$SCALAR_JSON.sha256")
-          echo "exact_digest=$exact_digest" >> "$GITHUB_OUTPUT"
-          echo "scalar_digest=$scalar_digest" >> "$GITHUB_OUTPUT"
+          scaling_digest=$(cut -d ' ' -f 1 "$SCALING_JSON.sha256")
+          {
+            echo "exact_digest=$exact_digest"
+            echo "scalar_digest=$scalar_digest"
+            echo "scaling_digest=$scaling_digest"
+          } >> "$GITHUB_OUTPUT"
 
       # actions/upload-artifact v4
       - name: Upload verified exact-batch evidence
@@ -178,6 +207,9 @@ jobs:
             build/benchmarks/exact-batch-evidence/scalar-attribution.json
             build/benchmarks/exact-batch-evidence/scalar-attribution.md
             build/benchmarks/exact-batch-evidence/scalar-attribution.json.sha256
+            build/benchmarks/exact-batch-evidence/exact-batch-scaling.json
+            build/benchmarks/exact-batch-evidence/exact-batch-scaling.md
+            build/benchmarks/exact-batch-evidence/exact-batch-scaling.json.sha256
           if-no-files-found: error
           retention-days: 90
           compression-level: 6
@@ -189,6 +221,7 @@ jobs:
           BASELINE_SHA: ${{ steps.revisions.outputs.baseline }}
           EXACT_DIGEST: ${{ steps.verify.outputs.exact_digest }}
           SCALAR_DIGEST: ${{ steps.verify.outputs.scalar_digest }}
+          SCALING_DIGEST: ${{ steps.verify.outputs.scaling_digest }}
           ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
           ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
         run: |
@@ -199,15 +232,19 @@ jobs:
 
           exact = json.loads(Path(os.environ["EXACT_JSON"]).read_text())
           scalar = json.loads(Path(os.environ["SCALAR_JSON"]).read_text())
+          scaling = json.loads(Path(os.environ["SCALING_JSON"]).read_text())
           public = scalar["layers"]["rangeset_public"]
           gates = exact["gates"]
-          print("## Verified experimental exact-batch evidence\n")
+          print("## Verified stable exact-batch evidence\n")
           print(f"- Candidate: `{os.environ['CANDIDATE_SHA']}`")
           print(f"- Scalar baseline: `{os.environ['BASELINE_SHA']}`")
           workload_digest = exact["workload_manifest"]["digest"]
           print(f"- Restorative workload digest: `{workload_digest}`")
           print(f"- Exact JSON SHA-256: `{os.environ['EXACT_DIGEST']}`")
           print(f"- Scalar JSON SHA-256: `{os.environ['SCALAR_DIGEST']}`")
+          print(f"- Scaling JSON SHA-256: `{os.environ['SCALING_DIGEST']}`")
+          scaling_workload = scaling["workload_manifest"]["digest"]
+          print(f"- Scaling workload digest: `{scaling_workload}`")
           print(f"- GitHub artifact digest: `{os.environ['ARTIFACT_DIGEST']}`")
           print(f"- [Download verified evidence]({os.environ['ARTIFACT_URL']})")
           print("\n| Gate | Lower/upper 95% bound | Threshold |")
@@ -216,12 +253,19 @@ jobs:
           batch16 = gates["batch16_speedup"]["observed"]
           throughput = gates["batch16_absolute"]["observed"]
           scalar_upper = public["confidence_95_ratio"][1]
+          scaling_upper = scaling["gates"]["production_envelope"][
+              "observed_upper_95_ns"
+          ] / 1_000_000
           print(f"| Batch 4 speedup | {batch4:.4f} | >= 1.0 |")
           print(f"| Batch 16 speedup | {batch16:.4f} | >= 2.0 |")
           print(f"| Batch 16 ops/s | {throughput:.0f} | >= 2000000 |")
           print(
               f"| Stable scalar candidate/baseline | {scalar_upper:.4f} "
               "| <= 1.03 |"
+          )
+          print(
+              f"| 100,000 intervals batch-16 latency (ms) | "
+              f"{scaling_upper:.3f} | <= 10.0 |"
           )
           print(
               "\nQuick attribution scopes only the stable `rangeset_public` "

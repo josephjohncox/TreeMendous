@@ -155,6 +155,42 @@ def test_rejects_falsified_gates_and_derived_fields(
         verifier.verify_artifact(path)
 
 
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (
+            lambda report: report["gates"]["batch16_speedup"].update(passed=1),
+            "gate derivation",
+        ),
+        (
+            lambda report: report["rows"]["1"].update(batch_size=True),
+            "declaration is invalid",
+        ),
+        (
+            lambda report: report["thresholds"].update(batch16_speedup_lower_95=2),
+            "fixed thresholds",
+        ),
+        (
+            lambda report: report["workload_manifest"]["traces"]["1"]["operations"][
+                0
+            ].__setitem__(0, False),
+            "workload manifest",
+        ),
+    ],
+)
+def test_rejects_json_type_coercion_tamper(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: Any,
+    message: str,
+) -> None:
+    path, report = _artifact(tmp_path, monkeypatch)
+    mutation(report)
+    _rewrite(path, report)
+    with pytest.raises(ValueError, match=message):
+        verifier.verify_artifact(path)
+
+
 def test_rejects_py_boundary_substitution_and_workload_digest_mismatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -369,6 +405,8 @@ def test_exact_batch_workflow_uses_package_module_entry_points() -> None:
         Path(__file__).parents[2] / ".github" / "workflows" / "exact-batch-evidence.yml"
     ).read_text(encoding="utf-8")
 
+    assert workflow.startswith("name: Exact-batch production evidence\n")
+    assert "Verified stable exact-batch evidence" in workflow
     assert "-m tests.performance.exact_batch_benchmark" in workflow
     assert "-m scripts.verify_mutation_attribution" in workflow
     assert "-m scripts.verify_exact_batch_benchmark" in workflow

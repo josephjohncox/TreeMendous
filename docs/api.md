@@ -139,6 +139,45 @@ so later caller mutation cannot alter default additions. Stable backend
 adapters must make each individual geometry mutation failure-atomic; callbacks
 and payload staging complete before that mutation is invoked.
 
+## Stable exact-batch API
+
+`treemendous.exact_batch` is a separate stable API for native CPU geometry
+transactions whose ordered per-row results and whole-batch atomicity are part
+of the contract:
+
+```python
+from treemendous.exact_batch import (
+    BatchLimits,
+    BatchMutation,
+    ExactBatchRangeSet,
+    MutationOpcode,
+)
+
+limits = BatchLimits(max_operations=3, max_live_intervals=100)
+ranges = ExactBatchRangeSet((0, 1_000), initially_available=False, limits=limits)
+results = ranges.mutate([
+    BatchMutation(MutationOpcode.ADD, 100, 200),
+    BatchMutation(MutationOpcode.DISCARD_REQUIRE_COVERED, 120, 140),
+])
+assert [result.changed_length for result in results] == [100, 20]
+assert ranges.limits is limits
+```
+
+The public module names are `ExactBatchRangeSet`, `BatchMutation`,
+`MutationOpcode`, `BatchLimits`, `PackedMutationResults`, and
+`BatchLimitError`. The range set exposes `mutate`, `mutate_packed`, `snapshot`,
+`domain`, and the read-only `limits` property. Ergonomic rows use
+`BatchMutation`; the packed path accepts exact immutable `bytes` containing
+native-endian signed-int64 `(opcode, start, end)` triples. Result memoryviews
+use the documented CSR layout. Every failure restores the exact pre-batch
+snapshot.
+
+This API has independent sorted-vector geometry and no payloads, allocation,
+or generic query surface. It is not re-exported from `treemendous`, added to
+`RangeSetProtocol`, or discoverable through `BackendRegistry`. See the
+[complete exact-batch contract](exact-batch.md) for opcodes, packed layouts,
+resource-limit defaults, concurrency, and the qualified scaling envelope.
+
 ## Backend registry
 
 ```python

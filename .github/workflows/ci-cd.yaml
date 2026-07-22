@@ -104,6 +104,7 @@ jobs:
           uv run pytest tests/unit/test_native_core_contract.py
           tests/unit/test_core_contract.py
           tests/unit/test_stable_backends.py
+          tests/unit/test_exact_batch.py
           -m "not metal and not cuda and not icl and not benchmark
           and not packaging"
 
@@ -135,7 +136,8 @@ jobs:
           export ASAN_OPTIONS=detect_leaks=0:halt_on_error=1
           export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
           uv run pytest tests/unit/test_native_core_contract.py \
-            tests/unit/test_core_contract.py -q
+            tests/unit/test_core_contract.py \
+            tests/unit/test_exact_batch.py -q
 
   benchmark-smoke:
     name: Validated workload benchmark smoke

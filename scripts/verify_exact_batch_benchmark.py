@@ -16,7 +16,7 @@ from typing import Any
 from scripts.verify_mutation_attribution import verify_artifact as verify_attribution
 from tests.performance.mutation_attribution import PRIMARY_LAYER
 
-SCHEMA = "treemendous-experimental-exact-batch-benchmark-v2"
+SCHEMA = "treemendous-exact-batch-benchmark-v3"
 WORKLOAD_SCHEMA = "treemendous-exact-batch-restorative-workload-v1"
 BASELINE_BACKEND = "cpp_boundary"
 BATCH_SIZES = (1, 2, 4, 8, 16, 32, 64)
@@ -78,6 +78,22 @@ def _boolean(value: Any, description: str) -> bool:
 def _exact_fields(value: dict[str, Any], expected: set[str], description: str) -> None:
     if set(value) != expected:
         raise ValueError(f"{description} fields are incomplete or unexpected")
+
+
+def _exact_json_equal(actual: Any, expected: Any) -> bool:
+    """Compare decoded JSON without bool/int or int/float coercion."""
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        return set(actual) == set(expected) and all(
+            _exact_json_equal(actual[key], value) for key, value in expected.items()
+        )
+    if isinstance(expected, list):
+        return len(actual) == len(expected) and all(
+            _exact_json_equal(item, value)
+            for item, value in zip(actual, expected, strict=True)
+        )
+    return bool(actual == expected)
 
 
 def _valid_commit(value: Any) -> bool:
@@ -359,6 +375,7 @@ def _verify_methodology(
             "workload",
             "batch_1",
             "timed_batch_layer",
+            "post_timing_validation",
             "excluded",
         },
         "methodology",
@@ -377,10 +394,14 @@ def _verify_methodology(
         "batch_sizes": list(BATCH_SIZES),
         "workload": "deterministic per-size restorative traces; four-operation blocks preserve the exact initial state",
         "batch_1": "separately labelled no-op call-overhead diagnostic",
-        "timed_batch_layer": "buffer acquisition/copy, state staging, ordered execution, packed allocation, atomic commit, packed-result destruction",
-        "excluded": "manager/setup construction, invariant snapshots, validation, and materialize",
+        "timed_batch_layer": "buffer acquisition/copy, state staging, ordered execution, packed allocation, atomic commit, and packed-result destruction except one retained validation result per sample",
+        "post_timing_validation": "the last timed packed result and both timed instances are checked against canonical per-row results and final state outside timing",
+        "excluded": "manager/setup construction, invariant snapshots, post-timing validation, and materialize",
     }
-    if any(methodology.get(key) != value for key, value in fixed.items()):
+    if any(
+        not _exact_json_equal(methodology.get(key), value)
+        for key, value in fixed.items()
+    ):
         raise ValueError("benchmark methodology is inconsistent")
     target = methodology.get("target_operations")
     if isinstance(target, bool) or not isinstance(target, int) or target < 1:
@@ -414,14 +435,16 @@ def _verify_rows(
         classification = "single-call-no-op-diagnostic" if size == 1 else "restorative"
         logical = row.get("logical_operations_per_sample")
         expected_logical = max(20, target_operations // size) * size
-        if (
-            row.get("batch_size") != size
-            or row.get("classification") != classification
-            or row.get("baseline_backend") != BASELINE_BACKEND
-            or isinstance(logical, bool)
-            or not isinstance(logical, int)
-            or logical != expected_logical
-        ):
+        declaration = {
+            "batch_size": size,
+            "classification": classification,
+            "baseline_backend": BASELINE_BACKEND,
+            "logical_operations_per_sample": expected_logical,
+        }
+        if any(
+            not _exact_json_equal(row.get(key), value)
+            for key, value in declaration.items()
+        ) or isinstance(logical, bool):
             raise ValueError(f"{description} declaration is invalid")
         batch = _positive_integer_samples(
             row.get("batch_ns_per_operation_samples"),
@@ -434,24 +457,28 @@ def _verify_rows(
             expected_count=samples,
         )
         expected_paired = _paired_statistics(scalar, batch)
-        if row.get("paired") != expected_paired:
+        if not _exact_json_equal(row.get("paired"), expected_paired):
             raise ValueError(f"{description} paired derivations are inconsistent")
         throughput = [1_000_000_000 / value for value in batch]
         throughput_ci = list(_median_confidence(throughput, THROUGHPUT_BOOTSTRAP_SEED))
-        if row.get("batch_median_ops_per_second") != statistics.median(throughput):
+        if not _exact_json_equal(
+            row.get("batch_median_ops_per_second"), statistics.median(throughput)
+        ):
             raise ValueError(f"{description} throughput median is inconsistent")
-        if row.get("batch_ops_per_second_confidence_95") != throughput_ci:
+        if not _exact_json_equal(
+            row.get("batch_ops_per_second_confidence_95"), throughput_ci
+        ):
             raise ValueError(f"{description} throughput CI is inconsistent")
         ratio_ci = expected_paired["confidence_95_ratio"]
         speedup_ci = [1.0 / ratio_ci[1], 1.0 / ratio_ci[0]]
-        if row.get("speedup_confidence_95") != speedup_ci:
+        if not _exact_json_equal(row.get("speedup_confidence_95"), speedup_ci):
             raise ValueError(f"{description} speedup CI is inconsistent")
         result[str(size)] = row
     return result
 
 
 def _verify_gates(report: dict[str, Any], rows: dict[str, dict[str, Any]]) -> None:
-    if report.get("thresholds") != EXPECTED_THRESHOLDS:
+    if not _exact_json_equal(report.get("thresholds"), EXPECTED_THRESHOLDS):
         raise ValueError("fixed thresholds are missing or inconsistent")
     expected_observed = {
         "batch16_absolute": rows["16"]["batch_ops_per_second_confidence_95"][0],
@@ -475,7 +502,7 @@ def _verify_gates(report: dict[str, Any], rows: dict[str, dict[str, Any]]) -> No
             "observed": observed,
             "passed": observed >= threshold,
         }
-        if gate != expected:
+        if not _exact_json_equal(gate, expected):
             raise ValueError(f"{name} gate derivation is inconsistent")
 
 
@@ -510,7 +537,7 @@ def verify_report(
         raise ValueError("exact-batch baseline must be cpp_boundary")
     commit = _verify_metadata(report, expected_candidate)
     samples, target_operations = _verify_methodology(report, require_samples)
-    if report.get("workload_manifest") != _expected_manifest():
+    if not _exact_json_equal(report.get("workload_manifest"), _expected_manifest()):
         raise ValueError("restorative workload manifest or digest is inconsistent")
     rows = _verify_rows(report, samples, target_operations)
     _positive_integer_samples(

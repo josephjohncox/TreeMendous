@@ -7,9 +7,19 @@ from pathlib import Path
 
 
 def tracked_markdown(root: Path) -> tuple[Path, ...]:
-    """Return tracked/staged Markdown under docs and examples."""
+    """Return maintained worktree Markdown under docs and examples."""
     completed = subprocess.run(
-        ["git", "ls-files", "-z", "--cached", "--", "docs", "examples"],
+        [
+            "git",
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--",
+            "docs",
+            "examples",
+        ],
         cwd=root,
         check=True,
         capture_output=True,
@@ -17,4 +27,6 @@ def tracked_markdown(root: Path) -> tuple[Path, ...]:
     paths = (
         root / item.decode("utf-8") for item in completed.stdout.split(b"\0") if item
     )
-    return tuple(sorted(path for path in paths if path.suffix == ".md"))
+    return tuple(
+        sorted(path for path in paths if path.suffix == ".md" and path.is_file())
+    )

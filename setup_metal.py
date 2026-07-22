@@ -145,6 +145,10 @@ if __name__ == "__main__":
     setup(
         ext_modules=[*make_cpu_extensions(), metal_extension],
         cmdclass={"build_ext": BuildMetalExtension},
-        package_data={"treemendous.cpp.metal": ["resources/*.metallib"]},
+        package_data={
+            "treemendous": ["py.typed"],
+            "treemendous.cpp": ["*.pyi"],
+            "treemendous.cpp.metal": ["resources/*.metallib"],
+        },
         zip_safe=False,
     )

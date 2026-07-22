@@ -30,10 +30,11 @@ evidence from generic stable-backend evidence.
 - [One-dimensional interval algorithms and performance](theory/one_dimensional_interval_algorithms.md)
 - [Experimental multidimensional `BoxIndex` semantics](theory/box_index_denotation.md)
 - [Experimental optimized multidimensional indexes](theory/optimized_box_indexes.md)
-- [Experimental exact whole-batch CPU mutations](experimental-exact-batch.md)
+- [Stable specialized exact whole-batch CPU mutations](exact-batch.md)
 - [Multidimensional batch, SIMD, Metal, and CUDA design](theory/multidimensional_acceleration.md)
 - [Contributing and quality gates](contributing.md)
 - [Release process](releasing.md)
+- [Tree-Mendous 1.1.0 release notes](releases/1.1.0.md)
 
 The stable root API is `RangeSet`, constructed with `create_range_set` or an
 immutable `BackendRegistry`. Application registry APIs live under
