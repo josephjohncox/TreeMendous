@@ -27,15 +27,20 @@ PYBIND11_MODULE(boundary, m) {
     const py::object domain = py::module_::import("treemendous.domain");
     const py::object span_type = domain.attr("Span");
     const py::object interval_result_type = domain.attr("IntervalResult");
-    const py::object mutation_result_type = domain.attr("MutationResult");
-    const auto mutation_result = [span_type, mutation_result_type](
+    // Trusted validation-free builders: the manager only emits int64 geometry it
+    // has already validated, so re-running the Python dataclass __post_init__
+    // checks on every delta is pure overhead.  These build the exact same
+    // public Span/MutationResult instances without that redundant validation.
+    const py::object native_span = domain.attr("_native_span");
+    const py::object native_mutation_result = domain.attr("_native_mutation_result");
+    const auto mutation_result = [native_span, native_mutation_result](
                                      const MutationDelta& delta) -> py::object {
         py::tuple changed(delta.changed.size());
         for (std::size_t index = 0; index < delta.changed.size(); ++index) {
             const auto& [start, end] = delta.changed[index];
-            changed[index] = span_type(start, end);
+            changed[index] = native_span(start, end);
         }
-        return mutation_result_type(
+        return native_mutation_result(
             changed, delta.changed_length, delta.fully_covered);
     };
 
@@ -89,6 +94,32 @@ PYBIND11_MODULE(boundary, m) {
                 manager.reserve_interval(checked_start, checked_end);
             }
             return result;
+        })
+        // Scalar hot-path mutators: apply the op and return only the int
+        // changed_length, building no Span/MutationResult.  changed_length == 0
+        // iff nothing changed; for a strict reserve a positive result iff the
+        // span was fully covered (and therefore applied).
+        .def("release_delta_length", [](IntervalManager& manager,
+                                         py::handle start, py::handle end) {
+            const Coordinate checked_start = checked_integer(start, "start");
+            const Coordinate checked_end = checked_integer(end, "end");
+            const MutationDelta delta = manager.preview_release_delta(
+                checked_start, checked_end);
+            manager.release_interval(checked_start, checked_end);
+            return py::int_(delta.changed_length);
+        })
+        .def("reserve_delta_length", [](IntervalManager& manager,
+                                         py::handle start, py::handle end,
+                                         bool require_covered) {
+            const Coordinate checked_start = checked_integer(start, "start");
+            const Coordinate checked_end = checked_integer(end, "end");
+            const MutationDelta delta = manager.preview_reserve_delta(
+                checked_start, checked_end, require_covered);
+            if (!require_covered || delta.fully_covered) {
+                manager.reserve_interval(checked_start, checked_end);
+                return py::int_(delta.changed_length);
+            }
+            return py::int_(0);
         })
         .def("find_interval", [](const IntervalManager& manager,
                                   py::handle point,

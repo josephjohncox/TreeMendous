@@ -6,7 +6,7 @@ import importlib
 
 import pytest
 
-from treemendous.domain import IntervalResult, MutationResult
+from treemendous.domain import IntervalResult
 
 MODULES = ("treemendous.cpp.boundary",)
 MIN_I64 = -(2**63)
@@ -74,7 +74,12 @@ def test_native_result_construction_failure_is_atomic(
     def fail_result(*args: object, **kwargs: object) -> None:
         raise RuntimeError("injected result failure")
 
-    monkeypatch.setattr(MutationResult, "__init__", fail_result)
+    # The delta path builds its Span/MutationResult through the trusted native
+    # constructors, which allocate via the module-level ``_object_new`` looked
+    # up at call time.  Making that allocation raise proves the result is
+    # materialized before the native mutation is applied, so a construction
+    # failure leaves the geometry unchanged.
+    monkeypatch.setattr("treemendous.domain._object_new", fail_result)
     with pytest.raises(RuntimeError, match="injected result failure"):
         manager.reserve_with_delta(2, 4, False)
     _expect_equal(_snapshot(manager), before)

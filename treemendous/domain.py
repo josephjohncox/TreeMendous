@@ -206,6 +206,36 @@ class MutationResult:
     fully_covered: bool
 
 
+# Trusted, validation-free constructors for coordinates a native backend has
+# already validated (int64, start < end, canonical geometry).  They build the
+# exact same public frozen-dataclass instances as the checked constructors
+# — identical fields, equality, hash, ordering, repr, pickle, and
+# ``dataclasses`` behavior — while skipping the redundant per-value
+# ``__post_init__`` validation on the hot mutation path.  They are private and
+# must only be called with coordinates a backend guarantees are valid.
+_object_new = object.__new__
+_object_setattr = object.__setattr__
+
+
+def _native_span(start: int, end: int) -> Span:
+    """Build a ``Span`` from backend-validated coordinates without re-checking."""
+    span = _object_new(Span)
+    _object_setattr(span, "start", start)
+    _object_setattr(span, "end", end)
+    return span
+
+
+def _native_mutation_result(
+    changed: tuple[Span, ...], changed_length: int, fully_covered: bool
+) -> MutationResult:
+    """Build a ``MutationResult`` from backend-validated deltas without checks."""
+    result = _object_new(MutationResult)
+    _object_setattr(result, "changed", changed)
+    _object_setattr(result, "changed_length", changed_length)
+    _object_setattr(result, "fully_covered", fully_covered)
+    return result
+
+
 @dataclass(frozen=True)
 class RangeSnapshot:
     """Immutable observable state of a range set."""

@@ -74,6 +74,7 @@ class BackendRegistry:
         payload_policy: PayloadPolicy[Any] | None = None,
         payload_cloner: Callable[[Any], Any] = deepcopy,
         initially_available: bool = True,
+        synchronized: bool = True,
     ) -> RangeSet:
         spec = self._resolve(backend, request)
         implementation = spec.loader()(**dict(spec.constructor_args))
@@ -83,6 +84,7 @@ class BackendRegistry:
             payload_policy=payload_policy,
             payload_cloner=payload_cloner,
             initially_available=initially_available,
+            synchronized=synchronized,
         )
 
     def _resolve(self, backend: str | None, request: BackendRequest) -> BackendSpec:
@@ -119,6 +121,7 @@ def create_range_set(
     payload_policy: PayloadPolicy[Any] | None = None,
     payload_cloner: Callable[[Any], Any] = deepcopy,
     initially_available: bool = True,
+    synchronized: bool = True,
 ) -> RangeSet:
     """Construct a canonical range set from the discovered default registry."""
     return _default_registry().create(
@@ -128,4 +131,5 @@ def create_range_set(
         payload_policy=payload_policy,
         payload_cloner=payload_cloner,
         initially_available=initially_available,
+        synchronized=synchronized,
     )

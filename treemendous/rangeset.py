@@ -33,6 +33,36 @@ from treemendous.policies import (
 _MISSING = object()
 
 
+class _NoOpLock:
+    """Lock sentinel that performs no synchronization.
+
+    Substituted for ``RangeSet._lock`` in unsynchronized mode.  It satisfies the
+    exact ``RLock`` surface the range set uses — context management plus
+    ``acquire``/``release`` — while performing no synchronization at all, so
+    every ``with self._lock:`` and ``self._lock.acquire``/``release`` site keeps
+    working unchanged.  Unsynchronized mode has no internal synchronization: the
+    caller alone guarantees single-threaded access or supplies external locking,
+    and snapshot/mutation consistency is the caller's responsibility.
+    """
+
+    __slots__ = ()
+
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def acquire(self, blocking: bool = True, timeout: float = -1.0) -> bool:
+        return True
+
+    def release(self) -> None:
+        return None
+
+
+_NOOP_LOCK = _NoOpLock()
+
+
 @dataclass(frozen=True)
 class _OrderedEvent:
     span: Span
@@ -142,6 +172,7 @@ class RangeSet:
         initially_available: bool = True,
         payload_policy: PayloadPolicy[Any] | None = None,
         payload_cloner: Callable[[Any], Any] = deepcopy,
+        synchronized: bool = True,
     ) -> None:
         self._adapter = adapter
         self._domain = (
@@ -149,7 +180,12 @@ class RangeSet:
             if isinstance(domain, ManagedDomain)
             else (ManagedDomain(domain) if domain is not None else None)
         )
-        self._lock = RLock()
+        # ``synchronized=True`` keeps the reentrant internal lock.  ``False``
+        # installs a no-op lock: the reentrancy guard still functions, but the
+        # caller owns all cross-thread synchronization and snapshot/mutation
+        # consistency (see ``_NoOpLock``).
+        self._synchronized = synchronized
+        self._lock: RLock | _NoOpLock = RLock() if synchronized else _NOOP_LOCK
         self._payload_activity_lock = Lock()
         self._payload_activity = 0
         self._authoritative_mutation_active = False
@@ -167,6 +203,16 @@ class RangeSet:
         self._authoritative_geometry = (
             payload_policy is None and adapter.supports_authoritative_geometry
         )
+        # Cached bound native mutators for the authoritative hot path.  They are
+        # bound once here so ``add``/``discard`` and the scalar mutators skip the
+        # adapter wrapper frame and its per-op ``isinstance`` check; a
+        # construction probe verifies their return contract, failing closed.
+        self._native_release: Callable[[int, int], MutationResult] | None = None
+        self._native_reserve: Callable[[int, int, bool], MutationResult] | None = None
+        self._native_scalar_release: Callable[[int, int], int] | None = None
+        self._native_scalar_reserve: Callable[[int, int, bool], int] | None = None
+        if self._authoritative_geometry:
+            self._bind_authoritative_fast_path()
         self._backend_validates_domain = False
 
         staged_payloads = self._payload_segments
@@ -214,10 +260,78 @@ class RangeSet:
         self._snapshot_cache: RangeSnapshot | None = None
         self._payload_segments = staged_payloads
         self._ordered_events = staged_events
+        # Hot-path constants resolved once: the managed domain to re-validate
+        # against per op, or ``None`` when the backend already validates it (so
+        # the scalar path skips the check entirely); and whether the fully-native
+        # scalar surface is available without a method call on the capable path.
+        self._validation_domain: ManagedDomain | None = (
+            self._domain
+            if (self._domain is not None and not self._backend_validates_domain)
+            else None
+        )
+        self._scalar_capable = (
+            self._authoritative_geometry and self._payload_policy is None
+        )
+
+    def _bind_authoritative_fast_path(self) -> None:
+        """Verify and cache the native mutators an authoritative backend exposes.
+
+        A construction-time probe against an isolated instance confirms the
+        delta contract before the hot path trusts it: the MutationResult
+        mutators must return ``MutationResult`` and any scalar mutators must
+        return an ``int``.  A backend that claims authoritative geometry but
+        breaks the contract fails closed here rather than at mutation time.
+        """
+        implementation = self._adapter.implementation
+        try:
+            probe = type(implementation)()
+        except Exception as exc:  # noqa: BLE001 - re-raised as a clear contract error
+            raise TypeError(
+                "authoritative geometry backends must be constructible for "
+                "hot-path verification"
+            ) from exc
+        for raw in (
+            probe.release_with_delta(0, 1),
+            probe.reserve_with_delta(0, 1, False),
+        ):
+            if not isinstance(raw, MutationResult):
+                raise TypeError(
+                    "authoritative geometry backends must return MutationResult"
+                )
+        self._native_release = implementation.release_with_delta
+        self._native_reserve = implementation.reserve_with_delta
+        if self._adapter.supports_scalar_delta:
+            for scalar in (
+                probe.release_delta_length(0, 1),
+                probe.reserve_delta_length(0, 1, False),
+            ):
+                if isinstance(scalar, bool) or not isinstance(scalar, int):
+                    raise TypeError(
+                        "authoritative scalar backends must return an int "
+                        "changed_length"
+                    )
+            self._native_scalar_release = implementation.release_delta_length
+            self._native_scalar_reserve = implementation.reserve_delta_length
+
+    def _require_scalar_capability(self) -> None:
+        """Guard the fully-native scalar surface; never fall back silently."""
+        if self._payload_policy is not None:
+            raise ValueError(
+                "scalar mutators require a geometry-only range set without a "
+                "payload policy"
+            )
+        if not self._authoritative_geometry:
+            raise ValueError(
+                "scalar mutators require an authoritative geometry backend"
+            )
 
     @property
     def domain(self) -> ManagedDomain | None:
         return self._domain
+
+    @property
+    def synchronized(self) -> bool:
+        return self._synchronized
 
     @property
     def payload_policy(self) -> PayloadPolicy[Any] | None:
@@ -515,20 +629,33 @@ class RangeSet:
         if self._authoritative_geometry:
             if payload is not _MISSING:
                 raise ValueError("payload requires an explicit payload policy")
-            with self._lock:
+            native_release = self._native_release
+            assert native_release is not None
+            # Hot path: acquire the shared lock directly (no ``with`` protocol,
+            # whose __enter__/__exit__ calls dominate the per-op cost) and skip
+            # it entirely when unsynchronized.  Synchronized mode uses the same
+            # ``self._lock`` object as every ``with self._lock:`` site, so
+            # mutual exclusion with snapshots/queries is preserved.
+            synchronized = self._synchronized
+            if synchronized:
+                self._lock.acquire()
+            try:
                 if self._authoritative_mutation_active:
                     raise RuntimeError(
                         "reentrant mutation on the same RangeSet is not allowed"
                     )
                 self._authoritative_mutation_active = True
                 try:
-                    result = self._adapter.release_with_delta(span.start, span.end)
+                    result = native_release(span.start, span.end)
                     self._total_free += result.changed_length
                     if result.changed:
                         self._invalidate_authoritative_geometry_cache(span, adding=True)
                     return result
                 finally:
                     self._authoritative_mutation_active = False
+            finally:
+                if synchronized:
+                    self._lock.release()
         with self._mutation():
             if payload is not _MISSING and self._payload_policy is None:
                 raise ValueError("payload requires an explicit payload policy")
@@ -583,16 +710,19 @@ class RangeSet:
     def discard(self, span: Span, *, require_covered: bool = False) -> MutationResult:
         self._validate_domain(span)
         if self._authoritative_geometry:
-            with self._lock:
+            native_reserve = self._native_reserve
+            assert native_reserve is not None
+            synchronized = self._synchronized
+            if synchronized:
+                self._lock.acquire()
+            try:
                 if self._authoritative_mutation_active:
                     raise RuntimeError(
                         "reentrant mutation on the same RangeSet is not allowed"
                     )
                 self._authoritative_mutation_active = True
                 try:
-                    result = self._adapter.reserve_with_delta(
-                        span.start, span.end, require_covered
-                    )
+                    result = native_reserve(span.start, span.end, require_covered)
                     self._total_free -= result.changed_length
                     if result.changed:
                         self._invalidate_authoritative_geometry_cache(
@@ -601,6 +731,9 @@ class RangeSet:
                     return result
                 finally:
                     self._authoritative_mutation_active = False
+            finally:
+                if synchronized:
+                    self._lock.release()
         with self._mutation():
             before = self._geometry_intervals()
             changed = _intersect_geometry(before, span)
@@ -663,6 +796,91 @@ class RangeSet:
             if committed_events is not None:
                 self._ordered_events = committed_events
             return MutationResult(changed, changed_length, covered)
+
+    def release(self, span: Span) -> int:
+        """Free ``span`` and return only the changed length (``add`` semantics).
+
+        This is the fully-native scalar path: it builds no ``MutationResult`` and
+        is exactly geometry-consistent with :meth:`add`.  It requires an
+        authoritative geometry backend and no payload policy; otherwise it raises
+        ``ValueError`` rather than falling back silently.
+        """
+        if not self._scalar_capable:
+            self._require_scalar_capability()
+        validation_domain = self._validation_domain
+        if validation_domain is not None and not validation_domain.contains(span):
+            raise ValueError("span must be contained in the managed domain")
+        scalar_release = self._native_scalar_release
+        native_release = self._native_release
+        assert native_release is not None
+        synchronized = self._synchronized
+        if synchronized:
+            self._lock.acquire()
+        try:
+            if self._authoritative_mutation_active:
+                raise RuntimeError(
+                    "reentrant mutation on the same RangeSet is not allowed"
+                )
+            self._authoritative_mutation_active = True
+            try:
+                if scalar_release is not None:
+                    changed_length = scalar_release(span.start, span.end)
+                else:
+                    changed_length = native_release(span.start, span.end).changed_length
+                self._total_free += changed_length
+                if changed_length:
+                    self._invalidate_authoritative_geometry_cache(span, adding=True)
+                return changed_length
+            finally:
+                self._authoritative_mutation_active = False
+        finally:
+            if synchronized:
+                self._lock.release()
+
+    def reserve(self, span: Span, *, require_covered: bool = False) -> int:
+        """Occupy ``span`` and return only the changed length (``discard`` semantics).
+
+        The fully-native scalar counterpart to :meth:`discard`: it builds no
+        ``MutationResult`` and is exactly geometry-consistent with it.
+        ``require_covered`` rejects a not-fully-covered span as a ``0`` no-op.
+        It requires an authoritative geometry backend and no payload policy;
+        otherwise it raises ``ValueError`` rather than falling back silently.
+        """
+        if not self._scalar_capable:
+            self._require_scalar_capability()
+        validation_domain = self._validation_domain
+        if validation_domain is not None and not validation_domain.contains(span):
+            raise ValueError("span must be contained in the managed domain")
+        scalar_reserve = self._native_scalar_reserve
+        native_reserve = self._native_reserve
+        assert native_reserve is not None
+        synchronized = self._synchronized
+        if synchronized:
+            self._lock.acquire()
+        try:
+            if self._authoritative_mutation_active:
+                raise RuntimeError(
+                    "reentrant mutation on the same RangeSet is not allowed"
+                )
+            self._authoritative_mutation_active = True
+            try:
+                if scalar_reserve is not None:
+                    changed_length = scalar_reserve(
+                        span.start, span.end, require_covered
+                    )
+                else:
+                    changed_length = native_reserve(
+                        span.start, span.end, require_covered
+                    ).changed_length
+                self._total_free -= changed_length
+                if changed_length:
+                    self._invalidate_authoritative_geometry_cache(span, adding=False)
+                return changed_length
+            finally:
+                self._authoritative_mutation_active = False
+        finally:
+            if synchronized:
+                self._lock.release()
 
     def first_fit(
         self,

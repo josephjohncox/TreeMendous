@@ -217,6 +217,12 @@ benchmark-gpu-focused: install-dev
 benchmark-batch backend="metal_boundary_summary": install-dev
     uv run python -m tests.performance.batch_operations_benchmark --backend {{backend}}
 
+# Generate and strictly verify the cpp_boundary hot-path evidence triplet.
+# Verification requires a clean worktree and the loaded native binary.
+benchmark-hotpath output="build/benchmarks/rangeset-hotpath.json" samples="30" target_operations="20000": build-cpp
+    uv run python -m tests.performance.rangeset_hotpath_benchmark --samples {{samples}} --target-operations {{target_operations}} --output "{{output}}"
+    uv run python -m scripts.verify_rangeset_hotpath_benchmark "{{output}}"
+
 check-layout: install-dev
     uv run pytest tests/packaging/test_repository_layout.py -q
 
