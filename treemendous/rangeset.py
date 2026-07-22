@@ -32,6 +32,8 @@ from treemendous.policies import (
 
 _MISSING = object()
 
+_REENTRANT_MUTATION_MESSAGE = "reentrant mutation on the same RangeSet is not allowed"
+
 
 class _NoOpLock:
     """Lock sentinel that performs no synchronization.
@@ -641,9 +643,7 @@ class RangeSet:
                 self._lock.acquire()
             try:
                 if self._authoritative_mutation_active:
-                    raise RuntimeError(
-                        "reentrant mutation on the same RangeSet is not allowed"
-                    )
+                    raise RuntimeError(_REENTRANT_MUTATION_MESSAGE)
                 self._authoritative_mutation_active = True
                 try:
                     result = native_release(span.start, span.end)
@@ -717,9 +717,7 @@ class RangeSet:
                 self._lock.acquire()
             try:
                 if self._authoritative_mutation_active:
-                    raise RuntimeError(
-                        "reentrant mutation on the same RangeSet is not allowed"
-                    )
+                    raise RuntimeError(_REENTRANT_MUTATION_MESSAGE)
                 self._authoritative_mutation_active = True
                 try:
                     result = native_reserve(span.start, span.end, require_covered)
@@ -818,9 +816,7 @@ class RangeSet:
             self._lock.acquire()
         try:
             if self._authoritative_mutation_active:
-                raise RuntimeError(
-                    "reentrant mutation on the same RangeSet is not allowed"
-                )
+                raise RuntimeError(_REENTRANT_MUTATION_MESSAGE)
             self._authoritative_mutation_active = True
             try:
                 if scalar_release is not None:
@@ -859,9 +855,7 @@ class RangeSet:
             self._lock.acquire()
         try:
             if self._authoritative_mutation_active:
-                raise RuntimeError(
-                    "reentrant mutation on the same RangeSet is not allowed"
-                )
+                raise RuntimeError(_REENTRANT_MUTATION_MESSAGE)
             self._authoritative_mutation_active = True
             try:
                 if scalar_reserve is not None:
@@ -981,9 +975,7 @@ class RangeSet:
                 )
             with self._lock:
                 if self._authoritative_mutation_active:
-                    raise RuntimeError(
-                        "reentrant mutation on the same RangeSet is not allowed"
-                    )
+                    raise RuntimeError(_REENTRANT_MUTATION_MESSAGE)
                 self._authoritative_mutation_active = True
                 try:
                     result = self._adapter.allocate(not_before, length, not_after)
