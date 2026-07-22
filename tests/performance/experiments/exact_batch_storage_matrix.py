@@ -1153,20 +1153,56 @@ def archive_metadata(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+class BaselineUnavailable(RuntimeError):
+    """The pinned baseline commit is absent and could not be fetched.
+
+    Raised when the durability proof cannot obtain the historical baseline
+    ``exact_batch_bindings.cpp`` — e.g. an offline shallow checkout that omits
+    the baseline commit — so callers can skip rather than hard-fail.
+    """
+
+
+_BASELINE_SOURCE_PATH = "treemendous/cpp/exact_batch_bindings.cpp"
+
+
+def _baseline_exact_batch_source() -> bytes:
+    """Return the baseline ``exact_batch_bindings.cpp`` bytes from Git history.
+
+    A shallow checkout (the CI default) omits the historical baseline commit, so
+    a best-effort fetch of that exact commit by SHA is attempted before giving
+    up; GitHub permits fetching a reachable SHA directly.
+    """
+    target = f"{BASELINE_FULL_COMMIT}:{_BASELINE_SOURCE_PATH}"
+
+    def show() -> bytes | None:
+        result = subprocess.run(
+            ["git", "show", target],
+            cwd=_REPOSITORY_ROOT,
+            capture_output=True,
+        )
+        return result.stdout if result.returncode == 0 else None
+
+    source = show()
+    if source is None:
+        subprocess.run(
+            ["git", "fetch", "--quiet", "--depth=1", "origin", BASELINE_FULL_COMMIT],
+            cwd=_REPOSITORY_ROOT,
+            capture_output=True,
+        )
+        source = show()
+    if source is None:
+        raise BaselineUnavailable(
+            f"baseline commit {BASELINE_FULL_COMMIT} is unavailable in this "
+            "checkout; cannot verify the segmented-patch durability proof"
+        )
+    return source
+
+
 def _verify_patch_application() -> None:
     patch = (_REPOSITORY_ROOT / SEGMENTED_PATCH).read_bytes()
     if hashlib.sha256(patch).hexdigest() != SEGMENTED_PATCH_SHA256:
         raise ValueError("segmented patch checksum mismatch")
-    source = subprocess.run(
-        [
-            "git",
-            "show",
-            f"{BASELINE_FULL_COMMIT}:treemendous/cpp/exact_batch_bindings.cpp",
-        ],
-        cwd=_REPOSITORY_ROOT,
-        check=True,
-        capture_output=True,
-    ).stdout
+    source = _baseline_exact_batch_source()
     if hashlib.sha256(source).hexdigest() != BASELINE_SOURCE_SHA256:
         raise ValueError("baseline exact-batch source checksum mismatch")
     with tempfile.TemporaryDirectory(prefix="treemendous-segmented-proof-") as raw:
