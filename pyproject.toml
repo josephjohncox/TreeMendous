@@ -1,11 +1,19 @@
 [project]
 name = "treemendous"
-version = "1.1.0"
-description = "Integer range sets with interchangeable Python and native CPU backends."
+version = "1.1.1"
+description = "Exact integer range sets with Python/C++ backends, atomic native batches, experimental multidimensional indexes, and 50 application engines."
 authors = [{ name = "Joseph Cox", email = "joseph@codensity.io" }]
 license = "BSD-3-Clause"
 readme = "README.md"
 requires-python = ">=3.11"
+keywords = [
+  "intervals",
+  "range-set",
+  "allocation",
+  "scheduling",
+  "spatial-index",
+  "pybind11",
+]
 classifiers = [
   "Development Status :: 5 - Production/Stable",
   "Intended Audience :: Developers",
@@ -15,12 +23,25 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering",
   "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed",
 ]
 
 dependencies = ["sortedcontainers>=2.4.0"]
 
+[project.urls]
+Homepage = "https://pypi.org/project/treemendous/"
+Documentation = "https://github.com/josephjohncox/TreeMendous/blob/main/docs/README.md"
+Repository = "https://github.com/josephjohncox/TreeMendous"
+Issues = "https://github.com/josephjohncox/TreeMendous/issues"
+Changelog = "https://github.com/josephjohncox/TreeMendous/releases"
+
 [project.optional-dependencies]
-build = ["build>=1.2.2", "pybind11>=3.0.0", "setuptools>=83.0.0"]
+build = [
+  "build>=1.2.2",
+  "pybind11>=3.0.0",
+  "setuptools>=83.0.0",
+  "twine>=6.2.0",
+]
 quality = [
   "mypy>=1.15.0",
   "pip-audit>=2.8.0",

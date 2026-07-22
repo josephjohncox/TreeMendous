@@ -15,7 +15,8 @@ Version `1.0.0` established `RangeSet` and `BackendRegistry` as the public API.
 Earlier factory, manager, protocol, compatibility, and raw-backend exports were
 removed rather than retained as shims. Version `1.1.0` compatibly adds the
 contained `treemendous.exact_batch` API without root exports, backend
-integration, or protocol integration.
+integration, or protocol integration. Version `1.1.1` is a documentation and
+packaging-metadata patch; it does not change either stable API.
 
 ## Pre-release checks
 
@@ -26,15 +27,18 @@ uv sync --all-extras
 uv lock --check
 just check
 just validate
-just build
-uv run python -m scripts.verify_artifact_contents dist/*.whl dist/*.tar.gz
 just run-examples
+rm -rf dist
+uv build
+uv run python -m scripts.verify_artifact_contents dist
+uv run python -m twine check --strict dist/*
 ```
 
 `just check` enforces formatting, lint, typing, focused/full non-hardware tests,
 documentation and packaging contracts, and branch coverage. `just validate`
-reruns the test contract and compiles Python sources. For 1.1.0, the reusable
-exact-batch evidence workflow must also pass against immutable pre-promotion
+reruns the test contract and compiles Python sources. For 1.1.0 and later
+releases, the reusable exact-batch evidence workflow must also pass against the
+immutable pre-promotion
 commit `fdb4efd5f407717c8e18b94e6f4c21cbfb8e5daa`; its correctness-attested
 benchmark, scaling, and scalar-attribution artifacts are release evidence rather
 than a substitute for the test suite.
@@ -55,7 +59,10 @@ Every wheel is installed into an isolated environment and exercised through
 the public `RangeSet` and stable exact-batch APIs from an unrelated working
 directory before publication. The freshly built sdist is installed into a
 separate isolated environment and receives the same arbitrary-working-directory
-smoke without importing from the source checkout.
+smoke without importing from the source checkout. Each sdist and wheel job runs
+`python -m twine check --strict` before artifact upload; the aggregate job runs
+the same strict check over the complete release set before it is made available
+to the single publisher.
 
 ## Hardware gates
 
@@ -76,7 +83,7 @@ A skipped CUDA lane does not promote or validate CUDA.
 4. Confirm the PyPI `treemendous` project trusts this repository's release
    workflow and that the protected GitHub `pypi` environment permits OIDC
    publication.
-5. Create and push the matching tag, for example `v1.1.0`.
+5. Create and push the matching tag, for example `v1.1.1`.
 6. Let the release workflow aggregate, verify, run exact-batch evidence against
    the immutable pre-promotion commit, and publish all artifacts once.
 
@@ -89,7 +96,7 @@ Install the published wheel in a clean environment and exercise the public API:
 
 ```bash
 python -m venv /tmp/treemendous-release-check
-/tmp/treemendous-release-check/bin/python -m pip install treemendous==1.1.0
+/tmp/treemendous-release-check/bin/python -m pip install treemendous==1.1.1
 (cd /tmp && /tmp/treemendous-release-check/bin/python - <<'PY'
 from treemendous import Span, create_range_set
 from treemendous.exact_batch import BatchMutation, ExactBatchRangeSet, MutationOpcode

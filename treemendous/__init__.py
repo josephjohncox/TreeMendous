@@ -42,7 +42,10 @@ def _resolve_version() -> str:
 
 __version__ = _resolve_version()
 __author__ = "Joseph Cox"
-__description__ = "Canonical integer range sets with interchangeable backends"
+__description__ = (
+    "Exact integer range sets with Python/C++ backends, atomic native batches, "
+    "experimental multidimensional indexes, and 50 application engines."
+)
 
 
 __all__ = [

@@ -49,6 +49,26 @@ snapshot:
 uv run python examples/exact_batch.py
 ```
 
+## Reusable patterns outside the engine registry
+
+These examples are independently executable patterns, not additions to the 50
+registered engines:
+
+- [`patterns/atomic_port_pool_reconciliation.py`](patterns/atomic_port_pool_reconciliation.py)
+  uses `ExactBatchRangeSet` for one geometry-only transaction. It has no lease
+  identity, TTL, fencing, persistence, or cross-process coordination.
+- [`patterns/spatiotemporal_geofences.py`](patterns/spatiotemporal_geofences.py)
+  uses experimental, process-local `BoxIndex3D`. It supplies no geographic
+  coordinate system, durability, distribution, or authorization.
+
+```bash
+uv run python examples/patterns/atomic_port_pool_reconciliation.py
+uv run python examples/patterns/spatiotemporal_geofences.py
+```
+
+See [Application patterns](../docs/application-patterns.md) for the surrounding
+system responsibilities and exclusions.
+
 ## Experimental multidimensional API
 
 [`multidimensional/core/linear_box_index.py`](multidimensional/core/linear_box_index.py)
@@ -58,6 +78,12 @@ and exact handle removal:
 ```bash
 uv run python examples/multidimensional/core/linear_box_index.py
 ```
+
+The registered radio-spectrum engine wraps experimental `BoxIndex(2)` behind
+its application-specific channel/time reservation contract. The Morton
+geospatial example does not use `BoxIndex`; it uses one-dimensional Morton
+bands plus exact Cartesian filtering. The new `BoxIndex3D` pattern remains
+outside the 50-engine registry.
 
 Backend implementation modules remain internal. Applications should construct
 one-dimensional range sets through `treemendous.create_range_set`, import the

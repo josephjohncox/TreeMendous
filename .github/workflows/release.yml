@@ -118,6 +118,10 @@ jobs:
       - run: >-
           uv run --frozen --no-sync python
           -m scripts.verify_artifact_contents artifacts
+      - name: Check source distribution metadata and long description
+        run: >-
+          uv run --frozen --no-sync python -m twine check --strict
+          artifacts/*
       - name: Clean-install sdist and smoke stable APIs from arbitrary CWD
         shell: bash
         run: |
@@ -213,6 +217,10 @@ jobs:
           TREEMENDOUS_WHEEL="$PWD/$wheel" \
             uv run --frozen --no-sync pytest \
             tests/packaging/test_wheel_install.py -q
+      - name: Check wheel metadata and long description
+        run: >-
+          uv run --frozen --no-sync python -m twine check --strict
+          artifacts/*
       # actions/upload-artifact v4
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -255,6 +263,10 @@ jobs:
       - run: >-
           uv run --frozen --no-sync python
           -m scripts.verify_artifact_contents release-artifacts
+      - name: Check aggregate metadata and long descriptions
+        run: >-
+          uv run --frozen --no-sync python -m twine check --strict
+          release-artifacts/*
       # actions/upload-artifact v4
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

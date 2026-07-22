@@ -3,7 +3,9 @@
 ## Start here
 
 - [Getting started](getting-started.md)
+- [Choosing an interface](choosing-an-interface.md)
 - [Canonical `RangeSet` API](api.md)
+- [Performance](performance.md)
 - [Backend support](backends.md)
 - [Building optional backends](building.md)
 
@@ -21,8 +23,12 @@ family:
 
 The [implementation status and legacy workload matrix](use-cases.md) separates
 real engines from the 50 generic backend qualification traces. The
-[benchmark guide](benchmarking.md) likewise separates concrete application
-evidence from generic stable-backend evidence.
+[application-pattern guide](application-patterns.md) shows where the separate
+exact-batch and experimental multidimensional APIs fit, with explicit
+exclusions. The [benchmark guide](benchmarking.md) separates concrete
+application evidence from generic stable-backend evidence, while the
+[user-facing performance guide](performance.md) reports scoped measurements and
+the optimization roadmap.
 
 ## Project guides
 
@@ -34,6 +40,7 @@ evidence from generic stable-backend evidence.
 - [Multidimensional batch, SIMD, Metal, and CUDA design](theory/multidimensional_acceleration.md)
 - [Contributing and quality gates](contributing.md)
 - [Release process](releasing.md)
+- [Tree-Mendous 1.1.1 release notes](releases/1.1.1.md)
 - [Tree-Mendous 1.1.0 release notes](releases/1.1.0.md)
 
 The stable root API is `RangeSet`, constructed with `create_range_set` or an
