@@ -16,7 +16,11 @@ Earlier factory, manager, protocol, compatibility, and raw-backend exports were
 removed rather than retained as shims. Version `1.1.0` compatibly adds the
 contained `treemendous.exact_batch` API without root exports, backend
 integration, or protocol integration. Version `1.1.1` is a documentation and
-packaging-metadata patch; it does not change either stable API.
+packaging-metadata patch; it does not change either stable API. Version `1.2.0`
+compatibly adds a faster native `RangeSet` mutation surface — a selectable
+`synchronized` locking level and the fully-native scalar `release`/`reserve`
+mutators — plus behavior-preserving snapshot and lease caching. The stable
+`1.0.0` and `1.1.0` APIs are unchanged.
 
 ## Pre-release checks
 
@@ -96,7 +100,7 @@ Install the published wheel in a clean environment and exercise the public API:
 
 ```bash
 python -m venv /tmp/treemendous-release-check
-/tmp/treemendous-release-check/bin/python -m pip install treemendous==1.1.1
+/tmp/treemendous-release-check/bin/python -m pip install treemendous==1.2.0
 (cd /tmp && /tmp/treemendous-release-check/bin/python - <<'PY'
 from treemendous import Span, create_range_set
 from treemendous.exact_batch import BatchMutation, ExactBatchRangeSet, MutationOpcode

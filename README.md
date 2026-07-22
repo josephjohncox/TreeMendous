@@ -161,7 +161,7 @@ for discovery and qualification details.
 - [Canonical API](https://github.com/josephjohncox/TreeMendous/blob/main/docs/api.md)
 - [Performance](https://github.com/josephjohncox/TreeMendous/blob/main/docs/performance.md)
 - [Examples](https://github.com/josephjohncox/TreeMendous/blob/main/examples/README.md)
-- [Release notes](https://github.com/josephjohncox/TreeMendous/blob/main/docs/releases/1.1.1.md)
+- [Release notes](https://github.com/josephjohncox/TreeMendous/blob/main/docs/releases/1.2.0.md)
 
 ## Development
 
